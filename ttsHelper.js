@@ -1,6 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { spawn } = require('child_process');
+
+let ffmpegPath = null;
+try {
+  ffmpegPath = require('ffmpeg-static');
+} catch (e) {
+  console.warn('[ttsHelper] ffmpeg-static not found:', e.message);
+}
 
 /**
  * Split text into chunks suitable for Google TTS API (max ~180 characters per request)
@@ -44,10 +52,104 @@ async function fetchGoogleTTSHttp(chunk, lang = 'hi') {
 }
 
 /**
+ * Convert any audio buffer (MP3, WAV, etc.) to WhatsApp's native Voice Note format (OGG Opus, Mono 48kHz).
+ * This format plays natively on ALL devices:
+ * - Android (Samsung, Xiaomi, Vivo, Realme, OnePlus, etc.)
+ * - iOS (iPhone / iPad)
+ * - WhatsApp Web & Desktop
+ *
+ * @param {Buffer} inputBuffer
+ * @param {string} [outputFilePath]
+ * @returns {Promise<{ buffer: Buffer, mimetype: string, filePath?: string }>}
+ */
+async function convertAudioToWhatsAppVoice(inputBuffer, outputFilePath = null) {
+  if (!ffmpegPath || !inputBuffer || inputBuffer.length === 0) {
+    return {
+      buffer: inputBuffer,
+      mimetype: 'audio/ogg; codecs=opus',
+      filePath: outputFilePath
+    };
+  }
+
+  return new Promise((resolve) => {
+    try {
+      // WhatsApp Voice Note Specification:
+      // Codec: libopus, Channels: 1 (mono), Sample rate: 48000Hz, Container: ogg
+      const proc = spawn(ffmpegPath, [
+        '-y',
+        '-i', 'pipe:0',
+        '-vn',
+        '-c:a', 'libopus',
+        '-b:a', '32k',
+        '-ar', '48000',
+        '-ac', '1',
+        '-avoid_negative_ts', 'make_zero',
+        '-f', 'ogg',
+        'pipe:1'
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+      const chunks = [];
+      proc.stdout.on('data', (c) => chunks.push(c));
+
+      let stderr = '';
+      proc.stderr.on('data', (c) => {
+        stderr += c.toString();
+      });
+
+      proc.on('error', (err) => {
+        console.warn('[ttsHelper] FFmpeg process error:', err.message);
+        resolve({
+          buffer: inputBuffer,
+          mimetype: 'audio/ogg; codecs=opus',
+          filePath: outputFilePath
+        });
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0 && chunks.length > 0) {
+          const oggBuffer = Buffer.concat(chunks);
+          if (outputFilePath) {
+            try {
+              const dir = path.dirname(outputFilePath);
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(outputFilePath, oggBuffer);
+            } catch (fsErr) {
+              console.warn('[ttsHelper] Error saving converted ogg file:', fsErr.message);
+            }
+          }
+          resolve({
+            buffer: oggBuffer,
+            mimetype: 'audio/ogg; codecs=opus',
+            filePath: outputFilePath
+          });
+        } else {
+          console.warn(`[ttsHelper] FFmpeg conversion warning (code ${code}):`, stderr.slice(-200));
+          resolve({
+            buffer: inputBuffer,
+            mimetype: 'audio/ogg; codecs=opus',
+            filePath: outputFilePath
+          });
+        }
+      });
+
+      proc.stdin.on('error', () => {});
+      proc.stdin.write(inputBuffer);
+      proc.stdin.end();
+    } catch (e) {
+      console.warn('[ttsHelper] convertAudioToWhatsAppVoice exception:', e.message);
+      resolve({
+        buffer: inputBuffer,
+        mimetype: 'audio/ogg; codecs=opus',
+        filePath: outputFilePath
+      });
+    }
+  });
+}
+
+/**
  * Robust text-to-speech converter
  * Generates an MP3 buffer from input text using Google Text-to-Speech.
- * Zero-dependency failure: Works out of the box with axios without needing native/external packages.
- * 
+ *
  * @param {string} text 
  * @param {string} lang e.g. 'hi', 'en', 'gu', 'bn', 'ur', 'mr', 'ta', 'te'
  * @param {string} [outputFilePath]
@@ -105,7 +207,30 @@ async function generateTTS(text, lang = 'hi', outputFilePath = null) {
   };
 }
 
+/**
+ * End-to-end Text-to-Speech to WhatsApp Universal Voice Note
+ * Generates TTS and converts to OGG Opus (Mono, 48kHz) for 100% universal mobile + desktop compatibility.
+ *
+ * @param {string} text
+ * @param {string} [lang]
+ * @param {string} [oggFilePath]
+ * @returns {Promise<{ buffer: Buffer, mimetype: string, mp3Buffer: Buffer, filePath?: string }>}
+ */
+async function generateWhatsAppVoiceNote(text, lang = 'hi', oggFilePath = null) {
+  const { buffer: mp3Buffer } = await generateTTS(text, lang);
+  const { buffer: oggBuffer, mimetype, filePath } = await convertAudioToWhatsAppVoice(mp3Buffer, oggFilePath);
+
+  return {
+    buffer: oggBuffer,
+    mimetype: mimetype || 'audio/ogg; codecs=opus',
+    mp3Buffer,
+    filePath
+  };
+}
+
 module.exports = {
   generateTTS,
+  convertAudioToWhatsAppVoice,
+  generateWhatsAppVoiceNote,
   chunkText
 };

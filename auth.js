@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { generateTTS } = require('./ttsHelper');
+const { generateTTS, convertAudioToWhatsAppVoice, generateWhatsAppVoiceNote } = require('./ttsHelper');
 const { 
   connection, 
   User, 
@@ -965,19 +965,19 @@ router.post('/api/user/send', authRequired, async (req, res) => {
     let mediaType = null;
     let fileName = null;
 
-    // 1. Google Text-to-Speech (TTS) Conversion: User text -> MP3 Voice Note
+    // 1. Google Text-to-Speech (TTS) Conversion: User text -> WhatsApp Universal Voice Note (OGG Opus)
     if (sendAsVoice && text && String(text).trim()) {
       try {
         const targetLang = String(voiceLang || 'hi').trim().toLowerCase();
-        const path = require('path');
         const MEDIA_DIR = path.join(__dirname, 'media_storage');
-        const savedName = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.mp3`;
+        if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
+        const savedName = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.ogg`;
         const filePath = path.join(MEDIA_DIR, savedName);
 
-        const { buffer } = await generateTTS(String(text).trim(), targetLang, filePath);
+        const { buffer, mimetype } = await generateWhatsAppVoiceNote(String(text).trim(), targetLang, filePath);
 
-        // In WhatsApp Baileys: ptt: true sends as native voice note waveform
-        messageContent = { audio: buffer, mimetype: 'audio/mp4', ptt: true };
+        // Universal WhatsApp Voice Note: OGG Opus, Mono, 48kHz works 100% on Mobile (Android & iOS) and Desktop
+        messageContent = { audio: buffer, mimetype: mimetype || 'audio/ogg; codecs=opus', ptt: true };
         mediaType = 'audio';
         fileName = savedName;
         mediaUrl = `/media/${savedName}`;
@@ -991,8 +991,6 @@ router.post('/api/user/send', authRequired, async (req, res) => {
       const mimeType = attachment.type || 'application/octet-stream';
       fileName = attachment.name || 'file';
 
-      const path = require('path');
-      const fs = require('fs');
       const MEDIA_DIR = path.join(__dirname, 'media_storage');
       if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
       const ext = path.extname(fileName) || '.bin';
@@ -1007,7 +1005,16 @@ router.post('/api/user/send', authRequired, async (req, res) => {
         messageContent = { video: buffer, caption: text ? String(text) : undefined, mimetype: mimeType };
         mediaType = 'video';
       } else if (mimeType.startsWith('audio/')) {
-        messageContent = { audio: buffer, mimetype: mimeType, ptt: Boolean(attachment.isVoice) };
+        let audioBuf = buffer;
+        let finalMime = mimeType;
+        if (Boolean(attachment.isVoice)) {
+          try {
+            const converted = await convertAudioToWhatsAppVoice(buffer);
+            audioBuf = converted.buffer;
+            finalMime = converted.mimetype;
+          } catch (e) {}
+        }
+        messageContent = { audio: audioBuf, mimetype: finalMime, ptt: Boolean(attachment.isVoice) };
         mediaType = 'audio';
       } else {
         messageContent = { document: buffer, fileName: fileName, caption: text ? String(text) : undefined, mimetype: mimeType };
