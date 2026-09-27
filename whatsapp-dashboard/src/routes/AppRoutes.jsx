@@ -59,7 +59,15 @@ export default function AppRoutes() {
         path="/login" 
         element={
           <PublicOnlyRoute>
-            <LoginPage />
+            <LoginPage initialMode="login" />
+          </PublicOnlyRoute>
+        } 
+      />
+      <Route 
+        path="/signup" 
+        element={
+          <PublicOnlyRoute>
+            <LoginPage initialMode="signup" />
           </PublicOnlyRoute>
         } 
       />

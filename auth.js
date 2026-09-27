@@ -1502,23 +1502,25 @@ router.post('/api/admin/plan-requests/:requestId/reject', authRequired, adminReq
   }
 });
 
-// 11. Public: Get company branding settings (Company Name, Favicon, Logo)
+// 11. Public: Get company branding settings (Company Name, Favicon, Logo, Login Banner)
 router.get('/api/settings/company', async (req, res) => {
   try {
-    let settings = { companyName: '', faviconUrl: '', logoUrl: '' };
+    let settings = { companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' };
     if (mongoose.connection.readyState === 1) {
       const doc = await CompanySettings.findOne({ key: 'company' });
       if (doc) {
         settings.companyName = doc.companyName || '';
         settings.faviconUrl = doc.faviconUrl || '';
         settings.logoUrl = doc.logoUrl || '';
+        settings.bannerUrl = doc.bannerUrl || '';
       }
     }
     const fileSettings = getCompanySettingsFile();
     settings = {
       companyName: settings.companyName || fileSettings.companyName || '',
       faviconUrl: settings.faviconUrl || fileSettings.faviconUrl || '',
-      logoUrl: settings.logoUrl || fileSettings.logoUrl || ''
+      logoUrl: settings.logoUrl || fileSettings.logoUrl || '',
+      bannerUrl: settings.bannerUrl || fileSettings.bannerUrl || ''
     };
     res.json({ success: true, settings });
   } catch (error) {
@@ -1527,14 +1529,15 @@ router.get('/api/settings/company', async (req, res) => {
   }
 });
 
-// 12. Admin: Update company branding settings (Company Name, Favicon, Logo)
+// 12. Admin: Update company branding settings (Company Name, Favicon, Logo, Login Banner)
 router.post('/api/settings/company', express.json({ limit: '15mb' }), authRequired, adminRequired, async (req, res) => {
   try {
-    const { companyName, faviconUrl, logoUrl } = req.body || {};
+    const { companyName, faviconUrl, logoUrl, bannerUrl } = req.body || {};
     const updated = {
       companyName: companyName !== undefined ? String(companyName).trim() : '',
       faviconUrl: faviconUrl !== undefined ? String(faviconUrl).trim() : '',
       logoUrl: logoUrl !== undefined ? String(logoUrl).trim() : '',
+      bannerUrl: bannerUrl !== undefined ? String(bannerUrl).trim() : '',
       updatedAt: new Date()
     };
 
@@ -1546,6 +1549,7 @@ router.post('/api/settings/company', express.json({ limit: '15mb' }), authRequir
       );
     }
     saveCompanySettingsFile(updated);
+
 
     res.json({
       success: true,

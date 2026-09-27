@@ -68,7 +68,8 @@ export function AuthProvider({ children }) {
   const [companySettings, setCompanySettings] = useState({
     companyName: '',
     faviconUrl: '',
-    logoUrl: ''
+    logoUrl: '',
+    bannerUrl: ''
   })
 
   const applyBranding = useCallback((settings) => {

@@ -219,8 +219,11 @@ async function initTables(pool) {
       "companyName" TEXT DEFAULT '',
       "faviconUrl" TEXT DEFAULT '',
       "logoUrl" TEXT DEFAULT '',
+      "bannerUrl" TEXT DEFAULT '',
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
+    `ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS "bannerUrl" TEXT DEFAULT '';`,
+
 
     // 7. session_auth (Baileys WhatsApp multi-session auth creds & keys)
     `CREATE TABLE IF NOT EXISTS session_auth (
@@ -886,10 +889,12 @@ const CompanySettings = createModel('company_settings', 'key', {
   key: 'company',
   companyName: '',
   faviconUrl: '',
-  logoUrl: ''
+  logoUrl: '',
+  bannerUrl: ''
 }, [], [
-  'key', 'companyName', 'faviconUrl', 'logoUrl', 'updatedAt'
+  'key', 'companyName', 'faviconUrl', 'logoUrl', 'bannerUrl', 'updatedAt'
 ]);
+
 
 const SessionAuth = createModel('session_auth', 'id', {}, ['data'], [
   'id', 'data'

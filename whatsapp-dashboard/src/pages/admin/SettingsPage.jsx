@@ -35,26 +35,28 @@ function SInput({ type = 'text', value, onChange, placeholder, ...rest }) {
 // ─── Tab 1: Company & Branding (Admin Only) ──────────────────────────────────
 function CompanyTab({ notify }) {
   const { companySettings, updateCompanySettings } = useAuth();
-  const [form, setForm] = useState({ companyName: '', faviconUrl: '', logoUrl: '' });
+  const [form, setForm] = useState({ companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' });
   const [saving, setSaving] = useState(false);
   const [previewTheme, setPreviewTheme] = useState('light');
   const faviconInputRef = useRef(null);
   const logoInputRef = useRef(null);
+  const bannerInputRef = useRef(null);
 
   useEffect(() => {
     if (companySettings) {
       setForm({
         companyName: companySettings.companyName || '',
         faviconUrl: companySettings.faviconUrl || '',
-        logoUrl: companySettings.logoUrl || ''
+        logoUrl: companySettings.logoUrl || '',
+        bannerUrl: companySettings.bannerUrl || ''
       });
     }
   }, [companySettings]);
 
   const handleImageFile = (file, type) => {
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      notify('File size must be under 5MB', 'error');
+    if (file.size > 8 * 1024 * 1024) {
+      notify('File size must be under 8MB', 'error');
       return;
     }
     const reader = new FileReader();
@@ -66,6 +68,9 @@ function CompanyTab({ notify }) {
       } else if (type === 'logo') {
         setForm(prev => ({ ...prev, logoUrl: dataUrl }));
         notify('Logo image loaded! Click Save to apply.', 'success');
+      } else if (type === 'banner') {
+        setForm(prev => ({ ...prev, bannerUrl: dataUrl }));
+        notify('Login banner image loaded! Click Save to apply.', 'success');
       }
     };
     reader.readAsDataURL(file);
@@ -90,12 +95,13 @@ function CompanyTab({ notify }) {
   };
 
   const resetDefaults = async () => {
-    if (!window.confirm('Reset company branding (Name, Logo, Favicon) to default?')) return;
-    const defaults = { companyName: '', faviconUrl: '', logoUrl: '' };
+    if (!window.confirm('Reset company branding (Name, Logo, Favicon, Banner) to default?')) return;
+    const defaults = { companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' };
     setForm(defaults);
     setSaving(true);
     try {
       const res = await apiPost('/api/settings/company', defaults);
+
       if (res.success) {
         if (updateCompanySettings) updateCompanySettings(defaults);
         notify('Default branding restored!', 'success');
@@ -180,6 +186,33 @@ function CompanyTab({ notify }) {
                 </div>
               </div>
 
+              <div className="field">
+                <label>LOGIN PAGE BANNER (Right-side Image/Graphic)</label>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="file"
+                    ref={bannerInputRef}
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={e => handleImageFile(e.target.files?.[0], 'banner')}
+                  />
+                  <button type="button" className="btn secondary" onClick={() => bannerInputRef.current?.click()} style={{ padding: '8px 14px' }}>
+                    📁 Choose Banner File
+                  </button>
+                  {form.bannerUrl && (
+                    <img src={form.bannerUrl} alt="Login Banner" style={{ maxHeight: 42, maxWidth: 100, objectFit: 'cover', borderRadius: 6, border: '1px solid #cbd5e1' }} />
+                  )}
+                  {form.bannerUrl && (
+                    <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, bannerUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <small style={{ color: '#64748b', fontSize: 11, marginTop: 4, display: 'block' }}>
+                  Displays on the right side of the Login &amp; Signup page.
+                </small>
+              </div>
+
               <div style={{ marginTop: 8 }}>
                 <button type="submit" className="btn primary" disabled={saving}>
                   {saving ? 'Saving...' : '💾 Save Company Settings'}
@@ -250,6 +283,35 @@ function CompanyTab({ notify }) {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Login Banner Preview */}
+          <div className="preview-box" style={{ marginTop: 14 }}>
+            <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>3. LOGIN PAGE BANNER PREVIEW</small>
+            <div style={{ 
+              height: 110, 
+              borderRadius: 10, 
+              background: form.bannerUrl ? `url(${form.bannerUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #133e2b, #0d281c)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: '#fff',
+              position: 'relative',
+              overflow: 'hidden',
+              border: '1px solid rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ 
+                background: 'rgba(0,0,0,0.4)', 
+                backdropFilter: 'blur(4px)', 
+                padding: '6px 14px', 
+                borderRadius: 8, 
+                fontSize: 12,
+                fontWeight: 600,
+                textAlign: 'center'
+              }}>
+                {form.bannerUrl ? '✓ Custom Banner Active' : 'Default Forest Green Theme'}
+              </div>
             </div>
           </div>
         </div>
