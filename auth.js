@@ -198,8 +198,11 @@ async function authenticateToken(token) {
   const hash = tokenHash(token);
   const user = await User.findOne({ 'sessions.tokenHash': hash, status: 'active' });
   if (!user) return null;
-  const session = user.sessions.find(s => s.tokenHash === hash);
-  if (!session || !session.expiresAt || session.expiresAt <= new Date()) return null;
+  if (!Array.isArray(user.sessions)) return null;
+  const session = user.sessions.find(s => s && s.tokenHash === hash);
+  if (!session || !session.expiresAt) return null;
+  const exp = new Date(session.expiresAt).getTime();
+  if (isNaN(exp) || exp <= Date.now()) return null;
   return user;
 }
 
@@ -1505,23 +1508,27 @@ router.post('/api/admin/plan-requests/:requestId/reject', authRequired, adminReq
 // 11. Public: Get company branding settings (Company Name, Favicon, Logo, Login Banner)
 router.get('/api/settings/company', async (req, res) => {
   try {
-    let settings = { companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' };
+    let settings = null;
     if (mongoose.connection.readyState === 1) {
       const doc = await CompanySettings.findOne({ key: 'company' });
       if (doc) {
-        settings.companyName = doc.companyName || '';
-        settings.faviconUrl = doc.faviconUrl || '';
-        settings.logoUrl = doc.logoUrl || '';
-        settings.bannerUrl = doc.bannerUrl || '';
+        settings = {
+          companyName: doc.companyName || '',
+          faviconUrl: doc.faviconUrl || '',
+          logoUrl: doc.logoUrl || '',
+          bannerUrl: doc.bannerUrl || ''
+        };
       }
     }
-    const fileSettings = getCompanySettingsFile();
-    settings = {
-      companyName: settings.companyName || fileSettings.companyName || '',
-      faviconUrl: settings.faviconUrl || fileSettings.faviconUrl || '',
-      logoUrl: settings.logoUrl || fileSettings.logoUrl || '',
-      bannerUrl: settings.bannerUrl || fileSettings.bannerUrl || ''
-    };
+    if (!settings) {
+      const fileSettings = getCompanySettingsFile();
+      settings = {
+        companyName: fileSettings.companyName || '',
+        faviconUrl: fileSettings.faviconUrl || '',
+        logoUrl: fileSettings.logoUrl || '',
+        bannerUrl: fileSettings.bannerUrl || ''
+      };
+    }
     res.json({ success: true, settings });
   } catch (error) {
     console.error('Get company settings error:', error);

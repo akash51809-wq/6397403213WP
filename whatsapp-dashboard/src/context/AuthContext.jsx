@@ -31,7 +31,22 @@ export function AuthProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('wa_theme') || 'dark')
   const [status, setStatus] = useState({ status: 'waiting', number: null, profileName: 'WhatsApp Account' })
   const [qr, setQr] = useState(null)
-  const [error, setError] = useState('')
+  const [error, setErrorState] = useState('')
+  const errorTimerRef = React.useRef(null)
+
+  const setError = useCallback((msg) => {
+    if (errorTimerRef.current) {
+      clearTimeout(errorTimerRef.current)
+      errorTimerRef.current = null
+    }
+    setErrorState(msg || '')
+    if (msg) {
+      errorTimerRef.current = setTimeout(() => {
+        setErrorState('')
+      }, 5000)
+    }
+  }, [])
+
   const [toast, setToast] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -65,11 +80,17 @@ export function AuthProvider({ children }) {
   const isAdmin = currentUser?.role === 'admin'
 
   // Company Branding Settings (Favicon, Company Name, Logo)
-  const [companySettings, setCompanySettings] = useState({
-    companyName: '',
-    faviconUrl: '',
-    logoUrl: '',
-    bannerUrl: ''
+  const [companySettings, setCompanySettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('wa_company_settings')
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return {
+      companyName: '',
+      faviconUrl: '',
+      logoUrl: '',
+      bannerUrl: ''
+    }
   })
 
   const applyBranding = useCallback((settings) => {
@@ -93,6 +114,9 @@ export function AuthProvider({ children }) {
       const res = await api('/api/settings/company')
       if (res && res.success && res.settings) {
         setCompanySettings(res.settings)
+        try {
+          localStorage.setItem('wa_company_settings', JSON.stringify(res.settings))
+        } catch {}
         applyBranding(res.settings)
       }
     } catch (e) {
@@ -102,6 +126,9 @@ export function AuthProvider({ children }) {
 
   const updateCompanySettings = useCallback((newSettings) => {
     setCompanySettings(newSettings)
+    try {
+      localStorage.setItem('wa_company_settings', JSON.stringify(newSettings))
+    } catch {}
     applyBranding(newSettings)
   }, [applyBranding])
 
@@ -181,7 +208,7 @@ export function AuthProvider({ children }) {
       }
       setError('')
     } catch (e) {
-      setError(e.message)
+      // Don't show noise error on periodic poll
     }
   }, [isAdmin, login])
 
@@ -244,7 +271,7 @@ export function AuthProvider({ children }) {
       const d = await api(`/api/incoming/chats?${qs}`)
       setChats(d.chats || [])
     } catch (e) {
-      setError(e.message)
+      // Silent on background fetch
     }
   }, [chatFilter, search, login])
 
@@ -257,7 +284,7 @@ export function AuthProvider({ children }) {
     } catch (e) {
       setError(e.message)
     }
-  }, [login])
+  }, [login, setError])
 
   const loadReports = useCallback(async () => {
     if (!login) return
@@ -266,7 +293,7 @@ export function AuthProvider({ children }) {
       setReports(d.reports || [])
       setReportStats(d.stats || {})
     } catch (e) {
-      setError(e.message)
+      // Silent on background fetch
     }
   }, [login])
 

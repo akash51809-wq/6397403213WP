@@ -36,7 +36,7 @@ export function Sidebar() {
 
       {/* Brand Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <NavLink className="brand" to={isAdmin ? "/admin" : "/dashboard"} onClick={closeMobile} data-title={companySettings?.companyName || "Easy Recharge"}>
+        <NavLink className="brand" to={isAdmin ? "/admin" : "/dashboard"} onClick={closeMobile} data-title={companySettings?.companyName || "WhatsApp Automation"}>
           {companySettings?.logoUrl ? (
             <img
               src={companySettings.logoUrl}
@@ -47,7 +47,7 @@ export function Sidebar() {
             <span className="brand-mark">⚡</span>
           )}
           <div>
-            <strong>{companySettings?.companyName || "Easy Recharge"}</strong>
+            <strong>{companySettings?.companyName || "WhatsApp Automation"}</strong>
             <small>WhatsApp Automation</small>
           </div>
         </NavLink>

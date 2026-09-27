@@ -278,7 +278,7 @@ function CompanyTab({ notify }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(145deg, #35c987, #0f9b61)', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900 }}>⚡</div>
                   <div>
-                    <strong style={{ display: 'block', fontSize: 13 }}>{form.companyName || 'Easy Recharge'}</strong>
+                    <strong style={{ display: 'block', fontSize: 13 }}>{form.companyName || 'WhatsApp Automation'}</strong>
                     <small style={{ display: 'block', fontSize: 9, opacity: 0.7 }}>WhatsApp Automation</small>
                   </div>
                 </div>

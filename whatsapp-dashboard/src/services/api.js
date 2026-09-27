@@ -40,6 +40,13 @@ export const api = async (url, options = {}) => {
   }
   const res = await fetch(url, { ...options, headers })
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && !url.includes('/api/auth/login')) {
+    clearToken()
+    sessionStorage.setItem('wa_logout_reason', 'expired')
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+      window.location.replace('/login')
+    }
+  }
   if (!res.ok) throw new Error(data.message || `Request failed: ${res.status}`)
   return data
 }

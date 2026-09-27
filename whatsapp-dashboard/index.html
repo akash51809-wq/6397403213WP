@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="/assets/images/brand/favicon.ico" type="image/x-icon" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=0" />
-    <title>zendash - WhatsApp Admin Dashboard</title>
+    <title>WhatsApp Automation</title>
+    <script>
+      (function() {
+        try {
+          var raw = localStorage.getItem('wa_company_settings');
+          if (raw) {
+            var s = JSON.parse(raw);
+            if (s && s.companyName) {
+              document.title = s.companyName + ' - WhatsApp Automation';
+            }
+            if (s && s.faviconUrl) {
+              var f = document.querySelector("link[rel*='icon']");
+              if (f) { f.href = s.faviconUrl; }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">

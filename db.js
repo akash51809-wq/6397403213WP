@@ -354,7 +354,7 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
     if (key.includes('.')) {
       const [col, subProp] = key.split('.');
       if (col === 'sessions') {
-        conditions.push(`EXISTS (SELECT 1 FROM jsonb_array_elements("sessions") elem WHERE elem->>'${subProp}' = $${pIdx})`);
+        conditions.push(`("sessions" IS NOT NULL AND jsonb_typeof("sessions") = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements("sessions") elem WHERE elem->>'${subProp}' = $${pIdx}))`);
         params.push(String(value));
         pIdx++;
         continue;
