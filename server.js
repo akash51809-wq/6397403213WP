@@ -119,6 +119,8 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
+const cron = require('node-cron');
+
 /* =========================================================
    AUTO-PING / KEEP-ALIVE SYSTEM (PREVENT RENDER SLEEP)
 ========================================================= */
@@ -127,6 +129,7 @@ const autoPingStats = {
   enabled: true,
   url: '',
   intervalMinutes: 5,
+  cronSchedule: '*/5 * * * *',
   lastPingTime: null,
   lastPingStatus: null,
   totalPings: 0,
@@ -150,35 +153,46 @@ async function performAutoPing() {
     const res = await fetch(pingUrl, {
       method: 'GET',
       headers: {
-        'User-Agent': 'WA-Control-AutoPing/1.0 (Keep-Alive)'
+        'User-Agent': 'WA-Control-AutoPing-Cron/1.0 (Keep-Alive)'
       },
       signal: AbortSignal.timeout(15000)
     });
     const elapsed = Date.now() - started;
     autoPingStats.lastPingTime = new Date().toISOString();
     autoPingStats.lastPingStatus = `${res.status} ${res.statusText} (${elapsed}ms)`;
-    console.log(`[AutoPing] Keep-Alive Ping -> ${pingUrl} [${autoPingStats.lastPingStatus}]`);
+    console.log(`[AutoPing Cron] Keep-Alive Ping -> ${pingUrl} [${autoPingStats.lastPingStatus}]`);
   } catch (err) {
     autoPingStats.failures += 1;
     autoPingStats.lastPingTime = new Date().toISOString();
     autoPingStats.lastPingStatus = `Error: ${err.message}`;
-    console.warn(`[AutoPing] Keep-Alive Ping to ${pingUrl} failed:`, err.message);
+    console.warn(`[AutoPing Cron] Keep-Alive Ping to ${pingUrl} failed:`, err.message);
   }
 }
 
 function startAutoPing() {
   const minutes = Math.max(1, Number(process.env.AUTOPING_INTERVAL_MINUTES || 5));
+  const cronSchedule = process.env.AUTOPING_CRON_SCHEDULE || `*/${minutes} * * * *`;
   autoPingStats.intervalMinutes = minutes;
+  autoPingStats.cronSchedule = cronSchedule;
   autoPingStats.url = getAutoPingUrl();
 
-  console.log(`[AutoPing] Render Keep-Alive active. Pinging ${autoPingStats.url} every ${minutes} minute(s).`);
+  console.log(`[AutoPing] Render Keep-Alive active. Registered cron job "${cronSchedule}" to ping ${autoPingStats.url}`);
 
-  // First ping after 30 seconds
-  setTimeout(performAutoPing, 30000);
+  // Initial warmup ping after 15 seconds
+  setTimeout(performAutoPing, 15000);
 
-  // Then recurring ping every intervalMinutes
-  setInterval(performAutoPing, minutes * 60 * 1000);
+  // Setup cronjob with node-cron
+  if (cron.validate(cronSchedule)) {
+    cron.schedule(cronSchedule, () => {
+      performAutoPing();
+    });
+    console.log(`[AutoPing] node-cron active on schedule: "${cronSchedule}"`);
+  } else {
+    console.warn(`[AutoPing] Invalid cron schedule "${cronSchedule}", falling back to setInterval (${minutes}m)`);
+    setInterval(performAutoPing, minutes * 60 * 1000);
+  }
 }
+
 
 const distPath = path.join(__dirname, 'whatsapp-dashboard', 'dist');
 
