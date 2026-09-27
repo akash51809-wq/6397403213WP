@@ -66,7 +66,6 @@ async function connectPostgres(customUri = null) {
   connection.readyState = 2; // connecting
   const useSSL = shouldEnableSSL(connStr);
 
-  // If sslmode=require is in connection string, pg handles SSL options
   const config = {
     connectionString: connStr,
     max: Number(process.env.PG_MAX_POOL || 10),
@@ -432,9 +431,42 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
   };
 }
 
-function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []) {
-  const modelName = tableName;
+function extractUpdateFields(update) {
+  let setFields = {};
+  let setOnInsertFields = {};
 
+  if (!update || typeof update !== 'object') {
+    return { setFields, setOnInsertFields };
+  }
+
+  if (update.$set || update.$setOnInsert) {
+    if (update.$set && typeof update.$set === 'object') {
+      Object.assign(setFields, update.$set);
+    }
+    if (update.$setOnInsert && typeof update.$setOnInsert === 'object') {
+      Object.assign(setOnInsertFields, update.$setOnInsert);
+    }
+    for (const [k, v] of Object.entries(update)) {
+      if (!k.startsWith('$')) {
+        setFields[k] = v;
+      }
+    }
+  } else {
+    Object.assign(setFields, update);
+  }
+
+  // Remove any remaining operator keys
+  for (const k of Object.keys(setFields)) {
+    if (k.startsWith('$')) delete setFields[k];
+  }
+  for (const k of Object.keys(setOnInsertFields)) {
+    if (k.startsWith('$')) delete setOnInsertFields[k];
+  }
+
+  return { setFields, setOnInsertFields };
+}
+
+function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = [], allowedColumns = []) {
   function wrapRow(row) {
     if (!row) return null;
 
@@ -454,7 +486,6 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         this.updatedAt = new Date();
         const pkVal = this[primaryKey];
         if (pkVal === undefined || pkVal === null) {
-          // If no PK, create
           const created = await Model.create(this);
           Object.assign(this, created);
           return this;
@@ -465,7 +496,9 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         let idx = 1;
 
         for (const [k, v] of Object.entries(this)) {
-          if (k === primaryKey) continue;
+          if (k === primaryKey || k.startsWith('$')) continue;
+          if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
           cols.push(`"${k}" = $${idx}`);
           let val = v;
           if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
@@ -474,6 +507,8 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
           vals.push(val);
           idx++;
         }
+
+        if (cols.length === 0) return this;
 
         vals.push(pkVal);
         const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE "${primaryKey}" = $${idx} RETURNING *`;
@@ -488,14 +523,26 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     return doc;
   }
 
+  function toLean(row) {
+    if (!row) return null;
+    const obj = { ...row };
+    for (const jc of jsonColumns) {
+      if (typeof obj[jc] === 'string') {
+        try { obj[jc] = JSON.parse(obj[jc]); } catch (e) {}
+      }
+    }
+    return obj;
+  }
+
   class QueryBuilder {
-    constructor(filter, selectFields) {
+    constructor(filter, selectFields, single = false) {
       this._filter = filter || {};
       this._selectFields = selectFields;
       this._sort = null;
-      this._limit = null;
+      this._limit = single ? 1 : null;
       this._offset = null;
       this._isLean = false;
+      this._single = single;
     }
 
     sort(sortSpec) {
@@ -549,21 +596,24 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
 
       const res = await query(sql, params);
       const rows = res.rows || [];
+
+      if (this._single) {
+        if (rows.length === 0) return null;
+        return this._isLean ? toLean(rows[0]) : wrapRow(rows[0]);
+      }
+
       if (this._isLean) {
-        return rows.map(r => {
-          for (const jc of jsonColumns) {
-            if (typeof r[jc] === 'string') {
-              try { r[jc] = JSON.parse(r[jc]); } catch (e) {}
-            }
-          }
-          return r;
-        });
+        return rows.map(r => toLean(r));
       }
       return rows.map(r => wrapRow(r));
     }
 
     then(resolve, reject) {
       return this.exec().then(resolve, reject);
+    }
+
+    catch(reject) {
+      return this.exec().catch(reject);
     }
   }
 
@@ -572,13 +622,11 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     primaryKey,
 
     find(filter = {}, projection = null) {
-      return new QueryBuilder(filter, projection);
+      return new QueryBuilder(filter, projection, false);
     },
 
-    async findOne(filter = {}, projection = null) {
-      const qb = new QueryBuilder(filter, projection).limit(1);
-      const rows = await qb.exec();
-      return rows.length > 0 ? rows[0] : null;
+    findOne(filter = {}, projection = null) {
+      return new QueryBuilder(filter, projection, true);
     },
 
     async create(data) {
@@ -590,17 +638,19 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         return results;
       }
 
-      const record = { ...defaultFields, ...data };
-      if (!record.createdAt) record.createdAt = new Date();
-      if (!record.updatedAt) record.updatedAt = new Date();
+      const raw = { ...defaultFields, ...data };
+      if (!raw.createdAt) raw.createdAt = new Date();
+      if (!raw.updatedAt) raw.updatedAt = new Date();
 
       const cols = [];
       const placeholders = [];
       const values = [];
       let idx = 1;
 
-      for (const [k, v] of Object.entries(record)) {
-        if (v === undefined) continue;
+      for (const [k, v] of Object.entries(raw)) {
+        if (v === undefined || k.startsWith('$')) continue;
+        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
         cols.push(`"${k}"`);
         placeholders.push(`$${idx}`);
         let val = v;
@@ -611,31 +661,42 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         idx++;
       }
 
+      if (cols.length === 0) return null;
+
       const sql = `INSERT INTO "${tableName}" (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
       const res = await query(sql, values);
       return wrapRow(res.rows[0]);
     },
 
     async updateOne(filter, update, options = {}) {
-      const setDoc = update.$set ? { ...update.$set } : { ...update };
-      setDoc.updatedAt = new Date();
+      const { setFields, setOnInsertFields } = extractUpdateFields(update);
 
       const existing = await this.findOne(filter);
       if (!existing) {
         if (options.upsert) {
-          const insertData = { ...filter, ...setDoc };
+          const cleanFilter = {};
+          for (const [k, v] of Object.entries(filter)) {
+            if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
+              cleanFilter[k] = v;
+            }
+          }
+          const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
           return this.create(insertData);
         }
         return { modifiedCount: 0 };
       }
 
       const pkVal = existing[primaryKey];
+      setFields.updatedAt = new Date();
+
       const cols = [];
       const vals = [];
       let idx = 1;
 
-      for (const [k, v] of Object.entries(setDoc)) {
-        if (k === primaryKey) continue;
+      for (const [k, v] of Object.entries(setFields)) {
+        if (k === primaryKey || k.startsWith('$')) continue;
+        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
         cols.push(`"${k}" = $${idx}`);
         let val = v;
         if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
@@ -643,6 +704,10 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         }
         vals.push(val);
         idx++;
+      }
+
+      if (cols.length === 0) {
+        return { modifiedCount: 0 };
       }
 
       vals.push(pkVal);
@@ -652,26 +717,34 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     },
 
     async findOneAndUpdate(filter, update, options = {}) {
-      const setDoc = update.$set ? { ...update.$set } : { ...update };
-      delete setDoc.$setOnInsert;
-      setDoc.updatedAt = new Date();
+      const { setFields, setOnInsertFields } = extractUpdateFields(update);
 
       const existing = await this.findOne(filter);
       if (!existing) {
         if (options.upsert) {
-          const insertData = { ...filter, ...setDoc };
+          const cleanFilter = {};
+          for (const [k, v] of Object.entries(filter)) {
+            if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
+              cleanFilter[k] = v;
+            }
+          }
+          const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
           return this.create(insertData);
         }
         return null;
       }
 
       const pkVal = existing[primaryKey];
+      setFields.updatedAt = new Date();
+
       const cols = [];
       const vals = [];
       let idx = 1;
 
-      for (const [k, v] of Object.entries(setDoc)) {
-        if (k === primaryKey) continue;
+      for (const [k, v] of Object.entries(setFields)) {
+        if (k === primaryKey || k.startsWith('$')) continue;
+        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
         cols.push(`"${k}" = $${idx}`);
         let val = v;
         if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
@@ -679,6 +752,10 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         }
         vals.push(val);
         idx++;
+      }
+
+      if (cols.length === 0) {
+        return existing;
       }
 
       vals.push(pkVal);
@@ -745,7 +822,7 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
   return Model;
 }
 
-// Pre-define all application models
+// Pre-define all application models with exact column constraints
 const User = createModel('users', 'userId', {
   name: '',
   role: 'user',
@@ -753,17 +830,24 @@ const User = createModel('users', 'userId', {
   status: 'active',
   sessions: [],
   autoSendImage: { enabled: false, imageUrl: '', fileName: '' }
-}, ['sessions', 'autoSendImage']);
+}, ['sessions', 'autoSendImage'], [
+  'userId', 'username', 'name', 'mobile', 'passwordHash', 'apiToken', 'role',
+  'plan', 'planExpiresAt', 'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
+]);
 
 const Otp = createModel('otps', 'id', {
   attempts: 0,
   verified: false
-});
+}, [], [
+  'id', 'mobile', 'otpHash', 'expiresAt', 'lastSentAt', 'attempts', 'verified', 'createdAt'
+]);
 
 const WhatsAppSession = createModel('whatsapp_sessions', 'sessionId', {
   role: 'admin',
   status: 'waiting'
-});
+}, [], [
+  'sessionId', 'ownerUserId', 'phone', 'role', 'authPath', 'status', 'lastConnectedAt', 'createdAt', 'updatedAt'
+]);
 
 const Plan = createModel('plans', 'planId', {
   currency: 'INR',
@@ -782,22 +866,34 @@ const Plan = createModel('plans', 'planId', {
   badgeText: '',
   active: true,
   sortOrder: 0
-});
+}, [], [
+  'planId', 'name', 'price', 'currency', 'description', 'dailyLimit', 'validity',
+  'validityDays', 'deviceLimit', 'apiAccess', 'webAccess', 'bulkMsg', 'groupOption',
+  'scheduleMsg', 'ipSecurity', 'headerColor', 'badgeText', 'active', 'sortOrder', 'createdAt', 'updatedAt'
+]);
 
 const PlanPurchaseRequest = createModel('plan_purchase_requests', 'requestId', {
   status: 'pending',
   adminNotes: '',
   screenshot: ''
-});
+}, [], [
+  'requestId', 'userId', 'userName', 'userMobile', 'planId', 'planName', 'amount',
+  'paymentDate', 'bankDetails', 'screenshot', 'status', 'adminNotes', 'approvedAt',
+  'rejectedAt', 'createdAt', 'updatedAt'
+]);
 
 const CompanySettings = createModel('company_settings', 'key', {
   key: 'company',
   companyName: '',
   faviconUrl: '',
   logoUrl: ''
-});
+}, [], [
+  'key', 'companyName', 'faviconUrl', 'logoUrl', 'updatedAt'
+]);
 
-const SessionAuth = createModel('session_auth', 'id', {}, ['data']);
+const SessionAuth = createModel('session_auth', 'id', {}, ['data'], [
+  'id', 'data'
+]);
 
 const ApiSettings = createModel('api_settings', 'key', {
   key: 'default',
@@ -807,7 +903,9 @@ const ApiSettings = createModel('api_settings', 'key', {
   webhookEnabled: false,
   totalSent: 0,
   lastUsed: null
-});
+}, [], [
+  'key', 'token', 'isEnabled', 'webhookUrl', 'webhookEnabled', 'totalSent', 'lastUsed', 'createdAt', 'updatedAt'
+]);
 
 const Contact = createModel('contacts', 'id', {
   name: null,
@@ -815,7 +913,9 @@ const Contact = createModel('contacts', 'id', {
   verifiedName: null,
   phone: null,
   lid: null
-});
+}, [], [
+  'id', 'name', 'notify', 'verifiedName', 'phone', 'lid', 'updatedAt'
+]);
 
 const IncomingMessage = createModel('incoming_messages', 'id', {
   from: '',
@@ -827,7 +927,10 @@ const IncomingMessage = createModel('incoming_messages', 'id', {
   isRead: false,
   sessionPhone: null,
   isGroup: false
-});
+}, [], [
+  'id', 'chatJid', 'ownerUserId', 'from', 'fromMe', 'message', 'mediaType', 'mediaUrl',
+  'fileName', 'date', 'timestamp', 'isRead', 'sessionPhone', 'isGroup', 'createdAt'
+]);
 
 const MessageReport = createModel('message_reports', 'id', {
   from: '',
@@ -838,7 +941,10 @@ const MessageReport = createModel('message_reports', 'id', {
   type: 'text',
   source: 'web',
   recipient: ''
-});
+}, [], [
+  'id', 'date', 'ownerUserId', 'from', 'to', 'message', 'status', 'session',
+  'type', 'source', 'recipient', 'createdAt'
+]);
 
 module.exports = {
   connection,
