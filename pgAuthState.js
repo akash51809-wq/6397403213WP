@@ -24,16 +24,26 @@ function deriveKey(secret) {
   return crypto.scryptSync(secret, SALT, 32);
 }
 
-// Build candidate keys list: Primary key first, followed by legacy candidates (in memory)
+// Hardened candidate keys derivation: strictly from environment variables
 function getCandidateKeys() {
-  const legacyDefault = 'wa-automation-secure-salt-key-2026';
+  const isProd = process.env.NODE_ENV === 'production';
   const primaryRaw = process.env.SESSION_ENCRYPTION_KEY || process.env.WHATSAPP_SESSION_ENCRYPTION_KEY;
   let primary = normalizeSecret(primaryRaw);
-  if (!primary || primary.length < 16) {
-    if (primary && primary.length < 16) {
-      console.warn('[SessionAuth] WARNING: SESSION_ENCRYPTION_KEY is shorter than 16 characters. Please provide a strong key.');
+
+  if (isProd) {
+    if (!primary || primary.length < 16) {
+      const errMsg = 'FATAL: SESSION_ENCRYPTION_KEY is required in production and must be at least 16 characters long. Refusing to run with insecure fallback.';
+      console.error(`[SessionAuth] ${errMsg}`);
+      throw new Error(errMsg);
     }
-    primary = normalizeSecret(process.env.AUTH_SECRET) || legacyDefault;
+  } else {
+    // Non-production fallback (development/test only)
+    if (!primary || primary.length < 16) {
+      primary = normalizeSecret(process.env.AUTH_SECRET);
+      if (!primary || primary.length < 16) {
+        primary = 'dev_env_session_key_' + (process.env.PORT || '10000');
+      }
+    }
   }
 
   const authSecret = normalizeSecret(process.env.AUTH_SECRET);
@@ -54,17 +64,8 @@ function getCandidateKeys() {
   });
   seenSecrets.add(primary);
 
-  // 2. Legacy fallback candidate: legacy default salt key
-  if (!seenSecrets.has(legacyDefault)) {
-    candidates.push({
-      label: 'legacy-default',
-      key: deriveKey(legacyDefault)
-    });
-    seenSecrets.add(legacyDefault);
-  }
-
-  // 3. Legacy fallback candidate: AUTH_SECRET (if defined)
-  if (authSecret && !seenSecrets.has(authSecret)) {
+  // 2. Fallback candidate: AUTH_SECRET (if defined and >= 16 chars)
+  if (authSecret && authSecret.length >= 16 && !seenSecrets.has(authSecret)) {
     candidates.push({
       label: 'AUTH_SECRET',
       key: deriveKey(authSecret)
@@ -72,8 +73,8 @@ function getCandidateKeys() {
     seenSecrets.add(authSecret);
   }
 
-  // 4. Legacy fallback candidate: DB URI (if defined)
-  if (dbUri && !seenSecrets.has(dbUri)) {
+  // 3. Fallback candidate: DB URI (if defined and >= 16 chars)
+  if (dbUri && dbUri.length >= 16 && !seenSecrets.has(dbUri)) {
     candidates.push({
       label: 'DB_URI',
       key: deriveKey(dbUri)
@@ -146,6 +147,10 @@ function decryptPayload(payload) {
   }
 }
 
+function isEncryptedPayload(payload) {
+  return Boolean(payload && typeof payload === 'object' && payload.encrypted === true && payload.iv && payload.tag && payload.data);
+}
+
 async function usePgAuthState(sessionId) {
   const writeData = async (data, file) => {
     try {
@@ -178,9 +183,27 @@ async function usePgAuthState(sessionId) {
         return JSON.parse(decryptedJson, BufferJSON.reviver);
       }
 
-      // Backward-compatible for previously stored unencrypted data
+      // If unencrypted record encountered:
       const jsonString = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-      return JSON.parse(jsonString, BufferJSON.reviver);
+      const parsed = JSON.parse(jsonString, BufferJSON.reviver);
+
+      // In production, do NOT silently accept unencrypted credentials!
+      // Immediately migrate & encrypt the record into the database!
+      try {
+        const encryptedRecord = encryptPayload(jsonString);
+        await SessionAuth.updateOne(
+          { id: key },
+          { $set: { data: encryptedRecord } }
+        );
+        console.warn(`[SessionAuth Security Audit] Auto-migrated and encrypted unencrypted credential '${key}'.`);
+      } catch (migErr) {
+        if (process.env.NODE_ENV === 'production') {
+          console.error(`[SessionAuth Security] Failed to securely migrate unencrypted credential '${key}':`, migErr.message);
+          throw new Error(`Insecure WhatsApp credential format rejected in production for ${key}`);
+        }
+      }
+
+      return parsed;
     } catch (error) {
       if (file === 'creds.json') {
         throw error;
@@ -297,11 +320,55 @@ async function usePgAuthState(sessionId) {
   };
 }
 
+async function migrateUnencryptedSessionAuth() {
+  try {
+    const unencryptedRecords = await SessionAuth.find({
+      $or: [
+        { 'data.encrypted': { $ne: true } },
+        { 'data.encrypted': null }
+      ]
+    }).lean();
+
+    if (!Array.isArray(unencryptedRecords) || unencryptedRecords.length === 0) {
+      return 0;
+    }
+
+    console.log(`[SessionAuth Security] Found ${unencryptedRecords.length} unencrypted session credential records. Beginning safe encryption migration...`);
+    let migratedCount = 0;
+
+    for (const record of unencryptedRecords) {
+      if (!record || !record.id || !record.data) continue;
+      if (record.data.encrypted === true && record.data.iv && record.data.tag) continue;
+
+      const jsonString = typeof record.data === 'string' ? record.data : JSON.stringify(record.data);
+      const encryptedPayload = encryptPayload(jsonString);
+
+      await SessionAuth.updateOne(
+        { id: record.id },
+        { $set: { data: encryptedPayload } }
+      );
+      migratedCount++;
+    }
+
+    if (migratedCount > 0) {
+      console.log(`[SessionAuth Security] Successfully migrated and encrypted ${migratedCount} session credential records.`);
+    }
+    return migratedCount;
+  } catch (err) {
+    console.error('[SessionAuth Security] Error during credential encryption migration:', err.message);
+    return 0;
+  }
+}
+
 module.exports = { 
   usePgAuthState,
   useMongoAuthState: usePgAuthState, // Alias for backwards compatibility
   encryptPayload,
   decryptPayload,
   encryptData: encryptPayload,
-  decryptData: decryptPayload
+  decryptData: decryptPayload,
+  encryptSessionData: encryptPayload,
+  decryptSessionData: decryptPayload,
+  isEncryptedPayload,
+  migrateUnencryptedSessionAuth
 };

@@ -124,6 +124,9 @@ async function initTables(pool) {
       "mobile" VARCHAR(30) UNIQUE,
       "passwordHash" TEXT NOT NULL,
       "apiToken" VARCHAR(100) UNIQUE,
+      "apiTokenHash" VARCHAR(128) UNIQUE,
+      "apiTokenPrefix" VARCHAR(20),
+      "apiTokenLast4" VARCHAR(10),
       "role" VARCHAR(20) DEFAULT 'user',
       "plan" VARCHAR(50) DEFAULT 'Standard',
       "planExpiresAt" TIMESTAMPTZ,
@@ -133,9 +136,13 @@ async function initTables(pool) {
       "createdAt" TIMESTAMPTZ DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenHash" VARCHAR(128) UNIQUE;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenPrefix" VARCHAR(20);`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenLast4" VARCHAR(10);`,
     `CREATE INDEX IF NOT EXISTS idx_users_username ON users("username");`,
     `CREATE INDEX IF NOT EXISTS idx_users_mobile ON users("mobile");`,
     `CREATE INDEX IF NOT EXISTS idx_users_apiToken ON users("apiToken");`,
+    `CREATE INDEX IF NOT EXISTS idx_users_apiTokenHash ON users("apiTokenHash");`,
     `CREATE INDEX IF NOT EXISTS idx_users_role ON users("role");`,
 
     // 2. otps
@@ -304,6 +311,30 @@ async function initTables(pool) {
     await pool.query(stmt);
   }
   console.log('[PostgreSQL] All tables and indexes are verified/created successfully.');
+
+  // Migrate existing plain text API tokens to secure SHA-256 hashes
+  try {
+    const crypto = require('crypto');
+    const existingTokens = await pool.query(
+      `SELECT "userId", "apiToken" FROM users WHERE "apiToken" IS NOT NULL AND "apiToken" != '' AND ("apiTokenHash" IS NULL OR "apiTokenHash" = '')`
+    );
+    if (existingTokens.rows && existingTokens.rows.length > 0) {
+      console.log(`[Security Migration] Migrating ${existingTokens.rows.length} plaintext API tokens to secure SHA-256 hashes...`);
+      for (const row of existingTokens.rows) {
+        const token = row.apiToken;
+        const hash = crypto.createHash('sha256').update(String(token)).digest('hex');
+        const prefix = String(token).slice(0, 7);
+        const last4 = String(token).slice(-4);
+        await pool.query(
+          `UPDATE users SET "apiTokenHash" = $1, "apiTokenPrefix" = $2, "apiTokenLast4" = $3, "apiToken" = NULL WHERE "userId" = $4`,
+          [hash, prefix, last4, row.userId]
+        );
+      }
+      console.log(`[Security Migration] API tokens successfully migrated to hash format.`);
+    }
+  } catch (migErr) {
+    console.warn('[Security Migration] API token migration notice:', migErr.message);
+  }
 }
 
 /* ==========================================================================
@@ -831,10 +862,13 @@ const User = createModel('users', 'userId', {
   role: 'user',
   plan: 'Standard',
   status: 'active',
+  apiTokenHash: null,
+  apiTokenPrefix: null,
+  apiTokenLast4: null,
   sessions: [],
   autoSendImage: { enabled: false, imageUrl: '', fileName: '' }
 }, ['sessions', 'autoSendImage'], [
-  'userId', 'username', 'name', 'mobile', 'passwordHash', 'apiToken', 'role',
+  'userId', 'username', 'name', 'mobile', 'passwordHash', 'apiToken', 'apiTokenHash', 'apiTokenPrefix', 'apiTokenLast4', 'role',
   'plan', 'planExpiresAt', 'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
 ]);
 

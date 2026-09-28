@@ -9,9 +9,8 @@ function createRateLimiter(options = {}) {
   const message = options.message || 'बहुत सारे अनुरोध (Too many requests). कृपया कुछ देर बाद प्रयास करें।';
   const statusCode = options.statusCode || 429;
   const keyGenerator = options.keyGenerator || ((req) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = forwarded ? String(forwarded).split(',')[0].trim() : (req.socket?.remoteAddress || '127.0.0.1');
-    return ip;
+    const ip = req.ip || req.socket?.remoteAddress || '127.0.0.1';
+    return String(ip).trim();
   });
 
   const hits = new Map();

@@ -40,17 +40,19 @@ try {
       if (!current || typeof current.sendMessage !== 'function') {
         try {
           const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '8840457632';
+          const adminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '';
           const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
           if (match?.session?.socket && match?.session?.status === 'connected') {
             current = match.session.socket;
             global.__waAdminSocket = current;
           } else {
-            const fallbackUser = process.env.ADMIN_DEFAULT_USER_ID ? String(process.env.ADMIN_DEFAULT_USER_ID).trim() : 'USR59396382';
-            const userS = sessions?.get(fallbackUser);
-            if (userS?.socket && userS?.status === 'connected') {
-              current = userS.socket;
-              global.__waAdminSocket = current;
+            const fallbackUser = process.env.ADMIN_DEFAULT_USER_ID ? String(process.env.ADMIN_DEFAULT_USER_ID).trim() : '';
+            if (fallbackUser) {
+              const userS = sessions?.get(fallbackUser);
+              if (userS?.socket && userS?.status === 'connected') {
+                current = userS.socket;
+                global.__waAdminSocket = current;
+              }
             }
           }
         } catch (e) {}
@@ -111,6 +113,7 @@ if (!botApp) throw new Error('WhatsApp backend app could not be loaded from inde
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
 // Strict CORS Configuration
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -295,6 +298,12 @@ async function startServer() {
 
     console.log('PostgreSQL Connected Successfully');
     await ensureAdminUser();
+    try {
+      const { migrateUnencryptedSessionAuth } = require('./pgAuthState');
+      await migrateUnencryptedSessionAuth();
+    } catch (migAuthErr) {
+      console.warn('[SessionAuth] Encryption migration warning:', migAuthErr.message);
+    }
     try {
       const { initMongoDataSync } = require('./index');
       if (typeof initMongoDataSync === 'function') {

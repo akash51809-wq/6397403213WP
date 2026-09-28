@@ -39,25 +39,30 @@ async function run() {
     const expires = new Date();
     expires.setDate(expires.getDate() + 30); // 30 days validity
 
+    const rawTok = 'wa_' + crypto.randomBytes(24).toString('hex');
+    const tokHash = crypto.createHash('sha256').update(rawTok).digest('hex');
     user = await User.create({
       userId: 'USR' + target.slice(-8),
       username: target,
       mobile: target,
       name: 'User ' + target,
       passwordHash: await hashPassword(newPassword),
-      apiToken: generateApiToken(),
+      apiTokenHash: tokHash,
+      apiTokenPrefix: rawTok.slice(0, 7),
+      apiTokenLast4: rawTok.slice(-4),
       role: 'user',
       plan: 'Professional',
       planExpiresAt: expires,
       status: 'active'
     });
-    console.log(`SUCCESS: Created user "${user.username}" with password: ${newPassword}`);
+    console.log(`SUCCESS: Created user "${user.username}" with password: ${newPassword}, API Token: ${rawTok}`);
   } else {
     console.log(`Found existing user: ${user.username} (userId: ${user.userId})`);
     user.passwordHash = await hashPassword(newPassword);
+    user.sessions = []; // Revoke all sessions on password reset
     user.status = 'active';
     await user.save();
-    console.log(`SUCCESS: Password for user "${user.username}" reset to: ${newPassword}`);
+    console.log(`SUCCESS: Password for user "${user.username}" reset to: ${newPassword} (all active sessions revoked)`);
   }
 
   process.exit(0);

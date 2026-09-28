@@ -17,9 +17,9 @@ const mongoose = { connection };
 const router = express.Router();
 const { createRateLimiter } = require('./rateLimiter');
 
-// Configurable Admin & Fallback Parameters
-const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '8840457632').trim();
-const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || 'USR59396382').trim();
+// Configurable Admin Parameters (strictly from environment, no hardcoded identities)
+const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '').trim();
+const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || '').trim();
 
 // Security Rate Limiters
 const loginLimiter = createRateLimiter({
@@ -117,7 +117,22 @@ const makePassword = () => {
   return value;
 };
 const tokenHash = (token) => hashText(token);
-const generateApiToken = () => 'wa_' + crypto.randomBytes(12).toString('hex');
+function generateApiTokenData() {
+  const rawToken = 'wa_' + crypto.randomBytes(24).toString('hex');
+  const hash = hashText(rawToken);
+  const prefix = rawToken.slice(0, 7);
+  const last4 = rawToken.slice(-4);
+  return { 
+    rawToken, 
+    hash, 
+    prefix, 
+    last4,
+    apiTokenHash: hash,
+    apiTokenPrefix: prefix,
+    apiTokenLast4: last4
+  };
+}
+const generateApiToken = () => generateApiTokenData().rawToken;
 
 async function ensureDefaultPlans() {
   if (mongoose.connection.readyState !== 1) return;
@@ -199,12 +214,30 @@ async function ensureAdminUser() {
   }
   let admin = await User.findOne({ role: 'admin' });
   if (!admin) {
+    const tokenData = generateApiTokenData();
     admin = await User.create({
-      userId: 'ADMIN', username, passwordHash: await hashPassword(password), apiToken: generateApiToken(), role: 'admin', status: 'active',
+      userId: 'ADMIN',
+      username,
+      passwordHash: await hashPassword(password),
+      apiTokenHash: tokenData.hash,
+      apiTokenPrefix: tokenData.prefix,
+      apiTokenLast4: tokenData.last4,
+      role: 'admin',
+      status: 'active',
     });
     console.log(`Admin user created: ${username}`);
-  } else if (!admin.apiToken) {
-    admin.apiToken = generateApiToken();
+  } else if (!admin.apiTokenHash && !admin.apiToken) {
+    const tokenData = generateApiTokenData();
+    admin.apiTokenHash = tokenData.hash;
+    admin.apiTokenPrefix = tokenData.prefix;
+    admin.apiTokenLast4 = tokenData.last4;
+    admin.apiToken = null;
+    await admin.save();
+  } else if (admin.apiToken && !admin.apiTokenHash) {
+    admin.apiTokenHash = hashText(admin.apiToken);
+    admin.apiTokenPrefix = String(admin.apiToken).slice(0, 7);
+    admin.apiTokenLast4 = String(admin.apiToken).slice(-4);
+    admin.apiToken = null;
     await admin.save();
   }
   await WhatsAppSession.updateOne(
@@ -216,13 +249,31 @@ async function ensureAdminUser() {
   return admin;
 }
 
+function getSessionTokenTtlMs() {
+  if (process.env.AUTH_TOKEN_TTL_MS) {
+    const ms = Number(process.env.AUTH_TOKEN_TTL_MS);
+    if (!isNaN(ms) && ms > 0) return ms;
+  }
+  if (process.env.AUTH_TOKEN_TTL_HOURS) {
+    const hours = Number(process.env.AUTH_TOKEN_TTL_HOURS);
+    if (!isNaN(hours) && hours > 0) return hours * 3600000;
+  }
+  if (process.env.AUTH_TOKEN_TTL_DAYS) {
+    const days = Math.min(7, Math.max(0.1, Number(process.env.AUTH_TOKEN_TTL_DAYS)));
+    if (!isNaN(days) && days > 0) return days * 86400000;
+  }
+  // Secure configurable short lifetime: default 24 hours (1 day) instead of 30 days
+  return 24 * 3600000;
+}
+
 async function createLoginToken(user) {
   const token = crypto.randomBytes(32).toString('hex');
-  const ttlDays = Math.max(1, Number(process.env.AUTH_TOKEN_TTL_DAYS || 30));
-  const expiresAt = new Date(Date.now() + ttlDays * 86400000);
-  user.sessions = (user.sessions || []).filter(s => s.expiresAt && s.expiresAt > new Date()).slice(-4);
-  user.sessions.push({ tokenHash: tokenHash(token), expiresAt });
-  user.updatedAt = new Date();
+  const ttlMs = getSessionTokenTtlMs();
+  const expiresAt = new Date(Date.now() + ttlMs);
+  const now = new Date();
+  user.sessions = (user.sessions || []).filter(s => s && s.expiresAt && new Date(s.expiresAt) > now).slice(-4);
+  user.sessions.push({ tokenHash: tokenHash(token), expiresAt, createdAt: now });
+  user.updatedAt = now;
   await user.save();
   return token;
 }
@@ -231,12 +282,16 @@ async function authenticateToken(token) {
   if (!token) return null;
   const hash = tokenHash(token);
   const user = await User.findOne({ 'sessions.tokenHash': hash, status: 'active' });
-  if (!user) return null;
-  if (!Array.isArray(user.sessions)) return null;
+  if (!user || !Array.isArray(user.sessions)) return null;
   const session = user.sessions.find(s => s && s.tokenHash === hash);
   if (!session || !session.expiresAt) return null;
   const exp = new Date(session.expiresAt).getTime();
-  if (isNaN(exp) || exp <= Date.now()) return null;
+  if (isNaN(exp) || exp <= Date.now()) {
+    // Immediately filter out and reject expired session
+    user.sessions = user.sessions.filter(s => s && s.tokenHash !== hash && new Date(s.expiresAt) > new Date());
+    await user.save().catch(() => {});
+    return null;
+  }
   return user;
 }
 
@@ -262,7 +317,19 @@ async function authRequired(req, res, next) {
     let user = await authenticateToken(token);
     if (!user && token) {
       try {
-        user = await User.findOne({ apiToken: token, status: 'active' });
+        const tokenH = hashText(token);
+        user = await User.findOne({ apiTokenHash: tokenH, status: 'active' });
+        if (!user) {
+          // Seamless migration fallback for unmigrated legacy plain text token
+          user = await User.findOne({ apiToken: token, status: 'active' });
+          if (user) {
+            user.apiTokenHash = tokenH;
+            user.apiTokenPrefix = String(token).slice(0, 7);
+            user.apiTokenLast4 = String(token).slice(-4);
+            user.apiToken = null;
+            await user.save().catch(() => {});
+          }
+        }
       } catch {}
     }
     if (!user) return res.status(401).json({ success: false, message: 'लॉगिन समाप्त हो गया है। फिर से लॉगिन करें।' });
@@ -379,7 +446,7 @@ function getLiveAdminWhatsAppSender() {
       if (match?.session?.socket && match?.session?.status === 'connected') {
         socket = match.session.socket;
         global.__waAdminSocket = socket;
-      } else {
+      } else if (CONFIG_ADMIN_DEFAULT_USER_ID) {
         const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
         if (userS?.socket && userS?.status === 'connected') {
           socket = userS.socket;
@@ -483,12 +550,15 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
     const initialExpiresAt = new Date();
     initialExpiresAt.setDate(initialExpiresAt.getDate() + 30);
 
+    const tokenData = generateApiTokenData();
     const user = await User.create({
       userId,
       username,
       mobile,
       passwordHash: await hashPassword(password),
-      apiToken: generateApiToken(),
+      apiTokenHash: tokenData.hash,
+      apiTokenPrefix: tokenData.prefix,
+      apiTokenLast4: tokenData.last4,
       role: 'user',
       plan: 'Standard',
       planExpiresAt: initialExpiresAt,
@@ -564,6 +634,8 @@ router.post('/api/auth/change-password', passwordLimiter, authRequired, async (r
     }
 
     req.user.passwordHash = await hashPassword(newPassword);
+    // Instantly revoke all active login sessions/tokens for this user upon password change
+    req.user.sessions = [];
     req.user.updatedAt = new Date();
     await req.user.save();
 
@@ -706,6 +778,7 @@ router.post('/api/admin/users/:userId/send-password', authRequired, adminRequire
 
     const newPassword = makePassword();
     user.passwordHash = await hashPassword(newPassword);
+    user.sessions = []; // Revoke all old sessions
     user.updatedAt = new Date();
     await user.save();
 
@@ -1091,15 +1164,26 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
         return res.status(500).json({ success: false, message: 'Voice generation failed: ' + ttsErr.message });
       }
     } else if (attachment && attachment.data) {
-      const base64Clean = attachment.data.replace(/^data:.*?;base64,/, '');
-      const buffer = Buffer.from(base64Clean, 'base64');
-      const mimeType = attachment.type || 'application/octet-stream';
-      fileName = attachment.name || 'file';
+      const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+      const validation = validateAndProcessMediaUpload(attachment.data, {
+        claimedMimeType: attachment.type,
+        claimedFileName: attachment.name,
+        prefix: `out_${req.user.userId}`
+      });
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.error || 'अमान्य अटैचमेंट फ़ाइल।'
+        });
+      }
+
+      const buffer = validation.buffer;
+      const mimeType = validation.mimeType;
+      fileName = validation.originalName || validation.safeFilename;
 
       const MEDIA_DIR = path.join(__dirname, 'media_storage');
       if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
-      const ext = path.extname(fileName) || '.bin';
-      const savedName = `out_${Date.now()}_${Math.random().toString(36).substring(2, 6)}${ext}`;
+      const savedName = validation.safeFilename;
       fs.writeFileSync(path.join(MEDIA_DIR, savedName), buffer);
       mediaUrl = `/media/${savedName}`;
 
@@ -1200,8 +1284,19 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
       });
     }
 
-    if (!req.user.apiToken) {
-      req.user.apiToken = generateApiToken();
+    if (!req.user.apiTokenHash && !req.user.apiToken) {
+      const tokenData = generateApiTokenData();
+      req.user.apiTokenHash = tokenData.hash;
+      req.user.apiTokenPrefix = tokenData.prefix;
+      req.user.apiTokenLast4 = tokenData.last4;
+      req.user.apiToken = null;
+      await req.user.save();
+    } else if (req.user.apiToken && !req.user.apiTokenHash) {
+      // Migrate legacy plaintext token
+      req.user.apiTokenHash = hashText(req.user.apiToken);
+      req.user.apiTokenPrefix = String(req.user.apiToken).slice(0, 7);
+      req.user.apiTokenLast4 = String(req.user.apiToken).slice(-4);
+      req.user.apiToken = null;
       await req.user.save();
     }
 
@@ -1225,17 +1320,25 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
     const host = req.get('host') || 'local-whatsapp.onrender.com';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const baseUrl = `${protocol}://${host}`;
-    const sampleUrl = `${baseUrl}/send-text?token=${req.user.apiToken}&to=9876543210&message=Hello&session=${session10 || 'YOUR_10_DIGIT_NUMBER'}`;
+    
+    // Masked token: token is only shown in full when newly created/regenerated
+    const displayToken = (req.user.apiTokenPrefix && req.user.apiTokenLast4)
+      ? `${req.user.apiTokenPrefix}••••••••••••${req.user.apiTokenLast4}`
+      : 'wa_••••••••••••••••';
+    const sampleToken = req.user.apiTokenPrefix ? `${req.user.apiTokenPrefix}...` : 'YOUR_API_TOKEN';
+    const sampleUrl = `${baseUrl}/send-text?token=${sampleToken}&to=9876543210&message=Hello&session=${session10 || 'YOUR_10_DIGIT_NUMBER'}`;
 
     res.json({
       success: true,
-      token: req.user.apiToken,
+      token: displayToken,
+      isMasked: true,
+      hasToken: Boolean(req.user.apiTokenHash || req.user.apiToken),
       session: session10 || null,
       connectedNumber: rawNumber || null,
       status: isConnected ? 'connected' : (active?.status || dbSession?.status || 'disconnected'),
       baseUrl,
       sampleUrl,
-      sampleProductionUrl: `https://local-whatsapp.onrender.com/send-text?token=${req.user.apiToken}&to=9876543210&message=Hello&session=${session10 || 'YOUR_10_DIGIT_NUMBER'}`
+      sampleProductionUrl: `https://local-whatsapp.onrender.com/send-text?token=${sampleToken}&to=9876543210&message=Hello&session=${session10 || 'YOUR_10_DIGIT_NUMBER'}`
     });
   } catch (error) {
     console.error('Fetch user api-token error:', error);
@@ -1253,13 +1356,19 @@ router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => 
       });
     }
 
-    req.user.apiToken = generateApiToken();
+    const tokenData = generateApiTokenData();
+    req.user.apiTokenHash = tokenData.hash;
+    req.user.apiTokenPrefix = tokenData.prefix;
+    req.user.apiTokenLast4 = tokenData.last4;
+    req.user.apiToken = null; // NEVER store plaintext token in DB
     req.user.updatedAt = new Date();
     await req.user.save();
+
     res.json({
       success: true,
-      token: req.user.apiToken,
-      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है।'
+      token: tokenData.rawToken, // Full token returned ONLY upon creation/regeneration!
+      isMasked: false,
+      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है। इसे सुरक्षित स्थान पर सहेजें, यह केवल अभी दिखाई देगा।'
     });
   } catch (error) {
     console.error('Regenerate API token error:', error);
@@ -1507,6 +1616,22 @@ router.post('/api/plans/purchase', authRequired, async (req, res) => {
     const plan = await Plan.findOne({ planId });
     if (!plan) return res.status(404).json({ success: false, message: 'चुना हुआ Plan उपलब्ध नहीं है।' });
 
+    let finalScreenshot = (typeof screenshot === 'string' ? screenshot.trim() : '');
+    if (finalScreenshot && finalScreenshot.startsWith('data:')) {
+      const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+      const validation = validateAndProcessMediaUpload(finalScreenshot, {
+        claimedFileName: 'screenshot.jpg',
+        prefix: `proof_${req.user.userId}`
+      });
+      if (!validation.valid || !validation.mimeType?.startsWith('image/')) {
+        return res.status(400).json({ success: false, message: validation.error || 'अमान्य स्क्रीनशॉट फ़ाइल।' });
+      }
+      const MEDIA_DIR = path.join(__dirname, 'media_storage');
+      if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(MEDIA_DIR, validation.safeFilename), validation.buffer);
+      finalScreenshot = `/media/${validation.safeFilename}`;
+    }
+
     const requestId = 'REQ' + randomDigits(7);
     const purchaseReq = await PlanPurchaseRequest.create({
       requestId,
@@ -1518,7 +1643,7 @@ router.post('/api/plans/purchase', authRequired, async (req, res) => {
       amount: Number(amount) || plan.price,
       paymentDate: paymentDate || new Date().toISOString().slice(0, 10),
       bankDetails: String(bankDetails).trim(),
-      screenshot: screenshot || '',
+      screenshot: finalScreenshot,
       adminNotes: notes || '',
       status: 'pending'
     });
@@ -1723,24 +1848,25 @@ router.post('/api/user/settings/auto-image', express.json({ limit: '15mb' }), au
     let finalImageUrl = (typeof imageUrl === 'string' ? imageUrl.trim() : '');
     let finalFileName = (typeof fileName === 'string' ? fileName.trim() : '');
 
-    // If base64 file data is provided, save it to media_storage
-    if (fileData && typeof fileData === 'string' && fileData.startsWith('data:image/')) {
-      const base64Clean = fileData.replace(/^data:.*?;base64,/, '');
-      const buffer = Buffer.from(base64Clean, 'base64');
+    // If base64 file data is provided, validate and save it to media_storage
+    if (fileData && typeof fileData === 'string') {
+      const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+      const validation = validateAndProcessMediaUpload(fileData, {
+        claimedFileName: fileName || 'image.jpg',
+        prefix: `auto_img_${user.userId || 'usr'}`
+      });
+      if (!validation.valid || !validation.mimeType?.startsWith('image/')) {
+        return res.status(400).json({
+          success: false,
+          message: validation.error || 'अमान्य छवि फ़ाइल। केवल JPG, PNG, WebP या GIF स्वीकार्य हैं।'
+        });
+      }
+
       const MEDIA_DIR = path.join(__dirname, 'media_storage');
       if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
-
-      let ext = '.jpg';
-      if (fileData.startsWith('data:image/png')) ext = '.png';
-      else if (fileData.startsWith('data:image/jpeg')) ext = '.jpg';
-      else if (fileData.startsWith('data:image/webp')) ext = '.webp';
-      else if (fileData.startsWith('data:image/gif')) ext = '.gif';
-      else if (finalFileName) ext = path.extname(finalFileName) || '.jpg';
-
-      const savedName = `auto_img_${user.userId || 'usr'}_${Date.now()}${ext}`;
-      fs.writeFileSync(path.join(MEDIA_DIR, savedName), buffer);
-      finalImageUrl = `/media/${savedName}`;
-      if (!finalFileName) finalFileName = savedName;
+      fs.writeFileSync(path.join(MEDIA_DIR, validation.safeFilename), validation.buffer);
+      finalImageUrl = `/media/${validation.safeFilename}`;
+      if (!finalFileName) finalFileName = validation.originalName || validation.safeFilename;
     }
 
     user.autoSendImage = {
@@ -2075,6 +2201,8 @@ module.exports = {
   ensureAdminUser, 
   recordAdminWhatsAppSession, 
   getUserPlanFeatures,
+  getSessionTokenTtlMs,
+  generateApiTokenData,
   CONFIG_ADMIN_PHONE,
   CONFIG_ADMIN_DEFAULT_USER_ID,
   User, 

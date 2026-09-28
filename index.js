@@ -28,6 +28,7 @@ const { generateTTS, generateWhatsAppVoiceNote } = require('./ttsHelper');
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
 // Strict CORS Configuration
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
@@ -105,18 +106,83 @@ app.get('/media/:filename', (req, res, next) => {
             return res.status(403).json({ success: false, message: 'Access forbidden: invalid path.' });
         }
 
-        // Allow preview without mandatory header auth for auto send images, company assets, and tts voice notes
-        if (safeFilename.startsWith('auto_img_') || safeFilename.startsWith('company_') || safeFilename.startsWith('tts_')) {
+        // Existing required public assets: company branding (logo, favicon, banner) for unauthenticated UI
+        if (safeFilename.startsWith('company_')) {
             if (!fs.existsSync(filePath)) {
                 return res.status(404).json({ success: false, message: 'Media file not found.' });
             }
             return res.sendFile(filePath);
         }
 
-        return authRequired(req, res, () => {
+        // All user-generated sensitive media requires authentication + ownership validation
+        return authRequired(req, res, async () => {
             if (!fs.existsSync(filePath)) {
                 return res.status(404).json({ success: false, message: 'Media file not found.' });
             }
+
+            // Admins have access to all media files
+            if (req.user && req.user.role === 'admin') {
+                return res.sendFile(filePath);
+            }
+
+            // Check if user owns this media file
+            const userId = req.user?.userId;
+            let isOwner = false;
+
+            // 1. Check in user's autoSendImage configuration
+            if (req.user?.autoSendImage?.imageUrl && String(req.user.autoSendImage.imageUrl).includes(safeFilename)) {
+                isOwner = true;
+            }
+
+            // 2. Check in user's incoming/outgoing messages
+            if (!isOwner) {
+                const userMessages = getIncomingMessages(req.user);
+                isOwner = userMessages.some(m => 
+                    (m.mediaUrl && m.mediaUrl.includes(safeFilename)) || 
+                    (m.fileName && m.fileName === safeFilename)
+                );
+            }
+
+            // 3. Check in Database models (IncomingMessageModel, MessageReportModel, PlanPurchaseRequest)
+            if (!isOwner && mongoose.connection.readyState === 1 && userId) {
+                try {
+                    const matchMsg = await IncomingMessageModel.exists({
+                        ownerUserId: userId,
+                        $or: [
+                            { mediaUrl: new RegExp(safeFilename) },
+                            { fileName: safeFilename }
+                        ]
+                    });
+                    if (matchMsg) isOwner = true;
+
+                    if (!isOwner) {
+                        const matchReport = await MessageReportModel.exists({
+                            ownerUserId: userId,
+                            message: new RegExp(safeFilename)
+                        });
+                        if (matchReport) isOwner = true;
+                    }
+
+                    if (!isOwner) {
+                        const { PlanPurchaseRequest } = require('./db');
+                        const matchPlan = await PlanPurchaseRequest.exists({
+                            userId: userId,
+                            screenshot: new RegExp(safeFilename)
+                        });
+                        if (matchPlan) isOwner = true;
+                    }
+                } catch (dbCheckErr) {
+                    console.warn('[Media Security] Ownership DB check notice:', dbCheckErr.message);
+                }
+            }
+
+            if (!isOwner) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'सुरक्षा उल्लंघन: आपके पास इस मीडिया फ़ाइल को एक्सेस करने की अनुमति नहीं है।'
+                });
+            }
+
             return res.sendFile(filePath);
         });
     } catch (err) {
@@ -714,13 +780,23 @@ function normalizeExistingMessages() {
 }
 normalizeExistingMessages();
 
-function updateIncomingReadStatus(id, isRead = true) {
+function updateIncomingReadStatus(id, isRead = true, callerUser = null) {
     try {
         const messages = getIncomingMessages();
         const msg = messages.find(m => m.id === id);
         if (msg) {
+            if (callerUser && callerUser.role !== 'admin') {
+                const userMessages = getIncomingMessages(callerUser);
+                if (!userMessages.some(m => m.id === id)) {
+                    return false;
+                }
+            }
             msg.isRead = isRead;
             persistIncomingMessages();
+            if (mongoose.connection.readyState === 1) {
+                IncomingMessageModel.updateOne({ id }, { $set: { isRead } })
+                    .catch(err => console.warn('[Postgres/Mongo] update read status error:', err.message));
+            }
             return true;
         }
         return false;
@@ -1091,14 +1167,25 @@ app.get('/api/incoming/messages', authRequired, (req, res) => {
 app.post('/api/incoming/mark-read', authRequired, async (req, res) => {
     try {
         const { id, chatJid, isRead, all } = req.body || {};
+        const isAdmin = req.user && req.user.role === 'admin';
         if (all) {
             markAllIncomingRead(req.user);
-            broadcastIncomingEvent('read_update', { all: true }, req.user.role === 'admin' ? null : req.user.userId);
+            broadcastIncomingEvent('read_update', { all: true }, isAdmin ? null : req.user.userId);
             return res.json({ success: true, message: 'All messages marked as read' });
         }
         if (chatJid) {
+            if (!isAdmin) {
+                const userMessages = getIncomingMessages(req.user);
+                const ownsChat = userMessages.some(m => m.chatJid === chatJid || m.from === chatJid);
+                if (!ownsChat) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'सुरक्षा उल्लंघन: आप दूसरे यूजर की चैट का स्टेटस नहीं बदल सकते।'
+                    });
+                }
+            }
             markChatAsRead(chatJid, req.user);
-            if (sock && connectionStatus === 'connected' && req.user.role === 'admin') {
+            if (sock && connectionStatus === 'connected' && isAdmin) {
                 try {
                     const unreadList = getIncomingMessages(req.user).filter(m => (m.chatJid === chatJid || m.from === chatJid) && !m.fromMe);
                     if (unreadList.length > 0) {
@@ -1107,12 +1194,29 @@ app.post('/api/incoming/mark-read', authRequired, async (req, res) => {
                     }
                 } catch {}
             }
-            broadcastIncomingEvent('read_update', { chatJid }, req.user.role === 'admin' ? null : req.user.userId);
+            broadcastIncomingEvent('read_update', { chatJid }, isAdmin ? null : req.user.userId);
             return res.json({ success: true, message: 'Chat marked as read' });
         }
         if (id) {
-            const ok = updateIncomingReadStatus(id, isRead !== undefined ? Boolean(isRead) : true);
-            broadcastIncomingEvent('read_update', { id }, req.user.role === 'admin' ? null : req.user.userId);
+            const allMessages = getIncomingMessages();
+            const targetMsg = allMessages.find(m => m.id === id);
+            if (!targetMsg) {
+                return res.status(404).json({ success: false, message: 'Message not found' });
+            }
+
+            if (!isAdmin) {
+                const userMessages = getIncomingMessages(req.user);
+                const isOwned = userMessages.some(m => m.id === id);
+                if (!isOwned) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'सुरक्षा उल्लंघन: आप दूसरे यूजर के मैसेज का स्टेटस नहीं बदल सकते।'
+                    });
+                }
+            }
+
+            const ok = updateIncomingReadStatus(id, isRead !== undefined ? Boolean(isRead) : true, req.user);
+            broadcastIncomingEvent('read_update', { id }, isAdmin ? null : req.user.userId);
             return res.json({ success: ok, message: ok ? 'Read status updated' : 'Message not found' });
         }
         return res.status(400).json({ success: false, message: 'id, chatJid or all:true required' });
@@ -1331,16 +1435,24 @@ app.post('/api/incoming/reply', authRequired, attachmentBodyParser, async (req, 
         let mimetype = null;
 
         if (attachment && attachment.data) {
-            const base64Data = attachment.data.includes('base64,')
-                ? attachment.data.split('base64,')
-                : attachment.data;
-            const buffer = Buffer.from(base64Data, 'base64');
-            mimetype = attachment.type || 'application/octet-stream';
-            fileName = attachment.name || 'file';
-            fileSize = buffer.length;
+            const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+            const validation = validateAndProcessMediaUpload(attachment.data, {
+                claimedMimeType: attachment.type,
+                claimedFileName: attachment.name,
+                prefix: `out_${req.user.userId || 'usr'}`,
+                maxSizeBytes: 15 * 1024 * 1024
+            });
 
-            const ext = path.extname(fileName) || '.bin';
-            const savedName = `out_${Date.now()}_${Math.random().toString(36).substring(2, 6)}${ext}`;
+            if (!validation.valid) {
+                return res.status(400).json({ success: false, message: validation.error });
+            }
+
+            const buffer = validation.buffer;
+            mimetype = validation.mimeType;
+            fileName = validation.originalName || validation.safeFilename;
+            fileSize = validation.fileSize;
+            const savedName = validation.safeFilename;
+
             fs.writeFileSync(path.join(MEDIA_DIR, savedName), buffer);
             mediaUrl = `/media/${savedName}`;
 
@@ -1433,18 +1545,51 @@ app.get('/api/incoming/chat-info', authRequired, async (req, res) => {
             return res.status(400).json({ success: false, message: 'chatJid is required' });
         }
 
-        const isGroup = chatJid.endsWith('@g.us');
-        let groupMeta = null;
+        const isAdmin = req.user && req.user.role === 'admin';
+        const userMessages = getIncomingMessages(req.user);
+        const userHasChat = userMessages.some(m => m.chatJid === chatJid || m.from === chatJid);
 
-        if (isGroup && sock && connectionStatus === 'connected') {
-            try {
-                groupMeta = await sock.groupMetadata(chatJid);
-            } catch (err) {
-                console.error('Could not fetch group metadata:', err.message);
+        let userSocket = null;
+        if (!isAdmin) {
+            const { getUserSession } = require('./userSessions');
+            const uSess = getUserSession(req.user.userId);
+            if (uSess && uSess.status === 'connected' && uSess.socket) {
+                userSocket = uSess.socket;
+            }
+            // Strict ownership verification: Non-admin must own messages in this chat or have connected session
+            if (!userHasChat && !userSocket) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'सुरक्षा उल्लंघन: आपके पास इस चैट या ग्रुप की जानकारी देखने की अनुमति नहीं है।'
+                });
             }
         }
 
-        const all = getIncomingMessages(req.user).filter(m => m.chatJid === chatJid || m.from === chatJid);
+        const isGroup = chatJid.endsWith('@g.us');
+        let groupMeta = null;
+
+        // Isolate socket query: Admin uses admin socket, user uses their own socket
+        const activeTargetSocket = isAdmin ? (sock || global.__waAdminSocket) : userSocket;
+        if (isGroup && activeTargetSocket && typeof activeTargetSocket.groupMetadata === 'function') {
+            try {
+                groupMeta = await activeTargetSocket.groupMetadata(chatJid);
+            } catch (err) {
+                // If non-admin fails to query group metadata on their socket, they don't belong to the group
+                if (!isAdmin && !userHasChat) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'सुरक्षा उल्लंघन: आप इस ग्रुप के सदस्य नहीं हैं।'
+                    });
+                }
+            }
+        } else if (isGroup && !isAdmin && !userHasChat) {
+            return res.status(403).json({
+                success: false,
+                message: 'सुरक्षा उल्लंघन: आपके पास इस ग्रुप की जानकारी देखने की अनुमति नहीं है।'
+            });
+        }
+
+        const all = userMessages.filter(m => m.chatJid === chatJid || m.from === chatJid);
         const mediaItems = all.filter(m => m.mediaUrl).map(m => ({
             id: m.id,
             date: m.date,
@@ -1486,6 +1631,16 @@ app.delete('/api/incoming/chat', authRequired, (req, res) => {
         const chatJid = req.body?.chatJid || req.query?.chatJid;
         if (!chatJid) {
             return res.status(400).json({ success: false, message: 'chatJid is required' });
+        }
+        if (req.user && req.user.role !== 'admin') {
+            const userMessages = getIncomingMessages(req.user);
+            const ownsChat = userMessages.some(m => m.chatJid === chatJid || m.from === chatJid);
+            if (!ownsChat) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'सुरक्षा उल्लंघन: आप दूसरे यूजर की चैट को डिलीट नहीं कर सकते।'
+                });
+            }
         }
         deleteChatMessages(chatJid, req.user);
         broadcastIncomingEvent('chat_deleted', { chatJid }, req.user.role === 'admin' ? null : req.user.userId);
@@ -1869,10 +2024,21 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
         // Construct message payload
         let messagePayload = {};
         if (attachment && attachment.data) {
-            const base64Clean = attachment.data.replace(/^data:.*?;base64,/, '');
-            const buffer = Buffer.from(base64Clean, 'base64');
-            const mimeType = attachment.type || 'application/octet-stream';
-            const fileName = attachment.name || 'file';
+            const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+            const validation = validateAndProcessMediaUpload(attachment.data, {
+                claimedMimeType: attachment.type,
+                claimedFileName: attachment.name,
+                prefix: `out_${req.user.userId}`
+            });
+            if (!validation.valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: validation.error || 'अमान्य अटैचमेंट फ़ाइल।'
+                });
+            }
+            const buffer = validation.buffer;
+            const mimeType = validation.mimeType;
+            const fileName = validation.originalName || validation.safeFilename;
 
             if (mimeType.startsWith('image/')) {
                 messagePayload = { image: buffer, caption: message ? String(message) : undefined, mimetype: mimeType };
@@ -2088,18 +2254,19 @@ async function sendWhatsAppMessage(targetSocket, number, message, attachment = n
     }
 
     if (attachment && attachment.data) {
-        let buffer;
-        if (Buffer.isBuffer(attachment.data)) {
-            buffer = attachment.data;
-        } else if (typeof attachment.data === 'string') {
-            const base64Clean = attachment.data.replace(/^data:.*?;base64,/, '');
-            buffer = Buffer.from(base64Clean, 'base64');
-        } else {
-            throw new Error('Invalid attachment data format');
+        const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+        const validation = validateAndProcessMediaUpload(attachment.data, {
+            claimedMimeType: attachment.type,
+            claimedFileName: attachment.name,
+            prefix: 'out'
+        });
+        if (!validation.valid) {
+            throw new Error(`Media validation failed: ${validation.error}`);
         }
 
-        const mimeType = attachment.type || 'application/octet-stream';
-        const fileName = attachment.name || 'document';
+        const buffer = validation.buffer;
+        const mimeType = validation.mimeType || attachment.type || 'application/octet-stream';
+        const fileName = validation.originalName || validation.safeFilename || attachment.name || 'document';
 
         if (mimeType.startsWith('image/')) {
             await s.sendMessage(jid, { image: buffer, caption: textToSend || undefined, mimetype: mimeType });
@@ -2159,6 +2326,24 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
                 success: false,
                 message: 'कम से कम Message या Attachment देना आवश्यक है'
             });
+        }
+
+        if (hasAttachment) {
+            const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+            const validation = validateAndProcessMediaUpload(attachment.data, {
+                claimedMimeType: attachment.type,
+                claimedFileName: attachment.name,
+                prefix: `out_${req.user.userId}`
+            });
+            if (!validation.valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: validation.error || 'अमान्य अटैचमेंट फ़ाइल।'
+                });
+            }
+            attachment.data = validation.buffer;
+            attachment.type = validation.mimeType;
+            attachment.name = validation.originalName || validation.safeFilename;
         }
 
         if (!Array.isArray(numbers) || numbers.length === 0) {
@@ -2509,7 +2694,20 @@ async function handleSendText(req, res) {
         } else {
             try {
                 const { User } = require('./auth');
-                user = await User.findOne({ apiToken: token, status: 'active' }).lean();
+                const crypto = require('crypto');
+                const tHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+                user = await User.findOne({ apiTokenHash: tHash, status: 'active' }).lean();
+                if (!user) {
+                    const legacyUser = await User.findOne({ apiToken: token, status: 'active' });
+                    if (legacyUser) {
+                        legacyUser.apiTokenHash = tHash;
+                        legacyUser.apiTokenPrefix = String(token).slice(0, 7);
+                        legacyUser.apiTokenLast4 = String(token).slice(-4);
+                        legacyUser.apiToken = null;
+                        await legacyUser.save().catch(() => {});
+                        user = legacyUser;
+                    }
+                }
             } catch (dbErr) {
                 console.warn('[API /send-text] DB user token lookup warn:', dbErr.message);
             }

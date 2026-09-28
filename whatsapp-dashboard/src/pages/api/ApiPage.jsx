@@ -55,8 +55,8 @@ export function ApiPage() {
     try {
       const res = await api('/api/user/api-token/regenerate', { method: 'POST' })
       if (res.success) {
-        if (notify) notify('नया API Token सफलतापूर्वक बन गया!')
-        loadApiData()
+        if (notify) notify('नया API Token सफलतापूर्वक बन गया! इसे सुरक्षित स्थान पर सहेजें।')
+        setData(prev => ({ ...(prev || {}), ...res, token: res.token }))
       }
     } catch (e) {
       alert(e.message || 'Token regeneration failed')

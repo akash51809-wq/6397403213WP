@@ -5,8 +5,8 @@ const { WhatsAppSession } = require('./auth');
 const QRCode = require('qrcode');
 const { Boom } = require('@hapi/boom');
 
-const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '8840457632').trim();
-const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || 'USR59396382').trim();
+const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '').trim();
+const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || '').trim();
 
 const sessions = new Map();
 
@@ -448,18 +448,20 @@ async function findOrLoadSession(sessionParam, caller = null) {
                 }
             };
         }
-        const userS = sessions.get(CONFIG_ADMIN_DEFAULT_USER_ID);
-        if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
-            global.__waAdminSocket = userS.socket;
-            return {
-                userId: 'ADMIN',
-                isAdmin: true,
-                session: {
-                    socket: userS.socket,
-                    status: 'connected',
-                    connectedNumber: userS.connectedNumber || adminPhone
-                }
-            };
+        if (CONFIG_ADMIN_DEFAULT_USER_ID) {
+            const userS = sessions.get(CONFIG_ADMIN_DEFAULT_USER_ID);
+            if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
+                global.__waAdminSocket = userS.socket;
+                return {
+                    userId: 'ADMIN',
+                    isAdmin: true,
+                    session: {
+                        socket: userS.socket,
+                        status: 'connected',
+                        connectedNumber: userS.connectedNumber || adminPhone
+                    }
+                };
+            }
         }
         return {
             userId: 'ADMIN',
@@ -478,7 +480,8 @@ async function findOrLoadSession(sessionParam, caller = null) {
         if (sessionParam && sessionParam !== `user-${callerUserId}` && sessionParam !== callerUserId) {
             const activeS = sessions.get(callerUserId);
             const active10 = activeS?.connectedNumber ? String(activeS.connectedNumber).replace(/\D/g, '').slice(-10) : '';
-            if (clean10 && clean10 !== callerMobile10 && clean10 !== active10) {
+            const isMatch = (clean10 && ((callerMobile10 && clean10 === callerMobile10) || (active10 && clean10 === active10)));
+            if (!isMatch) {
                 const err = new Error('सुरक्षा उल्लंघन: आप केवल अपने स्वयं के व्हाट्सऐप सेशन का उपयोग कर सकते हैं।');
                 err.statusCode = 403;
                 throw err;
