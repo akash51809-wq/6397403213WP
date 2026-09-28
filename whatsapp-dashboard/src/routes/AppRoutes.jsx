@@ -101,8 +101,8 @@ export default function AppRoutes() {
         <Route path="contacts" element={<ContactsPage />} />
 
         {/* User Pricing & Plans */}
+        <Route path="subscription" element={<UserPlansPage />} />
         <Route path="plans" element={<UserPlansPage />} />
-        <Route path="subscription" element={<Navigate to="/plans" replace />} />
 
         {/* Admin Routes - Main admin panel is /admin */}
         <Route 

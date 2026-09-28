@@ -36,5 +36,7 @@ Thumbs.db
 
 # Raw UI template assets & archives
 ADMIN UI/
-WP-UI-design-main/
+/WP-UI-design-main/
+!frontend design/
+!frontend design/**
 *.zip

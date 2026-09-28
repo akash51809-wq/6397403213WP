@@ -229,6 +229,9 @@ function startAutoPing() {
 
 
 const distPath = path.join(__dirname, 'whatsapp-dashboard', 'dist');
+const websitePath = fs.existsSync(path.join(__dirname, 'frontend design', 'WP-UI-design-main', 'index.html'))
+  ? path.join(__dirname, 'frontend design', 'WP-UI-design-main')
+  : path.join(__dirname, 'frontend design');
 
 app.get('/ping', (req, res) => {
   res.status(200).json({
@@ -266,10 +269,49 @@ app.use('/api/settings/company', express.json({ limit: '15mb' }));
 app.use('/api/user/settings/auto-image', express.json({ limit: '15mb' }));
 app.use(authRouter);
 app.use(botApp);
+
+// 1. Serve static files from marketing website and React dashboard
+app.use(express.static(websitePath, { index: false }));
 app.use(express.static(distPath, { index: false }));
 
+// 2. Marketing website subpages (plans, api-docs, contact, privacy, refund, security, terms)
+const marketingSubpages = ['plans', 'api-docs', 'contact', 'privacy', 'refund', 'security', 'terms'];
+marketingSubpages.forEach(sp => {
+  app.get(`/${sp}`, (req, res) => {
+    const cleanPath = req.originalUrl.split('?')[0];
+    if (!cleanPath.endsWith('/')) {
+      const query = req.url.slice(req.path.length);
+      return res.redirect(301, `/${sp}/${query}`);
+    }
+    const file = path.join(websitePath, sp, 'index.html');
+    if (fs.existsSync(file)) return res.sendFile(file);
+    const notFound = path.join(websitePath, '404.html');
+    if (fs.existsSync(notFound)) return res.status(404).sendFile(notFound);
+    res.status(404).send('Not Found');
+  });
+});
+
+// 3. Marketing website home page
+app.get(['/', '/index.html'], (req, res) => {
+  const homeFile = path.join(websitePath, 'index.html');
+  if (fs.existsSync(homeFile)) return res.sendFile(homeFile);
+  const fallbackDashboard = path.join(distPath, 'index.html');
+  return res.sendFile(fallbackDashboard);
+});
+
+// 4. React Dashboard SPA fallback (/login, /signup, /dashboard, /subscription, /admin, etc.)
 app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/media') && !req.path.startsWith('/send-text') && req.path !== '/ping') {
+  if (
+    req.method === 'GET' &&
+    !req.path.startsWith('/api/') &&
+    !req.path.startsWith('/media') &&
+    !req.path.startsWith('/send-text') &&
+    req.path !== '/ping'
+  ) {
+    const ext = path.extname(req.path);
+    if (ext && ext !== '.html') {
+      return next();
+    }
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
       return res.sendFile(indexPath);

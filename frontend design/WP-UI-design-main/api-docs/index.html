@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Easy Recharge Solution — API Docs</title>
+<link rel="stylesheet" href="./page.css?v=20260927-6">
+<link rel="stylesheet" href="../site-nav.css?v=20260928-4">
+</head>
+<body>
+<header class="site-nav">
+  <a class="brand" href="../"><span class="logo">⚡</span><span><b>Easy Recharge Solution</b><small>WHATSAPP AUTOMATION</small></span></a>
+  <button class="mobile-menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+  <nav>
+    <a href="../">Home</a><a href="../#why">Why Us</a><a href="../#features">Features</a><a href="../#how-it-works">How It Works</a><a href="../#developer-api">API</a><a href="../plans/">Pricing</a><a href="./">API Docs</a><a href="../contact/">Contact</a>
+  </nav>
+  <a class="nav-cta" href="/login">Login</a>
+</header>
+<main>
+<section class="intro"><span class="eyebrow">DEVELOPER DOCUMENTATION</span><h1>WhatsApp API Documentation</h1><p>Static examples for integrating message and group messaging endpoints.</p></section>
+<section class="api-card"><div class="api-head"><span>01</span><div><h2>Send Message API</h2><p>Send a WhatsApp message to a single recipient.</p></div><b>POST</b></div><div class="endpoint">POST <code>https://your-domain.com/api/message/send</code></div><h3>Request Body</h3><pre>{
+  "number": "+919876543210",
+  "message": "Hello from API",
+  "session": "main"
+}</pre><h3>Response</h3><pre>{
+  "success": true,
+  "message": "Message sent"
+}</pre></section>
+<section class="api-card"><div class="api-head"><span>02</span><div><h2>Send Message in Group</h2><p>Send a WhatsApp message to a selected group.</p></div><b>POST</b></div><div class="endpoint">POST <code>https://your-domain.com/api/group/message/send</code></div><h3>Request Body</h3><pre>{
+  "groupId": "120363012345678901",
+  "message": "Hello group",
+  "session": "main"
+}</pre><h3>Response</h3><pre>{
+  "success": true,
+  "message": "Group message sent"
+}</pre></section>
+<div class="note"><strong>API Base URL</strong><span>Replace <b>your-domain.com</b> with the domain where your WhatsApp API is hosted.</span></div>
+</main>
+<footer><span>© 2026 Easy Recharge Solution</span><span>Developed by <strong>PRINCE GOYAL</strong></span></footer>
+<script src="../site-nav.js"></script>
+</body>
+</html>

@@ -197,7 +197,7 @@ export function Sidebar() {
         </NavLink>
 
         <NavLink 
-          to="/plans" 
+          to="/subscription" 
           className={({ isActive }) => (isActive ? 'active' : '')} 
           onClick={closeMobile}
           data-title="Plans"
