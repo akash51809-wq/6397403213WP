@@ -19,23 +19,29 @@ export function ApiPage() {
 
   const loadApiData = useCallback(() => {
     setLoading(true)
+    setErr('')
     api('/api/user/api-token')
       .then(res => {
         setData(res)
         setLoading(false)
       })
-      .catch(() => {
-        api('/api/settings/api-token')
-          .then(res => {
-            setData(res)
-            setLoading(false)
-          })
-          .catch(e => {
-            setErr(e.message)
-            setLoading(false)
-          })
+      .catch(e => {
+        if (user?.role === 'admin') {
+          api('/api/settings/api-token')
+            .then(res => {
+              setData(res)
+              setLoading(false)
+            })
+            .catch(adminErr => {
+              setErr(adminErr.message)
+              setLoading(false)
+            })
+        } else {
+          setErr(e.message || 'API Token लोड करने में समस्या हुई।')
+          setLoading(false)
+        }
       })
-  }, [])
+  }, [user])
 
   useEffect(() => {
     loadApiData()
@@ -52,11 +58,12 @@ export function ApiPage() {
   const regenerateToken = async () => {
     if (!window.confirm('क्या आप नया API Token जनरेट करना चाहते हैं? पुराना टोकन काम करना बंद कर देगा।')) return
     setRegenLoading(true)
+    setErr('')
     try {
       const res = await api('/api/user/api-token/regenerate', { method: 'POST' })
       if (res.success) {
         if (notify) notify('नया API Token सफलतापूर्वक बन गया! इसे सुरक्षित स्थान पर सहेजें।')
-        setData(prev => ({ ...(prev || {}), ...res, token: res.token }))
+        setData(prev => ({ ...(prev || {}), ...res, token: res.token, isMasked: false }))
       }
     } catch (e) {
       alert(e.message || 'Token regeneration failed')
@@ -152,11 +159,18 @@ export function ApiPage() {
               className="copy-btn" 
               onClick={regenerateToken} 
               disabled={regenLoading} 
-              title="Regenerate API Token"
+              title={data?.isMasked ? "नया API Token जनरेट करें" : "API Token री-जनरेट करें"}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
             >
               <span>{regenLoading ? '...' : '🔄'}</span>
+              <span>{regenLoading ? 'Generating...' : (data?.isMasked ? 'Generate Key' : 'Regenerate')}</span>
             </button>
           </div>
+          {data?.isMasked && (
+            <small style={{ display: 'block', marginTop: 6, color: '#6b7280', fontSize: 11 }}>
+              टोकन सुरक्षित है। पूरा टोकन देखने व उपयोग करने के लिए 🔄 Generate Key पर क्लिक करें।
+            </small>
+          )}
         </div>
 
         <div className="cred-card">

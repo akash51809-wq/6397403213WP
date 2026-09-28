@@ -2539,13 +2539,47 @@ app.get('/api/send-status/:jobId', authRequired, (req, res) => {
    API & WEBHOOKS SYSTEM (EXTERNAL /send-text ENDPOINTS)
 ========================================================= */
 
-app.get('/api/settings/api-token', authRequired, adminRequired, (req, res) => {
+app.get('/api/settings/api-token', authRequired, async (req, res) => {
     try {
+        const host = req.get('host') || `localhost:${PORT}`;
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+        const localBaseUrl = `${protocol}://${host}`;
+
+        if (!req.user || req.user.role !== 'admin') {
+            const { getUserSession } = require('./userSessions');
+            const { WhatsAppSession } = require('./db');
+            const active = getUserSession ? getUserSession(req.user.userId) : null;
+            const dbSession = WhatsAppSession ? await WhatsAppSession.findOne({ ownerUserId: req.user.userId }).catch(() => null) : null;
+            const rawNumber = active?.connectedNumber || dbSession?.phone || req.user.mobile || '';
+            const session10 = String(rawNumber).replace(/\D/g, '').slice(-10);
+            const isConnected = active?.status === 'connected';
+            const userToken = req.user.apiToken || (req.user.apiTokenPrefix && req.user.apiTokenLast4 ? `${req.user.apiTokenPrefix}••••••••••••${req.user.apiTokenLast4}` : 'wa_••••••••••••••••');
+
+            return res.json({
+                success: true,
+                settings: {
+                    token: userToken,
+                    isEnabled: true,
+                    webhookUrl: '',
+                    webhookEnabled: false,
+                    totalSent: 0
+                },
+                token: userToken,
+                isMasked: !req.user.apiToken,
+                session: session10 || null,
+                connectedNumber: rawNumber || null,
+                connectionStatus: isConnected ? 'connected' : (active?.status || dbSession?.status || 'disconnected'),
+                status: isConnected ? 'connected' : (active?.status || dbSession?.status || 'disconnected'),
+                localBaseUrl,
+                baseUrl: localBaseUrl,
+                sampleUrl: `${localBaseUrl}/send-text?token=${userToken}&to=9876543210&message=Hello${session10 ? `&session=${session10}` : ''}`,
+                sampleLocalUrl: `${localBaseUrl}/send-text?token=${userToken}&to=9876543210&message=Hello${session10 ? `&session=${session10}` : ''}`,
+                sampleProductionUrl: `https://local-whatsapp.onrender.com/send-text?token=${userToken}&to=9876543210&message=Hello${session10 ? `&session=${session10}` : ''}`
+            });
+        }
+
         const settings = getApiSettings();
         const activeSession = connectedNumber ? String(connectedNumber).replace(/\D/g, '').slice(-10) : '';
-        const host = req.get('host') || `localhost:${PORT}`;
-        const protocol = req.protocol || 'http';
-        const localBaseUrl = `${protocol}://${host}`;
 
         res.json({
             success: true,
@@ -2558,6 +2592,7 @@ app.get('/api/settings/api-token', authRequired, adminRequired, (req, res) => {
                 lastUsed: settings.lastUsed,
                 totalSent: settings.totalSent || 0
             },
+            token: settings.token,
             session: activeSession,
             connectedNumber: connectedNumber,
             connectionStatus: connectionStatus,
@@ -2571,8 +2606,26 @@ app.get('/api/settings/api-token', authRequired, adminRequired, (req, res) => {
     }
 });
 
-app.post('/api/settings/api-token/regenerate', authRequired, adminRequired, (req, res) => {
+app.post('/api/settings/api-token/regenerate', authRequired, async (req, res) => {
     try {
+        if (!req.user || req.user.role !== 'admin') {
+            const { generateApiTokenData } = require('./auth');
+            const tokenData = generateApiTokenData();
+            req.user.apiToken = tokenData.rawToken;
+            req.user.apiTokenHash = tokenData.hash;
+            req.user.apiTokenPrefix = tokenData.prefix;
+            req.user.apiTokenLast4 = tokenData.last4;
+            req.user.updatedAt = new Date();
+            await req.user.save();
+
+            return res.json({
+                success: true,
+                token: tokenData.rawToken,
+                isMasked: false,
+                message: 'नया API Token सफलतापूर्वक जनरेट हो गया है।'
+            });
+        }
+
         const settings = getApiSettings();
         const newToken = generateToken12();
         settings.token = newToken;

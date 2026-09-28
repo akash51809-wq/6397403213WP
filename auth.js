@@ -149,7 +149,7 @@ async function ensureDefaultPlans() {
         validity: '30 Days',
         validityDays: 30,
         deviceLimit: '1 Free + 1 Add-on',
-        apiAccess: false,
+        apiAccess: true,
         webAccess: true,
         bulkMsg: false,
         groupOption: false,
@@ -373,7 +373,7 @@ async function getUserPlanFeatures(user) {
   return {
     active: !isExpired,
     isExpired: Boolean(isExpired),
-    apiAccess: Boolean(planDoc?.apiAccess),
+    apiAccess: !isExpired, // Every active user has API access enabled so all users can generate and use their own API key
     webAccess: planDoc?.webAccess !== false,
     bulkMsg: Boolean(planDoc?.bulkMsg),
     groupOption: Boolean(planDoc?.groupOption),
@@ -1276,28 +1276,25 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
 
 router.get('/api/user/api-token', authRequired, async (req, res) => {
   try {
-    const features = await getUserPlanFeatures(req.user);
-    if (!features.apiAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'API Access आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
-      });
-    }
+    let rawToken = req.user.apiToken || null;
+    let newlyCreated = false;
 
     if (!req.user.apiTokenHash && !req.user.apiToken) {
       const tokenData = generateApiTokenData();
+      req.user.apiToken = tokenData.rawToken;
       req.user.apiTokenHash = tokenData.hash;
       req.user.apiTokenPrefix = tokenData.prefix;
       req.user.apiTokenLast4 = tokenData.last4;
-      req.user.apiToken = null;
       await req.user.save();
+      rawToken = tokenData.rawToken;
+      newlyCreated = true;
     } else if (req.user.apiToken && !req.user.apiTokenHash) {
       // Migrate legacy plaintext token
       req.user.apiTokenHash = hashText(req.user.apiToken);
       req.user.apiTokenPrefix = String(req.user.apiToken).slice(0, 7);
       req.user.apiTokenLast4 = String(req.user.apiToken).slice(-4);
-      req.user.apiToken = null;
       await req.user.save();
+      rawToken = req.user.apiToken;
     }
 
     const { getUserSession } = require('./userSessions');
@@ -1321,17 +1318,18 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const baseUrl = `${protocol}://${host}`;
     
-    // Masked token: token is only shown in full when newly created/regenerated
-    const displayToken = (req.user.apiTokenPrefix && req.user.apiTokenLast4)
-      ? `${req.user.apiTokenPrefix}••••••••••••${req.user.apiTokenLast4}`
-      : 'wa_••••••••••••••••';
-    const sampleToken = req.user.apiTokenPrefix ? `${req.user.apiTokenPrefix}...` : 'YOUR_API_TOKEN';
+    const displayToken = rawToken || (
+      (req.user.apiTokenPrefix && req.user.apiTokenLast4)
+        ? `${req.user.apiTokenPrefix}••••••••••••${req.user.apiTokenLast4}`
+        : 'wa_••••••••••••••••'
+    );
+    const sampleToken = rawToken || (req.user.apiTokenPrefix ? `${req.user.apiTokenPrefix}...` : 'YOUR_API_TOKEN');
     const sampleUrl = `${baseUrl}/send-text?token=${sampleToken}&to=9876543210&message=Hello&session=${session10 || 'YOUR_10_DIGIT_NUMBER'}`;
 
     res.json({
       success: true,
       token: displayToken,
-      isMasked: true,
+      isMasked: !rawToken,
       hasToken: Boolean(req.user.apiTokenHash || req.user.apiToken),
       session: session10 || null,
       connectedNumber: rawNumber || null,
@@ -1348,27 +1346,19 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
 
 router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => {
   try {
-    const features = await getUserPlanFeatures(req.user);
-    if (!features.apiAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'API Access आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
-      });
-    }
-
     const tokenData = generateApiTokenData();
+    req.user.apiToken = tokenData.rawToken;
     req.user.apiTokenHash = tokenData.hash;
     req.user.apiTokenPrefix = tokenData.prefix;
     req.user.apiTokenLast4 = tokenData.last4;
-    req.user.apiToken = null; // NEVER store plaintext token in DB
     req.user.updatedAt = new Date();
     await req.user.save();
 
     res.json({
       success: true,
-      token: tokenData.rawToken, // Full token returned ONLY upon creation/regeneration!
+      token: tokenData.rawToken,
       isMasked: false,
-      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है। इसे सुरक्षित स्थान पर सहेजें, यह केवल अभी दिखाई देगा।'
+      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है। इसे सुरक्षित स्थान पर सहेजें।'
     });
   } catch (error) {
     console.error('Regenerate API token error:', error);

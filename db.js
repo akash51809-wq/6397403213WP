@@ -184,7 +184,7 @@ async function initTables(pool) {
       "validity" VARCHAR(50) DEFAULT '30 Days',
       "validityDays" INT DEFAULT 30,
       "deviceLimit" VARCHAR(50) DEFAULT '1 Free + 1 Add-on',
-      "apiAccess" BOOLEAN DEFAULT FALSE,
+      "apiAccess" BOOLEAN DEFAULT TRUE,
       "webAccess" BOOLEAN DEFAULT TRUE,
       "bulkMsg" BOOLEAN DEFAULT FALSE,
       "groupOption" BOOLEAN DEFAULT FALSE,
@@ -326,7 +326,7 @@ async function initTables(pool) {
         const prefix = String(token).slice(0, 7);
         const last4 = String(token).slice(-4);
         await pool.query(
-          `UPDATE users SET "apiTokenHash" = $1, "apiTokenPrefix" = $2, "apiTokenLast4" = $3, "apiToken" = NULL WHERE "userId" = $4`,
+          `UPDATE users SET "apiTokenHash" = $1, "apiTokenPrefix" = $2, "apiTokenLast4" = $3 WHERE "userId" = $4`,
           [hash, prefix, last4, row.userId]
         );
       }
@@ -893,7 +893,7 @@ const Plan = createModel('plans', 'planId', {
   validity: '30 Days',
   validityDays: 30,
   deviceLimit: '1 Free + 1 Add-on',
-  apiAccess: false,
+  apiAccess: true,
   webAccess: true,
   bulkMsg: false,
   groupOption: false,
