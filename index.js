@@ -10,7 +10,13 @@ const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const express = require('express');
 const cors = require('cors');
-const { authRequired, adminRequired } = require('./auth');
+const { 
+    authRequired, 
+    adminRequired, 
+    getUserPlanFeatures, 
+    CONFIG_ADMIN_PHONE, 
+    CONFIG_ADMIN_DEFAULT_USER_ID 
+} = require('./auth');
 const { connection: dbConnection } = require('./db');
 const mongoose = { connection: dbConnection };
 
@@ -84,11 +90,18 @@ if (!fs.existsSync(MEDIA_DIR)) {
 // Media Storage Route: allows auto_img and company assets preview, protects against path traversal
 app.get('/media/:filename', (req, res, next) => {
     try {
-        const rawFilename = req.params.filename || '';
+        const rawFilename = String(req.params.filename || '').trim();
+        if (!rawFilename || rawFilename.includes('\0') || rawFilename.includes('..') || rawFilename.includes('/') || rawFilename.includes('\\')) {
+            return res.status(400).json({ success: false, message: 'Invalid media filename parameter.' });
+        }
         const safeFilename = path.basename(rawFilename);
-        const filePath = path.resolve(MEDIA_DIR, safeFilename);
+        if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
+            return res.status(400).json({ success: false, message: 'Invalid media filename.' });
+        }
+        const resolvedBase = path.resolve(MEDIA_DIR);
+        const filePath = path.resolve(resolvedBase, safeFilename);
 
-        if (!filePath.startsWith(path.resolve(MEDIA_DIR))) {
+        if (!filePath.startsWith(resolvedBase + path.sep)) {
             return res.status(403).json({ success: false, message: 'Access forbidden: invalid path.' });
         }
 
@@ -717,11 +730,13 @@ function updateIncomingReadStatus(id, isRead = true) {
     }
 }
 
-function markChatAsRead(chatJid) {
+function markChatAsRead(chatJid, callerUser = null) {
     try {
         const messages = getIncomingMessages();
+        const callerUserId = callerUser && callerUser.role !== 'admin' ? callerUser.userId : null;
         let changed = false;
         messages.forEach(m => {
+            if (callerUserId && m.ownerUserId && m.ownerUserId !== callerUserId) return;
             if ((m.chatJid === chatJid || m.from === chatJid) && !m.isRead) {
                 m.isRead = true;
                 changed = true;
@@ -737,11 +752,21 @@ function markChatAsRead(chatJid) {
     }
 }
 
-function markAllIncomingRead() {
+function markAllIncomingRead(callerUser = null) {
     try {
         const messages = getIncomingMessages();
-        messages.forEach(m => { m.isRead = true; });
-        persistIncomingMessages();
+        const callerUserId = callerUser && callerUser.role !== 'admin' ? callerUser.userId : null;
+        let changed = false;
+        messages.forEach(m => { 
+            if (callerUserId && m.ownerUserId && m.ownerUserId !== callerUserId) return;
+            if (!m.isRead) {
+                m.isRead = true; 
+                changed = true;
+            }
+        });
+        if (changed) {
+            persistIncomingMessages();
+        }
         return true;
     } catch (e) {
         console.error('Error marking all incoming read:', e);
@@ -749,10 +774,18 @@ function markAllIncomingRead() {
     }
 }
 
-function deleteChatMessages(chatJid) {
+function deleteChatMessages(chatJid, callerUser = null) {
     try {
         const messages = getIncomingMessages();
-        const filtered = messages.filter(m => m.chatJid !== chatJid && m.from !== chatJid);
+        const callerUserId = callerUser && callerUser.role !== 'admin' ? callerUser.userId : null;
+        const filtered = messages.filter(m => {
+            const matchesChat = (m.chatJid === chatJid || m.from === chatJid);
+            if (!matchesChat) return true;
+            if (callerUserId && m.ownerUserId && m.ownerUserId !== callerUserId) {
+                return true; // Preserve other users' messages
+            }
+            return false;
+        });
         incomingMessagesCache = filtered;
         persistIncomingMessages();
         return true;
@@ -845,13 +878,13 @@ function getActiveAdminSocket() {
     }
     try {
         const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-        const adminPhone = process.env.ADMIN_PHONE || '8840457632';
-        const match = getSessionByPhoneOrUserId(adminPhone);
+        const adminPhone = CONFIG_ADMIN_PHONE;
+        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
         if (match?.session?.socket && match?.session?.status === 'connected' && Boolean(match.session.socket.user?.id)) {
             global.__waAdminSocket = match.session.socket;
             return match.session.socket;
         }
-        const userS = sessions?.get('USR59396382');
+        const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
         if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
             global.__waAdminSocket = userS.socket;
             return userS.socket;
@@ -874,7 +907,7 @@ app.get('/api/status', authRequired, adminRequired, async (req, res) => {
             }
         } catch {}
     }
-    const cleanNumber = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : (process.env.ADMIN_PHONE || '8840457632'))).replace(/\D/g, '');
+    const cleanNumber = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
     const jid = cleanNumber ? `${cleanNumber}@s.whatsapp.net` : null;
 
     res.json({
@@ -893,7 +926,7 @@ app.get('/api/qr', authRequired, adminRequired, async (req, res) => {
     // If admin is connected (dedicated or bridged active session), return connected
     const activeSock = getActiveAdminSocket();
     if (connectionStatus === 'connected' || (activeSock && typeof activeSock.sendMessage === 'function')) {
-        const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : (process.env.ADMIN_PHONE || '8840457632'))).replace(/\D/g, '');
+        const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
         return res.json({ status: 'connected', number: num });
     }
     // If admin credentials exist in MongoDB, Admin is paired: NEVER return a QR code!
@@ -903,7 +936,7 @@ app.get('/api/qr', authRequired, adminRequired, async (req, res) => {
         hasAdminCredsInDb = Boolean(await SessionAuth.exists({ id: 'admin_creds.json' }));
     } catch {}
     if (hasAdminCredsInDb) {
-        return res.json({ status: 'connecting', number: connectedNumber || '8840457632', qr: null });
+        return res.json({ status: 'connecting', number: connectedNumber || CONFIG_ADMIN_PHONE, qr: null });
     }
     if (!latestQR) {
         return res.json({ status: 'waiting' });
@@ -919,7 +952,7 @@ app.get('/api/qr', authRequired, adminRequired, async (req, res) => {
 app.get('/api/whatsapp/qr', authRequired, adminRequired, async (req, res) => {
     const activeSock = getActiveAdminSocket();
     if (connectionStatus === 'connected' || (activeSock && typeof activeSock.sendMessage === 'function')) {
-        const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : (process.env.ADMIN_PHONE || '8840457632'))).replace(/\D/g, '');
+        const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
         return res.json({ success: true, status: 'connected', number: num });
     }
     // If admin credentials exist in MongoDB, Admin is paired: NEVER return a QR code!
@@ -929,7 +962,7 @@ app.get('/api/whatsapp/qr', authRequired, adminRequired, async (req, res) => {
         hasAdminCredsInDb = Boolean(await SessionAuth.exists({ id: 'admin_creds.json' }));
     } catch {}
     if (hasAdminCredsInDb) {
-        return res.json({ success: true, status: 'connecting', number: connectedNumber || '8840457632', qr: null });
+        return res.json({ success: true, status: 'connecting', number: connectedNumber || CONFIG_ADMIN_PHONE, qr: null });
     }
     if (!latestQR) {
         return res.json({ success: true, status: 'waiting' });
@@ -1059,27 +1092,27 @@ app.post('/api/incoming/mark-read', authRequired, async (req, res) => {
     try {
         const { id, chatJid, isRead, all } = req.body || {};
         if (all) {
-            markAllIncomingRead();
-            broadcastIncomingEvent('read_update', { all: true });
+            markAllIncomingRead(req.user);
+            broadcastIncomingEvent('read_update', { all: true }, req.user.role === 'admin' ? null : req.user.userId);
             return res.json({ success: true, message: 'All messages marked as read' });
         }
         if (chatJid) {
-            markChatAsRead(chatJid);
-            if (sock && connectionStatus === 'connected') {
+            markChatAsRead(chatJid, req.user);
+            if (sock && connectionStatus === 'connected' && req.user.role === 'admin') {
                 try {
-                    const unreadList = getIncomingMessages().filter(m => (m.chatJid === chatJid || m.from === chatJid) && !m.fromMe);
+                    const unreadList = getIncomingMessages(req.user).filter(m => (m.chatJid === chatJid || m.from === chatJid) && !m.fromMe);
                     if (unreadList.length > 0) {
                         const target = unreadList[0];
                         await sock.readMessages([{ remoteJid: chatJid, id: target.id, participant: target.isGroup ? (target.from + '@s.whatsapp.net') : undefined }]);
                     }
                 } catch {}
             }
-            broadcastIncomingEvent('read_update', { chatJid });
+            broadcastIncomingEvent('read_update', { chatJid }, req.user.role === 'admin' ? null : req.user.userId);
             return res.json({ success: true, message: 'Chat marked as read' });
         }
         if (id) {
             const ok = updateIncomingReadStatus(id, isRead !== undefined ? Boolean(isRead) : true);
-            broadcastIncomingEvent('read_update', { id });
+            broadcastIncomingEvent('read_update', { id }, req.user.role === 'admin' ? null : req.user.userId);
             return res.json({ success: ok, message: ok ? 'Read status updated' : 'Message not found' });
         }
         return res.status(400).json({ success: false, message: 'id, chatJid or all:true required' });
@@ -1454,8 +1487,8 @@ app.delete('/api/incoming/chat', authRequired, (req, res) => {
         if (!chatJid) {
             return res.status(400).json({ success: false, message: 'chatJid is required' });
         }
-        deleteChatMessages(chatJid);
-        broadcastIncomingEvent('chat_deleted', { chatJid }, req.user.userId);
+        deleteChatMessages(chatJid, req.user);
+        broadcastIncomingEvent('chat_deleted', { chatJid }, req.user.role === 'admin' ? null : req.user.userId);
         res.json({ success: true, message: 'Chat messages cleared successfully' });
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
@@ -1675,6 +1708,20 @@ app.get('/api/whatsapp/list', authRequired, adminRequired, (req, res) => {
 
 app.get('/api/whatsapp/groups', authRequired, async (req, res) => {
     try {
+        const features = await getUserPlanFeatures(req.user);
+        if (features.isExpired) {
+            return res.status(403).json({
+                success: false,
+                message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+            });
+        }
+        if (!features.groupOption) {
+            return res.status(403).json({
+                success: false,
+                message: 'Group messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+            });
+        }
+
         const { findOrLoadSession } = require('./userSessions');
         const sessionParam = req.query.session || null;
         const match = await findOrLoadSession(sessionParam, req.user);
@@ -1769,6 +1816,20 @@ app.get('/api/whatsapp/groups', authRequired, async (req, res) => {
 
 app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (req, res) => {
     try {
+        const features = await getUserPlanFeatures(req.user);
+        if (features.isExpired) {
+            return res.status(403).json({
+                success: false,
+                message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+            });
+        }
+        if (!features.groupOption) {
+            return res.status(403).json({
+                success: false,
+                message: 'Group messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+            });
+        }
+
         const { groupIds, message, session, attachment } = req.body;
 
         const { findOrLoadSession } = require('./userSessions');
@@ -1891,6 +1952,20 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
 
 app.post('/api/whatsapp/extract-members', authRequired, async (req, res) => {
     try {
+        const features = await getUserPlanFeatures(req.user);
+        if (features.isExpired) {
+            return res.status(403).json({
+                success: false,
+                message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+            });
+        }
+        if (!features.groupOption) {
+            return res.status(403).json({
+                success: false,
+                message: 'Group member extraction आपके वर्तमान प्लान में उपलब्ध नहीं है।'
+            });
+        }
+
         const { groupIds } = req.body;
 
         const { findOrLoadSession } = require('./userSessions');
@@ -2110,6 +2185,21 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
                 success: false,
                 message: 'कोई valid 10 digit Indian number नहीं मिला',
                 invalidNumbers
+            });
+        }
+
+        const features = await getUserPlanFeatures(req.user);
+        if (features.isExpired) {
+            return res.status(403).json({
+                success: false,
+                message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+            });
+        }
+
+        if (validNumbers.length > 1 && !features.bulkMsg) {
+            return res.status(403).json({
+                success: false,
+                message: 'Bulk messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
             });
         }
 
@@ -2454,6 +2544,20 @@ async function handleSendText(req, res) {
             return res.status(403).json({ status: false, message: "Forbidden: API access is currently paused or disabled in settings." });
         }
 
+        // Plan Feature Gating for regular user API tokens (403 Forbidden)
+        if (user && !isGlobalAdmin && user.role !== 'admin') {
+            const features = await getUserPlanFeatures(user);
+            if (features.isExpired) {
+                return res.status(403).json({ status: false, message: "Forbidden: Your subscription plan has expired. Please renew your plan." });
+            }
+            if (!features.apiAccess) {
+                return res.status(403).json({ status: false, message: "Forbidden: API access is not included in your current plan. Please upgrade your plan." });
+            }
+            if (isGroup && !features.groupOption) {
+                return res.status(403).json({ status: false, message: "Forbidden: Group messaging is not enabled in your current plan." });
+            }
+        }
+
         // 2. Resolve WhatsApp Session and Socket
         let activeSocket = null;
         let fromNumber = null;
@@ -2482,7 +2586,7 @@ async function handleSendText(req, res) {
             activeSocket = getActiveAdminSocket();
             const adminPhone = activeSocket?.user?.id 
                 ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
-                : (connectedNumber || '8840457632');
+                : (connectedNumber || CONFIG_ADMIN_PHONE);
             const adminPhone10 = String(adminPhone).replace(/\D/g, '').slice(-10);
             if (activeSocket) {
                 fromNumber = adminPhone;
@@ -2809,7 +2913,7 @@ async function startBot() {
                     console.log('[Admin WhatsApp] Admin phone already connected via active session. Suppressing QR.');
                     connectionStatus = 'connected';
                     latestQR = null;
-                    const cleanAdminNum = (activeAdmin.user?.id ? activeAdmin.user.id.split(':')[0].split('@')[0] : (process.env.ADMIN_PHONE || '8840457632')).replace(/\D/g, '');
+                    const cleanAdminNum = (activeAdmin.user?.id ? activeAdmin.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE).replace(/\D/g, '');
                     connectedNumber = cleanAdminNum;
                     broadcastIncomingEvent('connection_status', { status: 'connected', number: connectedNumber });
                     const { recordAdminWhatsAppSession } = require('./auth');
@@ -2850,7 +2954,7 @@ async function startBot() {
             if (connection === 'open') {
                 connectionStatus = 'connected';
                 latestQR = null;
-                connectedNumber = newSock.user?.id?.split(':')[0]?.split('@')[0] || connectedNumber || '8840457632';
+                connectedNumber = newSock.user?.id?.split(':')[0]?.split('@')[0] || connectedNumber || CONFIG_ADMIN_PHONE;
 
                 // Refresh global socket reference for auth.js OTP sending
                 global.__waAdminSocket = newSock;

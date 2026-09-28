@@ -5,6 +5,9 @@ const { WhatsAppSession } = require('./auth');
 const QRCode = require('qrcode');
 const { Boom } = require('@hapi/boom');
 
+const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '8840457632').trim();
+const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || 'USR59396382').trim();
+
 const sessions = new Map();
 
 async function startUserSession(userId) {
@@ -407,7 +410,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
 
     const adminPhone = global.__waAdminSocket?.user?.id 
         ? String(global.__waAdminSocket.user.id).split(':')[0].replace(/\D/g, '') 
-        : (process.env.ADMIN_PHONE || '8840457632');
+        : CONFIG_ADMIN_PHONE;
     const adminPhone10 = String(adminPhone).replace(/\D/g, '').slice(-10);
 
     // 1. SECURITY CHECK: Non-admin users cannot access the Admin session
@@ -432,7 +435,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
             };
         }
         // Fallback: check if adminPhone is connected in user sessions
-        const match = getSessionByPhoneOrUserId(adminPhone);
+        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
         if (match?.session?.socket && match?.session?.status === 'connected' && Boolean(match.session.socket.user?.id)) {
             global.__waAdminSocket = match.session.socket;
             return {
@@ -445,7 +448,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
                 }
             };
         }
-        const userS = sessions.get('USR59396382');
+        const userS = sessions.get(CONFIG_ADMIN_DEFAULT_USER_ID);
         if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
             global.__waAdminSocket = userS.socket;
             return {

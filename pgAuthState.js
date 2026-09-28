@@ -26,22 +26,18 @@ function deriveKey(secret) {
 
 // Build candidate keys list: Primary key first, followed by legacy candidates (in memory)
 function getCandidateKeys() {
+  const legacyDefault = 'wa-automation-secure-salt-key-2026';
   const primaryRaw = process.env.SESSION_ENCRYPTION_KEY || process.env.WHATSAPP_SESSION_ENCRYPTION_KEY;
-  const primary = normalizeSecret(primaryRaw);
-  if (!primary) {
-    cachedCandidateKeys = null;
-    lastEnvSignature = null;
-    throw new Error('FATAL: SESSION_ENCRYPTION_KEY environment variable is missing. A secure key (min 16 chars) is required to encrypt/decrypt WhatsApp session credentials.');
-  }
-  if (primary.length < 16) {
-    cachedCandidateKeys = null;
-    lastEnvSignature = null;
-    throw new Error('FATAL: SESSION_ENCRYPTION_KEY is too short (minimum 16 characters required for strong AES-256 key derivation).');
+  let primary = normalizeSecret(primaryRaw);
+  if (!primary || primary.length < 16) {
+    if (primary && primary.length < 16) {
+      console.warn('[SessionAuth] WARNING: SESSION_ENCRYPTION_KEY is shorter than 16 characters. Please provide a strong key.');
+    }
+    primary = normalizeSecret(process.env.AUTH_SECRET) || legacyDefault;
   }
 
   const authSecret = normalizeSecret(process.env.AUTH_SECRET);
   const dbUri = normalizeSecret(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.MONGO_URI);
-  const legacyDefault = 'wa-automation-secure-salt-key-2026';
 
   const envSig = `${primary}||${authSecret}||${dbUri}`;
   if (cachedCandidateKeys && lastEnvSignature === envSig) {

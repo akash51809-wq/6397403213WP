@@ -40,13 +40,14 @@ try {
       if (!current || typeof current.sendMessage !== 'function') {
         try {
           const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = process.env.ADMIN_PHONE || '8840457632';
-          const match = getSessionByPhoneOrUserId(adminPhone);
+          const adminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '8840457632';
+          const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
           if (match?.session?.socket && match?.session?.status === 'connected') {
             current = match.session.socket;
             global.__waAdminSocket = current;
           } else {
-            const userS = sessions?.get('USR59396382');
+            const fallbackUser = process.env.ADMIN_DEFAULT_USER_ID ? String(process.env.ADMIN_DEFAULT_USER_ID).trim() : 'USR59396382';
+            const userS = sessions?.get(fallbackUser);
             if (userS?.socket && userS?.status === 'connected') {
               current = userS.socket;
               global.__waAdminSocket = current;
@@ -92,7 +93,8 @@ try {
   console.error('[Baileys bridge] Setup failed:', error?.message || error);
 }
 
-const { router: authRouter, ensureAdminUser } = require('./auth');
+const { router: authRouter, ensureAdminUser, authRequired, adminRequired } = require('./auth');
+const cors = require('cors');
 
 let botApp = null;
 let botStartup = null;
@@ -109,6 +111,35 @@ if (!botApp) throw new Error('WhatsApp backend app could not be loaded from inde
 
 const app = express();
 app.disable('x-powered-by');
+
+// Strict CORS Configuration
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (process.env.NODE_ENV !== 'production') {
+      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+    }
+    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    if (process.env.RENDER_EXTERNAL_URL && origin === process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Api-Token']
+};
+app.use(cors(corsOptions));
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -212,7 +243,7 @@ app.get('/ping', (req, res) => {
   });
 });
 
-app.get('/api/system/autoping', (req, res) => {
+app.get('/api/system/autoping', authRequired, adminRequired, (req, res) => {
   res.json({
     success: true,
     stats: autoPingStats,
@@ -220,7 +251,7 @@ app.get('/api/system/autoping', (req, res) => {
   });
 });
 
-app.post('/api/system/autoping/trigger', async (req, res) => {
+app.post('/api/system/autoping/trigger', authRequired, adminRequired, async (req, res) => {
   await performAutoPing();
   res.json({
     success: true,

@@ -15,6 +15,36 @@ const {
 const mongoose = { connection };
 
 const router = express.Router();
+const { createRateLimiter } = require('./rateLimiter');
+
+// Configurable Admin & Fallback Parameters
+const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '8840457632').trim();
+const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || 'USR59396382').trim();
+
+// Security Rate Limiters
+const loginLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 15,
+  message: 'लॉगिन के अत्यधिक प्रयास। कृपया 5 मिनट बाद पुनः प्रयास करें।'
+});
+
+const otpLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  message: 'OTP अनुरोध सीमा समाप्त हो गई है। कृपया 10 मिनट बाद प्रयास करें।'
+});
+
+const passwordLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'पासवर्ड बदलने के अत्यधिक अनुरोध। कृपया 15 मिनट बाद प्रयास करें।'
+});
+
+const sendLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: 'संदेश भेजने की सीमा (Rate limit) पार हो गई है। कृपया 1 मिनट बाद प्रयास करें।'
+});
 
 const COMPANY_SETTINGS_FILE = path.join(__dirname, 'company_settings.json');
 
@@ -161,8 +191,12 @@ async function ensureDefaultPlans() {
 
 async function ensureAdminUser() {
   if (mongoose.connection.readyState !== 1) return null;
-  const username = process.env.ADMIN_USERNAME || 'admin';
-  const password = process.env.ADMIN_PASSWORD || 'admin123';
+  const username = (process.env.ADMIN_USERNAME || 'admin').trim();
+  let password = process.env.ADMIN_PASSWORD;
+  if (!password) {
+    password = crypto.randomBytes(12).toString('hex');
+    console.log(`[Security Advisory] ADMIN_PASSWORD environment variable was not set. Generated initial admin password: ${password}`);
+  }
   let admin = await User.findOne({ role: 'admin' });
   if (!admin) {
     admin = await User.create({
@@ -210,9 +244,21 @@ async function authRequired(req, res, next) {
   try {
     const header = req.headers.authorization || '';
     let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+    // URL ?token= authentication is restricted strictly to SSE stream endpoints
+    // where browser EventSource API cannot supply custom Authorization headers.
+    const isSseEndpoint = req.path === '/api/incoming/events' || req.headers.accept?.includes('text/event-stream');
     if (!token && req.query && req.query.token) {
-      token = String(req.query.token).trim();
+      if (isSseEndpoint) {
+        token = String(req.query.token).trim();
+      } else {
+        return res.status(401).json({
+          success: false,
+          message: 'URL query parameter token authentication is disabled for security. Please use Authorization: Bearer header.'
+        });
+      }
     }
+
     let user = await authenticateToken(token);
     if (!user && token) {
       try {
@@ -228,7 +274,48 @@ async function authRequired(req, res, next) {
   }
 }
 
-router.post('/api/auth/login', async (req, res) => {
+async function getUserPlanFeatures(user) {
+  if (!user) return { active: false, isExpired: true, apiAccess: false, webAccess: false, bulkMsg: false, groupOption: false, scheduleMsg: false };
+  if (user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN') {
+    return {
+      active: true,
+      isExpired: false,
+      apiAccess: true,
+      webAccess: true,
+      bulkMsg: true,
+      groupOption: true,
+      scheduleMsg: true,
+      dailyLimit: 999999
+    };
+  }
+
+  const isExpired = user.planExpiresAt && new Date(user.planExpiresAt).getTime() < Date.now();
+  const planName = String(user.plan || 'Standard').trim();
+  let planDoc = null;
+  try {
+    planDoc = await Plan.findOne({
+      $or: [
+        { name: new RegExp(`^${planName}$`, 'i') },
+        { planId: planName.toLowerCase() }
+      ]
+    }).lean();
+  } catch (err) {
+    console.warn('[PlanFeatures] Lookup error:', err.message);
+  }
+
+  return {
+    active: !isExpired,
+    isExpired: Boolean(isExpired),
+    apiAccess: Boolean(planDoc?.apiAccess),
+    webAccess: planDoc?.webAccess !== false,
+    bulkMsg: Boolean(planDoc?.bulkMsg),
+    groupOption: Boolean(planDoc?.groupOption),
+    scheduleMsg: Boolean(planDoc?.scheduleMsg),
+    dailyLimit: planDoc?.dailyLimit || '500/Day'
+  };
+}
+
+router.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
     await ensureAdminUser();
     const username = String(req.body?.username || '').trim();
@@ -247,7 +334,10 @@ router.post('/api/auth/login', async (req, res) => {
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return res.status(401).json({ success: false, message: 'Username या password गलत है।' });
     }
-    if ((user.mobile === '8840457632' || user.username === '8840457632' || user.username === 'admin') && user.role !== 'admin') {
+    const configuredAdminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '';
+    const configuredAdminUser = (process.env.ADMIN_USERNAME || 'admin').trim();
+    const isConfiguredAdmin = (configuredAdminPhone && (user.mobile === configuredAdminPhone || user.username === configuredAdminPhone)) || (user.username === configuredAdminUser);
+    if (isConfiguredAdmin && user.role !== 'admin') {
       user.role = 'admin';
       await user.save();
     }
@@ -284,13 +374,13 @@ function getLiveAdminWhatsAppSender() {
   if (!socket || typeof socket.sendMessage !== 'function') {
     try {
       const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-      const adminPhone = process.env.ADMIN_PHONE || '8840457632';
-      const match = getSessionByPhoneOrUserId(adminPhone);
+      const adminPhone = CONFIG_ADMIN_PHONE;
+      const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
       if (match?.session?.socket && match?.session?.status === 'connected') {
         socket = match.session.socket;
         global.__waAdminSocket = socket;
       } else {
-        const userS = sessions?.get('USR59396382');
+        const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
         if (userS?.socket && userS?.status === 'connected') {
           socket = userS.socket;
           global.__waAdminSocket = socket;
@@ -322,7 +412,7 @@ async function waitForAdminWhatsAppSender(timeoutMs = 8000) {
    OTP-BASED SIGNUP (Credentials sent via Admin WhatsApp)
 ========================================================= */
 
-router.post('/api/auth/signup/request-otp', async (req, res) => {
+router.post('/api/auth/signup/request-otp', otpLimiter, async (req, res) => {
   try {
     const mobile = cleanMobile(req.body?.mobile);
     if (!/^\d{10}$/.test(mobile)) {
@@ -358,7 +448,7 @@ router.post('/api/auth/signup/request-otp', async (req, res) => {
   }
 });
 
-router.post('/api/auth/signup/verify', async (req, res) => {
+router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
   try {
     const mobile = cleanMobile(req.body?.mobile);
     const otp = String(req.body?.otp || '').trim();
@@ -456,7 +546,7 @@ router.post('/api/auth/signup/verify', async (req, res) => {
    USER PASSWORD CHANGE (in user panel)
 ========================================================= */
 
-router.post('/api/auth/change-password', authRequired, async (req, res) => {
+router.post('/api/auth/change-password', passwordLimiter, authRequired, async (req, res) => {
   try {
     const currentPassword = String(req.body?.currentPassword || '');
     const newPassword = String(req.body?.newPassword || '').trim();
@@ -657,14 +747,14 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
       if (!isConn) {
         try {
           const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = process.env.ADMIN_PHONE || '8840457632';
-          const match = getSessionByPhoneOrUserId(adminPhone);
+          const adminPhone = CONFIG_ADMIN_PHONE;
+          const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
           if (match?.session?.socket && match?.session?.status === 'connected') {
             activeSock = match.session.socket;
             global.__waAdminSocket = activeSock;
             isConn = true;
           } else {
-            const userS = sessions?.get('USR59396382');
+            const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
             if (userS?.socket && userS?.status === 'connected') {
               activeSock = userS.socket;
               global.__waAdminSocket = activeSock;
@@ -675,7 +765,7 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
       }
       const adminPhone = activeSock?.user?.id
         ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
-        : (process.env.ADMIN_PHONE || '8840457632');
+        : CONFIG_ADMIN_PHONE;
       return res.json({
         success: true,
         status: isConn ? 'connected' : 'waiting',
@@ -795,16 +885,16 @@ router.get('/api/user/whatsapp/sessions', authRequired, async (req, res) => {
       const dbAdminS = await WhatsAppSession.findOne({ sessionId: 'admin' });
       const adminPhone = global.__waAdminSocket?.user?.id
         ? String(global.__waAdminSocket.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
-        : (dbAdminS?.phone || process.env.ADMIN_PHONE || '8840457632');
+        : (dbAdminS?.phone || CONFIG_ADMIN_PHONE);
       let isAdminConnected = Boolean(global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function');
       if (!isAdminConnected) {
         const { getSessionByPhoneOrUserId } = require('./userSessions');
-        const match = getSessionByPhoneOrUserId(process.env.ADMIN_PHONE || '8840457632');
+        const match = CONFIG_ADMIN_PHONE ? getSessionByPhoneOrUserId(CONFIG_ADMIN_PHONE) : null;
         if (match?.session?.socket && match?.session?.status === 'connected') {
           global.__waAdminSocket = match.session.socket;
           isAdminConnected = true;
         } else {
-          const userS = sessions?.get('USR59396382');
+          const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
           if (userS?.socket && userS?.status === 'connected') {
             global.__waAdminSocket = userS.socket;
             isAdminConnected = true;
@@ -868,11 +958,30 @@ router.get('/api/user/whatsapp/sessions', authRequired, async (req, res) => {
 });
 
 // Send message from selected WhatsApp (single or sequential)
-router.post('/api/user/send', authRequired, async (req, res) => {
+router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
   try {
     const { to, text, attachment, session, sendAsVoice, voiceLang } = req.body || {};
     if (!to) return res.status(400).json({ success: false, message: 'Recipient number (to) is required.' });
     if (!text && !attachment) return res.status(400).json({ success: false, message: 'Message text or attachment is required.' });
+
+    // Format destination: Group vs Individual
+    const toClean = String(to).trim();
+    const isGroup = toClean.endsWith('@g.us') || toClean.includes('@g.us') || (toClean.startsWith('120363') && toClean.replace(/\D/g, '').length >= 15);
+
+    // Plan Feature Enforcement (403 Forbidden)
+    const features = await getUserPlanFeatures(req.user);
+    if (features.isExpired) {
+      return res.status(403).json({
+        success: false,
+        message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+      });
+    }
+    if (isGroup && !features.groupOption) {
+      return res.status(403).json({
+        success: false,
+        message: 'Group messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+      });
+    }
 
     // Resolve socket
     let activeSocket = null;
@@ -894,17 +1003,17 @@ router.post('/api/user/send', authRequired, async (req, res) => {
           fromNumber = activeSocket?.user?.id ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') : 'Admin';
           sessionName = 'admin';
         } else {
-          // Check fallback: get active session for adminPhone or USR59396382
+          // Check fallback: get active session for adminPhone or CONFIG_ADMIN_DEFAULT_USER_ID
           const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = process.env.ADMIN_PHONE || '8840457632';
-          const phoneMatch = getSessionByPhoneOrUserId(adminPhone);
+          const adminPhone = CONFIG_ADMIN_PHONE;
+          const phoneMatch = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
           if (phoneMatch?.session?.socket && phoneMatch?.session?.status === 'connected' && Boolean(phoneMatch.session.socket.user?.id)) {
             activeSocket = phoneMatch.session.socket;
             global.__waAdminSocket = activeSocket;
             fromNumber = phoneMatch.session.connectedNumber || adminPhone;
             sessionName = String(fromNumber).replace(/\D/g, '').slice(-10);
           } else {
-            const userS = sessions?.get('USR59396382');
+            const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
             if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
               activeSocket = userS.socket;
               global.__waAdminSocket = activeSocket;
@@ -936,10 +1045,6 @@ router.post('/api/user/send', authRequired, async (req, res) => {
         message: 'चयनित WhatsApp कनेक्टेड नहीं है। कृपया पहले Dashboard पर जाकर QR कोड स्कैन करें।'
       });
     }
-
-    // Format destination: Group vs Individual
-    const toClean = String(to).trim();
-    const isGroup = toClean.endsWith('@g.us') || toClean.includes('@g.us') || (toClean.startsWith('120363') && toClean.replace(/\D/g, '').length >= 15);
     let normalized = '';
     let jid = '';
 
@@ -1087,6 +1192,14 @@ router.post('/api/user/send', authRequired, async (req, res) => {
 
 router.get('/api/user/api-token', authRequired, async (req, res) => {
   try {
+    const features = await getUserPlanFeatures(req.user);
+    if (!features.apiAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'API Access आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+      });
+    }
+
     if (!req.user.apiToken) {
       req.user.apiToken = generateApiToken();
       await req.user.save();
@@ -1098,7 +1211,7 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
     
     const adminPhone = global.__waAdminSocket?.user?.id 
       ? String(global.__waAdminSocket.user.id).split(':')[0].replace(/\D/g, '') 
-      : (process.env.ADMIN_PHONE || '8840457632');
+      : CONFIG_ADMIN_PHONE;
 
     const rawNumber = req.user.role === 'admin' 
       ? (adminPhone || active?.connectedNumber || dbSession?.phone || req.user.mobile || '') 
@@ -1132,6 +1245,14 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
 
 router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => {
   try {
+    const features = await getUserPlanFeatures(req.user);
+    if (!features.apiAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'API Access आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+      });
+    }
+
     req.user.apiToken = generateApiToken();
     req.user.updatedAt = new Date();
     await req.user.save();
@@ -1953,6 +2074,9 @@ module.exports = {
   adminRequired, 
   ensureAdminUser, 
   recordAdminWhatsAppSession, 
+  getUserPlanFeatures,
+  CONFIG_ADMIN_PHONE,
+  CONFIG_ADMIN_DEFAULT_USER_ID,
   User, 
   WhatsAppSession, 
   Plan, 
