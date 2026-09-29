@@ -130,17 +130,21 @@ async function startUserSession(userId) {
         if (connection === 'close') {
             const statusCode = (lastDisconnect?.error instanceof Boom) ? lastDisconnect.error.output?.statusCode : null;
             const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-            const shouldReconnect = !isLoggedOut;
+            const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));
+            const shouldReconnect = !isLoggedOut && !isQRExpired;
             
-            console.log(`[UserSession] Connection closed for user ${userId}, statusCode: ${statusCode}, reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}`);
+            console.log(`[UserSession] Connection closed for user ${userId}, statusCode: ${statusCode}, reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}`);
             
-            currentSession.status = isLoggedOut ? 'logged_out' : 'connecting';
+            currentSession.status = isLoggedOut ? 'logged_out' : (isQRExpired ? 'disconnected' : 'connecting');
             currentSession.connectingSince = shouldReconnect ? Date.now() : null;
+            if (isQRExpired) {
+                currentSession.qr = null;
+            }
             
             await WhatsAppSession.updateOne(
                 { $or: [{ ownerUserId: userId }, { sessionId: sessionId }] },
                 { 
-                    status: isLoggedOut ? 'logged_out' : 'connecting', 
+                    status: isLoggedOut ? 'logged_out' : (isQRExpired ? 'disconnected' : 'connecting'), 
                     updatedAt: new Date() 
                 }
             );
@@ -149,9 +153,10 @@ async function startUserSession(userId) {
                 const { broadcastIncomingEvent } = require('./index');
                 if (typeof broadcastIncomingEvent === 'function') {
                     broadcastIncomingEvent('connection_status', { 
-                        status: isLoggedOut ? 'logged_out' : 'connecting', 
+                        status: isLoggedOut ? 'logged_out' : (isQRExpired ? 'disconnected' : 'connecting'), 
                         number: null,
-                        userId 
+                        userId,
+                        isQRExpired
                     }, userId);
                 }
             } catch (e) {}
@@ -165,7 +170,9 @@ async function startUserSession(userId) {
                         SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } }).catch(() => {});
                     } catch (e) {}
                 }
-                sessions.delete(userId);
+                if (isQRExpired) {
+                    sessions.delete(userId);
+                }
             }
         } else if (connection === 'open') {
             console.log(`[UserSession] User ${userId} connected`);

@@ -3428,24 +3428,32 @@ async function startBot(forceNew = false) {
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : null;
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-                const shouldReconnect = !isLoggedOut;
+                const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));
+                const shouldReconnect = !isLoggedOut && !isQRExpired;
 
-                console.log(`[Admin WhatsApp] Connection closed. StatusCode: ${statusCode}, Reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}`);
+                console.log(`[Admin WhatsApp] Connection closed. StatusCode: ${statusCode}, Reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}`);
 
-                connectionStatus = shouldReconnect ? 'connecting' : 'disconnected';
+                connectionStatus = isQRExpired ? 'disconnected' : (shouldReconnect ? 'connecting' : 'disconnected');
                 if (!shouldReconnect) {
                     connectedNumber = null;
                     latestQR = null;
-                    try {
-                        const SessionAuth = require('./models/SessionAuth');
-                        await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
-                        console.log('[Admin WhatsApp] Cleared stale admin credentials after logout.');
-                    } catch (e) {}
+                    if (isLoggedOut) {
+                        try {
+                            const SessionAuth = require('./models/SessionAuth');
+                            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+                            console.log('[Admin WhatsApp] Cleared stale admin credentials after logout.');
+                        } catch (e) {}
+                    }
                 }
                 if (global.__waAdminSocket === newSock) {
                     global.__waAdminSocket = null; // Clear so auth.js knows WhatsApp is disconnected
                 }
-                broadcastIncomingEvent('connection_status', { status: connectionStatus, number: connectedNumber, role: 'admin' });
+                broadcastIncomingEvent('connection_status', { 
+                    status: connectionStatus, 
+                    number: connectedNumber, 
+                    role: 'admin',
+                    isQRExpired 
+                });
 
                 const { recordAdminWhatsAppSession } = require('./auth');
                 recordAdminWhatsAppSession({ status: shouldReconnect ? 'connecting' : 'disconnected', phone: connectedNumber }).catch(() => {});
