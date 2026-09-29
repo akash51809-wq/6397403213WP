@@ -992,6 +992,9 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
         const SessionAuth = require('./models/SessionAuth');
         await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
       } catch (e) {}
+      if (typeof indexMod.clearUserIncomingMessages === 'function') {
+        indexMod.clearUserIncomingMessages('admin');
+      }
       if (typeof indexMod.recordAdminWhatsAppSession === 'function') {
         indexMod.recordAdminWhatsAppSession({ status: 'disconnected', phone: null }).catch(() => {});
       }
@@ -1003,6 +1006,10 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
 
     const { stopUserSession } = require('./userSessions');
     await stopUserSession(req.user.userId);
+    const indexMod = require('./index');
+    if (typeof indexMod.clearUserIncomingMessages === 'function') {
+      indexMod.clearUserIncomingMessages(req.user.userId);
+    }
     res.json({ success: true, message: 'WhatsApp disconnected.' });
   } catch (error) {
     console.error('User WhatsApp disconnect error:', error);
@@ -1281,6 +1288,7 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
     // Log to message_reports & incoming_messages
     try {
       const { appendMessageReport, appendIncomingMessage, broadcastIncomingEvent } = require('./index');
+      const sPhone = fromNumber ? String(fromNumber).replace(/\D/g, '') : null;
       const reportText = sendAsVoice ? `[VOICE NOTE] ${text || ''}`.trim() : (attachment ? `[${mediaType?.toUpperCase() || 'ATTACHMENT'}] ${text || ''}`.trim() : String(text || ''));
       appendMessageReport({
         id: messageId,
@@ -1297,6 +1305,7 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
         id: messageId,
         chatJid: jid,
         ownerUserId: req.user.userId,
+        sessionPhone: sPhone,
         from: fromNumber || sessionName || 'User',
         fromMe: true,
         message: reportText,
@@ -1311,10 +1320,12 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
       broadcastIncomingEvent('new_message', {
         id: messageId,
         chatJid: jid,
+        ownerUserId: req.user.userId,
+        sessionPhone: sPhone,
         from: fromNumber || sessionName || 'User',
         fromMe: true,
         message: reportText
-      });
+      }, req.user.userId, sPhone);
     } catch (logErr) {
       console.warn('[User Send] Report log warning:', logErr.message);
     }

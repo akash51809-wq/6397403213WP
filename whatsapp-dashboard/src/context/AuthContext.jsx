@@ -266,10 +266,14 @@ export function AuthProvider({ children }) {
       }
       setStatus({ status: 'disconnected', number: null, profileName: 'WhatsApp Account', ready: false })
       setQr(null)
+      setChats([])
+      setMessages([])
+      setSelected(null)
       notify('WhatsApp session disconnected.')
       setTimeout(() => {
         loadStatus()
         loadQr()
+        loadChats()
       }, 800)
     } catch (e) {
       setError(e.message)

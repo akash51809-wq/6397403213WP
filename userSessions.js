@@ -254,6 +254,7 @@ async function startUserSession(userId) {
                     ? (phoneNum || 'me')
                     : (rawMsg.key?.participant || rawRemoteJid).split('@')[0].replace(/\D/g, '');
 
+                const sPhone = phoneNum ? String(phoneNum).replace(/\D/g, '') : null;
                 batch.push({
                     id: rawMsg.key?.id || ('hist_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
                     date: new Date(rawMsg.messageTimestamp ? (rawMsg.messageTimestamp * 1000) : Date.now()).toISOString(),
@@ -267,7 +268,8 @@ async function startUserSession(userId) {
                     mediaType: null,
                     mediaUrl: null,
                     isRead: isFromMe ? true : false,
-                    ownerUserId: userId
+                    ownerUserId: userId,
+                    sessionPhone: sPhone
                 });
             }
 
@@ -275,7 +277,8 @@ async function startUserSession(userId) {
                 const added = indexModule.appendIncomingMessagesBatch(batch);
                 console.log(`[UserSession ${userId}] History sync: saved ${added} new messages`);
                 if (typeof indexModule.broadcastIncomingEvent === 'function') {
-                    indexModule.broadcastIncomingEvent('refresh', { count: added });
+                    const sPhone = phoneNum ? String(phoneNum).replace(/\D/g, '') : null;
+                    indexModule.broadcastIncomingEvent('refresh', { count: added }, userId, sPhone);
                 }
             }
         } catch (err) {
@@ -336,6 +339,14 @@ async function stopUserSession(userId) {
             { status: 'logged_out', updatedAt: new Date() }
         );
     } catch (e) {}
+
+    try {
+        const indexModule = require('./index');
+        if (indexModule && typeof indexModule.clearUserIncomingMessages === 'function') {
+            indexModule.clearUserIncomingMessages(userId);
+        }
+    } catch (e) {}
+
     console.log(`[UserSession] Session stopped and credentials cleared for user ${userId}`);
 }
 

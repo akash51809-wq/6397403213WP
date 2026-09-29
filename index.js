@@ -199,15 +199,24 @@ const sseClients = new Map();
 
 function broadcastIncomingEvent(type, data, ownerUserId = null, sessionPhone = null) {
     const payload = `data: ${JSON.stringify({ type, data, timestamp: new Date().toISOString() })}\n\n`;
+    const targetOwner = ownerUserId ? String(ownerUserId).toUpperCase() : null;
+
     for (const [clientRes, user] of sseClients.entries()) {
         try {
-            if (!user || user.role === 'admin') {
-                clientRes.write(payload);
-            } else if (ownerUserId && user.userId === ownerUserId) {
-                clientRes.write(payload);
+            if (!user) continue;
+
+            const isClientAdmin = user.role === 'admin' || String(user.userId || '').toUpperCase() === 'ADMIN';
+
+            if (targetOwner === 'ADMIN') {
+                if (isClientAdmin) clientRes.write(payload);
+            } else if (targetOwner) {
+                if (String(user.userId || '') === String(ownerUserId)) {
+                    clientRes.write(payload);
+                }
             } else if (sessionPhone && user.mobile && String(sessionPhone).includes(String(user.mobile).slice(-10))) {
                 clientRes.write(payload);
-            } else if (!ownerUserId && !sessionPhone) {
+            } else if (!targetOwner && !sessionPhone) {
+                // Global event without target owner
                 clientRes.write(payload);
             }
         } catch {
@@ -659,21 +668,100 @@ function getIncomingMessages(user = null) {
         }
     }
 
-    if (!user || user.role === 'admin') {
+    // If internal call without user context, return raw list
+    if (!user) {
         return all;
     }
 
-    const userMobile10 = user.mobile ? String(user.mobile).replace(/\D/g, '').slice(-10) : '';
-    return all.filter(m => {
-        if (m.ownerUserId && m.ownerUserId === user.userId) return true;
-        if (userMobile10) {
-            const sClean = m.sessionPhone ? String(m.sessionPhone).replace(/\D/g, '').slice(-10) : '';
-            const fClean = m.from ? String(m.from).replace(/\D/g, '').slice(-10) : '';
-            const cClean = m.chatJid ? String(m.chatJid).replace(/\D/g, '').slice(-10) : '';
-            if (sClean === userMobile10 || fClean === userMobile10 || cClean === userMobile10) return true;
+    const isRoleAdmin = user.role === 'admin' || String(user.userId || '').toUpperCase() === 'ADMIN';
+
+    if (isRoleAdmin) {
+        // ADMIN INBOX: ONLY data from Admin's active scanned WhatsApp
+        const activeSock = getActiveAdminSocket();
+        const isAdminConn = connectionStatus === 'connected' && Boolean(activeSock && typeof activeSock.sendMessage === 'function');
+        if (!isAdminConn) {
+            // Admin WhatsApp is disconnected / removed -> show no data
+            return [];
         }
-        return false;
+
+        const rawAdminPhone = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE));
+        const adminClean10 = rawAdminPhone ? String(rawAdminPhone).replace(/\D/g, '').slice(-10) : '';
+        if (!adminClean10) {
+            return [];
+        }
+
+        return all.filter(m => {
+            // Strictly exclude any regular user's data
+            const owner = String(m.ownerUserId || '').toUpperCase();
+            if (owner && owner !== 'ADMIN') {
+                return false;
+            }
+
+            // Must match Admin's currently scanned number
+            if (m.sessionPhone) {
+                const sClean10 = String(m.sessionPhone).replace(/\D/g, '').slice(-10);
+                return sClean10 === adminClean10;
+            }
+
+            return owner === 'ADMIN';
+        });
+    }
+
+    // REGULAR USER INBOX: ONLY data from this specific user's active scanned WhatsApp
+    const { getUserSession } = require('./userSessions');
+    const uSess = getUserSession(user.userId);
+    const isUserConn = Boolean(uSess && uSess.status === 'connected' && uSess.socket && uSess.connectedNumber);
+    if (!isUserConn) {
+        // User's WhatsApp is disconnected / removed -> show no data
+        return [];
+    }
+
+    const userPhoneClean10 = String(uSess.connectedNumber).replace(/\D/g, '').slice(-10);
+    if (!userPhoneClean10) {
+        return [];
+    }
+
+    return all.filter(m => {
+        // Strictly only this user's data
+        if (!m.ownerUserId || m.ownerUserId !== user.userId) {
+            return false;
+        }
+
+        // Must match this user's active scanned number
+        if (m.sessionPhone) {
+            const sClean10 = String(m.sessionPhone).replace(/\D/g, '').slice(-10);
+            return sClean10 === userPhoneClean10;
+        }
+
+        return true;
     });
+}
+
+function clearUserIncomingMessages(ownerUserId) {
+    if (!ownerUserId) return;
+    const isTargetAdmin = String(ownerUserId).toUpperCase() === 'ADMIN';
+
+    if (incomingMessagesCache) {
+        incomingMessagesCache = incomingMessagesCache.filter(m => {
+            const mOwner = String(m.ownerUserId || '').toUpperCase();
+            if (isTargetAdmin) {
+                return mOwner !== 'ADMIN' && mOwner !== '';
+            }
+            return mOwner !== String(ownerUserId);
+        });
+        persistIncomingMessages();
+    }
+
+    if (mongoose.connection.readyState === 1) {
+        const filter = isTargetAdmin
+            ? { $or: [{ ownerUserId: 'admin' }, { ownerUserId: 'ADMIN' }, { ownerUserId: null }] }
+            : { ownerUserId: String(ownerUserId) };
+        IncomingMessageModel.deleteMany(filter).catch(err =>
+            console.warn('[PostgreSQL] Clear user incoming messages warning:', err.message)
+        );
+    }
+
+    broadcastIncomingEvent('refresh', { cleared: true }, isTargetAdmin ? 'admin' : ownerUserId);
 }
 
 let incomingSaveTimer = null;
@@ -1132,6 +1220,8 @@ app.post('/api/whatsapp/disconnect', authRequired, adminRequired, async (req, re
             await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
         } catch (e) {}
 
+        clearUserIncomingMessages('admin');
+
         const { recordAdminWhatsAppSession } = require('./auth');
         recordAdminWhatsAppSession({ status: 'disconnected', phone: null }).catch(() => {});
 
@@ -1360,7 +1450,19 @@ app.get('/api/incoming/chats', authRequired, (req, res) => {
                         }
                     }
 
-                    if (cleanNum === connectedNumber) {
+                    const isAdminU = req.user && (req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN');
+                    let activeScannedNum = null;
+                    if (isAdminU) {
+                        const aSock = getActiveAdminSocket();
+                        activeScannedNum = (connectedNumber || (aSock?.user?.id ? aSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE));
+                    } else {
+                        const { getUserSession } = require('./userSessions');
+                        const uS = getUserSession(req.user.userId);
+                        activeScannedNum = uS?.connectedNumber || null;
+                    }
+                    const activeClean10 = activeScannedNum ? String(activeScannedNum).replace(/\D/g, '').slice(-10) : '';
+
+                    if (activeClean10 && cleanNum.slice(-10) === activeClean10) {
                         displayName = `+${cleanNum} (You / Notes)`;
                     } else if (!displayName || displayName === 'You') {
                         displayName = '+' + cleanNum;
@@ -1587,10 +1689,12 @@ app.post('/api/incoming/reply', authRequired, attachmentBodyParser, async (req, 
         const sentId = result?.key?.id || ('out_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6));
 
         const myNumber = fromNumber || (req.user?.mobile ? String(req.user.mobile) : 'User');
+        const sPhoneClean = myNumber ? String(myNumber).replace(/\D/g, '') : null;
         const outRecord = {
             id: sentId,
             date: new Date().toISOString(),
             ownerUserId: req.user.userId,
+            sessionPhone: sPhoneClean,
             from: myNumber,
             fromMe: true,
             pushName: req.user.username || 'You',
@@ -3049,10 +3153,11 @@ async function handleSendText(req, res) {
                         isRead: true,
                         isGroup: isGroup,
                         type: messageType,
-                        ownerUserId: ownerUserId
+                        ownerUserId: ownerUserId,
+                        sessionPhone: activeSession10 ? String(activeSession10).replace(/\D/g, '') : null
                     };
                     appendIncomingMessage(incomingRecord);
-                    broadcastIncomingEvent('new_message', incomingRecord);
+                    broadcastIncomingEvent('new_message', incomingRecord, ownerUserId, activeSession10);
                     if (isGlobalAdmin) {
                         settings.totalSent = (settings.totalSent || 0) + 1;
                         settings.lastUsed = new Date().toISOString();
@@ -3100,10 +3205,11 @@ async function handleSendText(req, res) {
                         isRead: true,
                         isGroup: isGroup,
                         type: messageType,
-                        ownerUserId: ownerUserId
+                        ownerUserId: ownerUserId,
+                        sessionPhone: activeSession10 ? String(activeSession10).replace(/\D/g, '') : null
                     };
                     appendIncomingMessage(incomingRecord);
-                    broadcastIncomingEvent('new_message', incomingRecord);
+                    broadcastIncomingEvent('new_message', incomingRecord, ownerUserId, activeSession10);
 
                     if (isGlobalAdmin) {
                         settings.totalSent = (settings.totalSent || 0) + 1;
@@ -3411,13 +3517,15 @@ async function startBot(forceNew = false) {
                             isGroup: isGroup,
                             groupName: isGroup ? 'WhatsApp Group' : null,
                             message: text || (hasMedia ? 'Media' : ''),
-                            isRead: isFromMe ? true : false
+                            isRead: isFromMe ? true : false,
+                            ownerUserId: 'admin',
+                            sessionPhone: connectedNumber ? String(connectedNumber).replace(/\D/g, '') : null
                         });
                     }
                     if (batch.length > 0) {
                         const addedCount = appendIncomingMessagesBatch(batch);
                         console.log(`History sync: appended ${addedCount} new messages from history set`);
-                        broadcastIncomingEvent('refresh', { count: addedCount });
+                        broadcastIncomingEvent('refresh', { count: addedCount }, 'admin', connectedNumber);
                     }
                 }
             } catch (err) {
@@ -3595,12 +3703,13 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
                 quotedText: quotedText,
                 quotedParticipant: quotedParticipant,
                 isRead: isFromMe ? true : false,
-                ownerUserId: ownerUserId
+                ownerUserId: ownerUserId,
+                sessionPhone: sessionConnectedNumber ? String(sessionConnectedNumber).replace(/\D/g, '') : null
             };
 
             const appended = appendIncomingMessage(record);
             if (appended) {
-                broadcastIncomingEvent('new_message', record);
+                broadcastIncomingEvent('new_message', record, ownerUserId, sessionConnectedNumber);
                 if (isFromMe) {
                     appendMessageReport({
                         id: record.id,
@@ -3680,5 +3789,6 @@ module.exports = {
     saveContact,
     initMongoDataSync,
     invalidateApiTokenCache,
+    clearUserIncomingMessages,
     getLatestQR: () => latestQR
 };
