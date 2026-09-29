@@ -715,7 +715,15 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
             }
           }
           const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
-          return this.create(insertData);
+          try {
+            await this.create(insertData);
+            return { modifiedCount: 1, upserted: true };
+          } catch (createErr) {
+            if (createErr && createErr.code === '23505') {
+              return this.updateOne(filter, update, { ...options, upsert: false });
+            }
+            throw createErr;
+          }
         }
         return { modifiedCount: 0 };
       }
@@ -763,7 +771,14 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
             }
           }
           const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
-          return this.create(insertData);
+          try {
+            return await this.create(insertData);
+          } catch (createErr) {
+            if (createErr && createErr.code === '23505') {
+              return this.findOneAndUpdate(filter, update, { ...options, upsert: false });
+            }
+            throw createErr;
+          }
         }
         return null;
       }
