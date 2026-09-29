@@ -10,9 +10,11 @@ const {
   WhatsAppSession, 
   Plan, 
   PlanPurchaseRequest, 
-  CompanySettings 
+  CompanySettings,
+  ApiSettings,
+  AppSettings
 } = require('./db');
-const mongoose = { connection };
+
 
 const router = express.Router();
 const { createRateLimiter } = require('./rateLimiter');
@@ -135,7 +137,7 @@ function generateApiTokenData() {
 const generateApiToken = () => generateApiTokenData().rawToken;
 
 async function ensureDefaultPlans() {
-  if (mongoose.connection.readyState !== 1) return;
+  if (connection.readyState !== 1) return;
   const count = await Plan.countDocuments();
   if (count === 0) {
     await Plan.create([
@@ -205,7 +207,7 @@ async function ensureDefaultPlans() {
 }
 
 async function ensureAdminUser() {
-  if (mongoose.connection.readyState !== 1) return null;
+  if (connection.readyState !== 1) return null;
   const username = (process.env.ADMIN_USERNAME || 'admin').trim();
   let password = process.env.ADMIN_PASSWORD;
   if (!password) {
@@ -613,13 +615,13 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
 });
 
 /* =========================================================
-   USER PASSWORD CHANGE (in user panel)
+   USER & ADMIN PASSWORD CHANGE
 ========================================================= */
 
-router.post('/api/auth/change-password', passwordLimiter, authRequired, async (req, res) => {
+const changePasswordHandler = async (req, res) => {
   try {
-    const currentPassword = String(req.body?.currentPassword || '');
-    const newPassword = String(req.body?.newPassword || '').trim();
+    const currentPassword = String(req.body?.currentPassword || req.body?.oldPassword || '');
+    const newPassword = String(req.body?.newPassword || req.body?.password || '').trim();
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, message: 'वर्तमान और नया पासवर्ड दोनों आवश्यक हैं।' });
@@ -634,8 +636,18 @@ router.post('/api/auth/change-password', passwordLimiter, authRequired, async (r
     }
 
     req.user.passwordHash = await hashPassword(newPassword);
-    // Instantly revoke all active login sessions/tokens for this user upon password change
-    req.user.sessions = [];
+
+    // Keep current active session, revoke all other active sessions for security
+    const currentHeader = req.headers.authorization || '';
+    const currentBearerToken = currentHeader.startsWith('Bearer ') ? currentHeader.slice(7).trim() : '';
+    const currentHash = currentBearerToken ? tokenHash(currentBearerToken) : null;
+
+    if (currentHash && Array.isArray(req.user.sessions)) {
+      req.user.sessions = req.user.sessions.filter(s => s && s.tokenHash === currentHash && new Date(s.expiresAt) > new Date());
+    } else {
+      req.user.sessions = [];
+    }
+
     req.user.updatedAt = new Date();
     await req.user.save();
 
@@ -644,7 +656,11 @@ router.post('/api/auth/change-password', passwordLimiter, authRequired, async (r
     console.error('Change password error:', error);
     res.status(500).json({ success: false, message: error.message || 'पासवर्ड बदलने में समस्या हुई।' });
   }
-});
+};
+
+router.post('/api/auth/change-password', passwordLimiter, authRequired, changePasswordHandler);
+router.post('/api/user/change-password', passwordLimiter, authRequired, changePasswordHandler);
+router.post('/api/admin/change-password', passwordLimiter, authRequired, changePasswordHandler);
 
 /* =========================================================
    ADMIN USER MANAGEMENT APIs (Admin only)
@@ -978,19 +994,24 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
         global.__waAdminSocket = null;
       }
       try {
-        const { stopUserSession, getSessionByPhoneOrUserId } = require('./userSessions');
-        const adminPhone = CONFIG_ADMIN_PHONE;
-        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-        if (match?.userId) {
-          await stopUserSession(match.userId).catch(() => {});
+        if (typeof indexMod.clearAdminWhatsAppCredentials === 'function') {
+          await indexMod.clearAdminWhatsAppCredentials();
+        } else {
+          const SessionAuth = require('./models/SessionAuth');
+          await SessionAuth.deleteMany({
+            $or: [
+              { id: 'admin' },
+              { id: 'admin_creds.json' },
+              { id: { $regex: '^admin_' } }
+            ]
+          });
+          const { connection } = require('./db');
+          if (connection?.pool) {
+            await connection.pool.query(
+              `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id LIKE 'admin_%'`
+            ).catch(() => {});
+          }
         }
-        if (CONFIG_ADMIN_DEFAULT_USER_ID) {
-          await stopUserSession(CONFIG_ADMIN_DEFAULT_USER_ID).catch(() => {});
-        }
-      } catch (e) {}
-      try {
-        const SessionAuth = require('./models/SessionAuth');
-        await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
       } catch (e) {}
       if (typeof indexMod.clearUserIncomingMessages === 'function') {
         indexMod.clearUserIncomingMessages('admin');
@@ -1534,7 +1555,7 @@ async function recordAdminWhatsAppSession(info = {}) {
       ...(info.status === 'connected' ? { lastConnectedAt: new Date() } : {}),
       updatedAt: new Date()
     };
-    if (info.phone) {
+    if (info.phone !== undefined) {
       updateFields.phone = info.phone;
     }
     await WhatsAppSession.updateOne(
@@ -1825,7 +1846,7 @@ router.post('/api/admin/plan-requests/:requestId/reject', authRequired, adminReq
 router.get('/api/settings/company', async (req, res) => {
   try {
     let settings = null;
-    if (mongoose.connection.readyState === 1) {
+    if (connection.readyState === 1) {
       const doc = await CompanySettings.findOne({ key: 'company' });
       if (doc) {
         settings = {
@@ -1844,6 +1865,13 @@ router.get('/api/settings/company', async (req, res) => {
         logoUrl: fileSettings.logoUrl || '',
         bannerUrl: fileSettings.bannerUrl || ''
       };
+      if (connection.readyState === 1 && (settings.companyName || settings.faviconUrl || settings.logoUrl || settings.bannerUrl)) {
+        CompanySettings.findOneAndUpdate(
+          { key: 'company' },
+          { $set: { ...settings, updatedAt: new Date() } },
+          { upsert: true }
+        ).catch(() => {});
+      }
     }
     res.json({ success: true, settings });
   } catch (error) {
@@ -1864,7 +1892,7 @@ router.post('/api/settings/company', express.json({ limit: '15mb' }), authRequir
       updatedAt: new Date()
     };
 
-    if (mongoose.connection.readyState === 1) {
+    if (connection.readyState === 1) {
       await CompanySettings.findOneAndUpdate(
         { key: 'company' },
         { $set: updated },
@@ -2023,6 +2051,46 @@ router.post('/api/user/tts-convert', authRequired, async (req, res) => {
 
 // =================== EXTENDED SETTINGS ROUTES ===================
 
+// Helper to get AppSetting from PostgreSQL with JSON file fallback and auto-migration
+async function getSettingWithFallback(key, fallbackFileFn) {
+  if (connection.readyState === 1) {
+    try {
+      const doc = await AppSettings.findOne({ key }).lean();
+      if (doc && doc.data && Object.keys(doc.data).length > 0) {
+        return { ...doc.data };
+      }
+    } catch (err) {
+      console.warn(`[PostgreSQL Settings] Error reading '${key}':`, err.message);
+    }
+  }
+  const fileData = typeof fallbackFileFn === 'function' ? fallbackFileFn() : {};
+  if (connection.readyState === 1 && fileData && (Array.isArray(fileData) ? fileData.length > 0 : Object.keys(fileData).length > 0)) {
+    AppSettings.findOneAndUpdate(
+      { key },
+      { $set: { key, data: fileData, updatedAt: new Date() } },
+      { upsert: true }
+    ).catch(err => console.warn(`[PostgreSQL Settings] Auto-migrate '${key}' warning:`, err.message));
+  }
+  return fileData || {};
+}
+
+async function saveSettingToDbAndFile(key, data, saveFileFn) {
+  if (connection.readyState === 1) {
+    try {
+      await AppSettings.findOneAndUpdate(
+        { key },
+        { $set: { key, data, updatedAt: new Date() } },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.warn(`[PostgreSQL Settings] Error saving '${key}':`, err.message);
+    }
+  }
+  if (typeof saveFileFn === 'function') {
+    saveFileFn(data);
+  }
+}
+
 // 17. Admin: Get/Save API Setting (IP + Callback URL)
 const API_SETTINGS_FILE = path.join(__dirname, 'api_settings.json');
 function getApiSettingsFile() {
@@ -2039,7 +2107,8 @@ function saveApiSettingsFile(data) {
 
 router.get('/api/settings/api-setting', authRequired, adminRequired, async (req, res) => {
   try {
-    res.json({ success: true, data: getApiSettingsFile() });
+    const data = await getSettingWithFallback('api_setting', getApiSettingsFile);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2049,7 +2118,7 @@ router.post('/api/settings/api-setting', authRequired, adminRequired, async (req
   try {
     const { allowedIp, callbackUrl } = req.body || {};
     const data = { allowedIp: String(allowedIp || '').trim(), callbackUrl: String(callbackUrl || '').trim(), updatedAt: new Date().toISOString() };
-    saveApiSettingsFile(data);
+    await saveSettingToDbAndFile('api_setting', data, saveApiSettingsFile);
     res.json({ success: true, message: 'API Setting saved.', data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2072,7 +2141,7 @@ function saveGDriveSettingsFile(data) {
 
 router.get('/api/settings/gdrive', authRequired, adminRequired, async (req, res) => {
   try {
-    const data = getGDriveSettingsFile();
+    const data = await getSettingWithFallback('gdrive', getGDriveSettingsFile);
     if (data.clientSecret) data.clientSecret = '***';
     res.json({ success: true, data });
   } catch (error) {
@@ -2083,14 +2152,14 @@ router.get('/api/settings/gdrive', authRequired, adminRequired, async (req, res)
 router.post('/api/settings/gdrive', authRequired, adminRequired, async (req, res) => {
   try {
     const { clientId, clientSecret, redirectUri } = req.body || {};
-    const existing = getGDriveSettingsFile();
+    const existing = await getSettingWithFallback('gdrive', getGDriveSettingsFile);
     const data = {
       clientId: String(clientId || '').trim(),
       clientSecret: clientSecret && clientSecret !== '***' ? String(clientSecret).trim() : (existing.clientSecret || ''),
       redirectUri: String(redirectUri || '').trim(),
       updatedAt: new Date().toISOString()
     };
-    saveGDriveSettingsFile(data);
+    await saveSettingToDbAndFile('gdrive', data, saveGDriveSettingsFile);
     res.json({ success: true, message: 'G Drive settings saved.', data: { ...data, clientSecret: '***' } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2113,7 +2182,7 @@ function saveGmailSettingsFile(data) {
 
 router.get('/api/settings/gmail', authRequired, adminRequired, async (req, res) => {
   try {
-    const data = getGmailSettingsFile();
+    const data = await getSettingWithFallback('gmail', getGmailSettingsFile);
     if (data.appPassword) data.appPassword = '***';
     res.json({ success: true, data });
   } catch (error) {
@@ -2124,7 +2193,7 @@ router.get('/api/settings/gmail', authRequired, adminRequired, async (req, res) 
 router.post('/api/settings/gmail', authRequired, adminRequired, async (req, res) => {
   try {
     const { gmailAddress, smtpHost, smtpPort, appPassword } = req.body || {};
-    const existing = getGmailSettingsFile();
+    const existing = await getSettingWithFallback('gmail', getGmailSettingsFile);
     const data = {
       gmailAddress: String(gmailAddress || '').trim(),
       smtpHost: String(smtpHost || '').trim(),
@@ -2132,7 +2201,7 @@ router.post('/api/settings/gmail', authRequired, adminRequired, async (req, res)
       appPassword: appPassword && appPassword !== '***' ? String(appPassword).trim() : (existing.appPassword || ''),
       updatedAt: new Date().toISOString()
     };
-    saveGmailSettingsFile(data);
+    await saveSettingToDbAndFile('gmail', data, saveGmailSettingsFile);
     res.json({ success: true, message: 'Gmail settings saved.', data: { ...data, appPassword: '***' } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2155,7 +2224,7 @@ function saveGeminiSettingsFile(data) {
 
 router.get('/api/settings/gemini', authRequired, adminRequired, async (req, res) => {
   try {
-    const data = getGeminiSettingsFile();
+    const data = await getSettingWithFallback('gemini', getGeminiSettingsFile);
     const masked = (data.keys || []).map(k => ({ ...k, apiKey: k.apiKey ? '***' + k.apiKey.slice(-4) : '' }));
     res.json({ success: true, keys: masked });
   } catch (error) {
@@ -2167,13 +2236,14 @@ router.post('/api/settings/gemini', authRequired, adminRequired, async (req, res
   try {
     const { keys } = req.body || {};
     if (!Array.isArray(keys)) return res.status(400).json({ success: false, message: 'keys array required' });
-    const existing = getGeminiSettingsFile();
+    const existing = await getSettingWithFallback('gemini', getGeminiSettingsFile);
     const processed = keys.map((k, i) => ({
       id: k.id || `gemini_${Date.now()}_${i}`,
       apiKey: k.apiKey && !k.apiKey.startsWith('***') ? String(k.apiKey).trim() : (existing.keys?.[i]?.apiKey || ''),
       model: String(k.model || 'Gemini Flash').trim()
     }));
-    saveGeminiSettingsFile({ keys: processed, updatedAt: new Date().toISOString() });
+    const data = { keys: processed, updatedAt: new Date().toISOString() };
+    await saveSettingToDbAndFile('gemini', data, saveGeminiSettingsFile);
     const masked = processed.map(k => ({ ...k, apiKey: k.apiKey ? '***' + k.apiKey.slice(-4) : '' }));
     res.json({ success: true, message: 'Gemini settings saved.', keys: masked });
   } catch (error) {
@@ -2197,7 +2267,8 @@ function saveEmailTemplateFile(data) {
 
 router.get('/api/settings/email-template', authRequired, adminRequired, async (req, res) => {
   try {
-    res.json({ success: true, data: getEmailTemplateFile() });
+    const data = await getSettingWithFallback('email_template', getEmailTemplateFile);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2212,7 +2283,7 @@ router.post('/api/settings/email-template', authRequired, adminRequired, async (
       availableVariables: String(availableVariables || '{{name}}, {{number}}, {{message}}').trim(),
       updatedAt: new Date().toISOString()
     };
-    saveEmailTemplateFile(data);
+    await saveSettingToDbAndFile('email_template', data, saveEmailTemplateFile);
     res.json({ success: true, message: 'Email template saved.', data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2235,7 +2306,8 @@ function saveWaQueueSettingsFile(data) {
 
 router.get('/api/settings/wa-queue', authRequired, adminRequired, async (req, res) => {
   try {
-    res.json({ success: true, data: getWaQueueSettingsFile() });
+    const data = await getSettingWithFallback('wa_queue', getWaQueueSettingsFile);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2250,7 +2322,7 @@ router.post('/api/settings/wa-queue', authRequired, adminRequired, async (req, r
       return res.status(400).json({ success: false, message: 'Invalid delay values.' });
     }
     const data = { minDelay: min, maxDelay: max, updatedAt: new Date().toISOString() };
-    saveWaQueueSettingsFile(data);
+    await saveSettingToDbAndFile('wa_queue', data, saveWaQueueSettingsFile);
     res.json({ success: true, message: 'Queue delay saved.', data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2272,5 +2344,7 @@ module.exports = {
   WhatsAppSession, 
   Plan, 
   PlanPurchaseRequest,
-  CompanySettings 
-};
+  CompanySettings,
+  ApiSettings,
+  AppSettings
+};

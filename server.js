@@ -347,9 +347,10 @@ async function startServer() {
       console.warn('[SessionAuth] Encryption migration warning:', migAuthErr.message);
     }
     try {
-      const { initMongoDataSync } = require('./index');
-      if (typeof initMongoDataSync === 'function') {
-        await initMongoDataSync();
+      const { initPostgresDataSync, initMongoDataSync } = require('./index');
+      const syncFn = initPostgresDataSync || initMongoDataSync;
+      if (typeof syncFn === 'function') {
+        await syncFn();
       }
     } catch (syncErr) {
       console.warn('[Server] Initial data sync warning:', syncErr.message);

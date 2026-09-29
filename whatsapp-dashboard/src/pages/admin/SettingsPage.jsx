@@ -860,21 +860,37 @@ function SecurityTab({ notify }) {
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
+    if (!form.oldPassword) return notify('Please enter your current password', 'error');
     if (!form.newPassword) return notify('Please enter a new password', 'error');
+    if (form.newPassword.length < 6) return notify('New password must be at least 6 characters', 'error');
     if (form.newPassword !== form.rePassword) return notify('New passwords do not match', 'error');
     setSaving(true);
     try {
-      const r = await apiPost('/api/user/change-password', {
-        currentPassword: form.oldPassword,
-        newPassword:     form.newPassword,
-      });
-      if (r.success) {
-        notify('Password updated successfully!', 'success');
+      let r;
+      try {
+        r = await apiPost('/api/user/change-password', {
+          currentPassword: form.oldPassword,
+          newPassword:     form.newPassword,
+        });
+      } catch (err) {
+        if (err.message && err.message.includes('404')) {
+          r = await apiPost('/api/auth/change-password', {
+            currentPassword: form.oldPassword,
+            newPassword:     form.newPassword,
+          });
+        } else {
+          throw err;
+        }
+      }
+      if (r && r.success) {
+        notify(r.message || 'Password updated successfully!', 'success');
         setForm({ oldPassword: '', newPassword: '', rePassword: '' });
       } else {
-        notify(r.message || 'Password update failed', 'error');
+        notify((r && r.message) || 'Password update failed', 'error');
       }
-    } catch (e) { notify(e.message || 'Network error', 'error'); }
+    } catch (e) {
+      notify(e.message || 'Network error', 'error');
+    }
     setSaving(false);
   };
 

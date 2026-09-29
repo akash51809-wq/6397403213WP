@@ -304,7 +304,14 @@ async function initTables(pool) {
     `CREATE INDEX IF NOT EXISTS idx_reports_date ON message_reports("date");`,
     `CREATE INDEX IF NOT EXISTS idx_reports_ownerUserId ON message_reports("ownerUserId");`,
     `CREATE INDEX IF NOT EXISTS idx_reports_status ON message_reports("status");`,
-    `CREATE INDEX IF NOT EXISTS idx_reports_createdAt ON message_reports("createdAt");`
+    `CREATE INDEX IF NOT EXISTS idx_reports_createdAt ON message_reports("createdAt");`,
+
+    // 12. app_settings (general persistent configuration for GDrive, Gmail, Gemini, EmailTemplate, WaQueue, etc.)
+    `CREATE TABLE IF NOT EXISTS app_settings (
+      "key" VARCHAR(100) PRIMARY KEY,
+      "data" JSONB NOT NULL DEFAULT '{}'::jsonb,
+      "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+    );`
   ];
 
   for (const stmt of statements) {
@@ -401,55 +408,79 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
       params.push(value.source);
       pIdx++;
     } else if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-      for (const [op, opVal] of Object.entries(value)) {
-        if (op === '$ne') {
-          if (opVal === null) {
-            conditions.push(`${colName} IS NOT NULL`);
-          } else {
-            conditions.push(`(${colName} IS NULL OR ${colName} != $${pIdx})`);
+      const keys = Object.keys(value);
+      const hasOperators = keys.some(k => k.startsWith('$'));
+
+      if (hasOperators) {
+        for (const [op, opVal] of Object.entries(value)) {
+          if (op === '$options') {
+            // Handled alongside $regex
+            continue;
+          } else if (op === '$ne') {
+            if (opVal === null) {
+              conditions.push(`${colName} IS NOT NULL`);
+            } else {
+              conditions.push(`(${colName} IS NULL OR ${colName} != $${pIdx})`);
+              params.push(opVal);
+              pIdx++;
+            }
+          } else if (op === '$eq') {
+            if (opVal === null) {
+              conditions.push(`${colName} IS NULL`);
+            } else {
+              conditions.push(`${colName} = $${pIdx}`);
+              params.push(opVal);
+              pIdx++;
+            }
+          } else if (op === '$gt') {
+            conditions.push(`${colName} > $${pIdx}`);
             params.push(opVal);
             pIdx++;
-          }
-        } else if (op === '$eq') {
-          if (opVal === null) {
-            conditions.push(`${colName} IS NULL`);
-          } else {
-            conditions.push(`${colName} = $${pIdx}`);
+          } else if (op === '$gte') {
+            conditions.push(`${colName} >= $${pIdx}`);
             params.push(opVal);
             pIdx++;
+          } else if (op === '$lt') {
+            conditions.push(`${colName} < $${pIdx}`);
+            params.push(opVal);
+            pIdx++;
+          } else if (op === '$lte') {
+            conditions.push(`${colName} <= $${pIdx}`);
+            params.push(opVal);
+            pIdx++;
+          } else if (op === '$in') {
+            const arrVal = Array.isArray(opVal) ? opVal : [opVal];
+            conditions.push(`${colName} = ANY($${pIdx})`);
+            params.push(arrVal);
+            pIdx++;
+          } else if (op === '$nin') {
+            const arrVal = Array.isArray(opVal) ? opVal : [opVal];
+            conditions.push(`${colName} != ALL($${pIdx})`);
+            params.push(arrVal);
+            pIdx++;
+          } else if (op === '$regex') {
+            const regSource = opVal instanceof RegExp ? opVal.source : String(opVal);
+            const flags = value.$options || (opVal instanceof RegExp ? opVal.flags : '');
+            const isCaseInsensitive = flags.includes('i');
+            conditions.push(`${colName} ${isCaseInsensitive ? '~*' : '~'} $${pIdx}`);
+            params.push(regSource);
+            pIdx++;
+          } else if (op === '$exists') {
+            if (opVal) {
+              conditions.push(`${colName} IS NOT NULL`);
+            } else {
+              conditions.push(`${colName} IS NULL`);
+            }
+          } else {
+            // Strictly reject unsupported MongoDB operator to prevent silent fallback to 1=1
+            throw new Error(`[PostgreSQL Compatibility Layer] Unsupported MongoDB operator '${op}' on field '${key}'. Query rejected to prevent unsafe fallback or data corruption.`);
           }
-        } else if (op === '$gt') {
-          conditions.push(`${colName} > $${pIdx}`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$gte') {
-          conditions.push(`${colName} >= $${pIdx}`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$lt') {
-          conditions.push(`${colName} < $${pIdx}`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$lte') {
-          conditions.push(`${colName} <= $${pIdx}`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$in') {
-          conditions.push(`${colName} = ANY($${pIdx})`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$nin') {
-          conditions.push(`${colName} != ALL($${pIdx})`);
-          params.push(opVal);
-          pIdx++;
-        } else if (op === '$regex') {
-          const regSource = opVal instanceof RegExp ? opVal.source : String(opVal);
-          const flags = value.$options || (opVal instanceof RegExp ? opVal.flags : '');
-          const isCaseInsensitive = flags.includes('i');
-          conditions.push(`${colName} ${isCaseInsensitive ? '~*' : '~'} $${pIdx}`);
-          params.push(regSource);
-          pIdx++;
         }
+      } else {
+        // Plain JSON object comparison
+        conditions.push(`${colName} = $${pIdx}::jsonb`);
+        params.push(JSON.stringify(value));
+        pIdx++;
       }
     } else if (value === null) {
       conditions.push(`${colName} IS NULL`);
@@ -474,12 +505,24 @@ function extractUpdateFields(update) {
     return { setFields, setOnInsertFields };
   }
 
-  if (update.$set || update.$setOnInsert) {
+  // Strictly check for unsupported update operators
+  for (const k of Object.keys(update)) {
+    if (k.startsWith('$') && !['$set', '$setOnInsert', '$unset'].includes(k)) {
+      throw new Error(`[PostgreSQL Compatibility Layer] Unsupported MongoDB update operator '${k}'. Please use direct document manipulation or supported operators ($set, $setOnInsert, $unset).`);
+    }
+  }
+
+  if (update.$set || update.$setOnInsert || update.$unset) {
     if (update.$set && typeof update.$set === 'object') {
       Object.assign(setFields, update.$set);
     }
     if (update.$setOnInsert && typeof update.$setOnInsert === 'object') {
       Object.assign(setOnInsertFields, update.$setOnInsert);
+    }
+    if (update.$unset && typeof update.$unset === 'object') {
+      for (const field of Object.keys(update.$unset)) {
+        setFields[field] = null;
+      }
     }
     for (const [k, v] of Object.entries(update)) {
       if (!k.startsWith('$')) {
@@ -1001,6 +1044,12 @@ const MessageReport = createModel('message_reports', 'id', {
   'type', 'source', 'recipient', 'createdAt'
 ]);
 
+const AppSettings = createModel('app_settings', 'key', {
+  data: {}
+}, ['data'], [
+  'key', 'data', 'updatedAt'
+]);
+
 module.exports = {
   connection,
   connectPostgres,
@@ -1016,5 +1065,7 @@ module.exports = {
   ApiSettings,
   Contact,
   IncomingMessage,
-  MessageReport
+  MessageReport,
+  AppSettings
 };
+

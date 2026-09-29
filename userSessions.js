@@ -9,6 +9,8 @@ const CONFIG_ADMIN_PHONE = (process.env.ADMIN_PHONE || '').trim();
 const CONFIG_ADMIN_DEFAULT_USER_ID = (process.env.ADMIN_DEFAULT_USER_ID || '').trim();
 
 const sessions = new Map();
+// Per-userId lock: prevents concurrent startUserSession() calls from creating duplicate sockets
+const startingSessionIds = new Set();
 
 async function startUserSession(userId) {
     const normalizedUserId = String(userId || '').trim();
@@ -22,22 +24,43 @@ async function startUserSession(userId) {
         };
     }
 
+    // ── Concurrency guard: prevent duplicate socket creation ──────────────────
+    if (startingSessionIds.has(normalizedUserId)) {
+        // Another call is already initialising this session right now — return current state
+        const existing = sessions.get(normalizedUserId);
+        return {
+            status: existing?.status || 'connecting',
+            connectedNumber: existing?.connectedNumber || null,
+            qr: existing?.qr || null
+        };
+    }
+
     if (sessions.has(userId)) {
         const currentSession = sessions.get(userId);
         if (currentSession.status === 'connected' && currentSession.socket) {
-            return {
-                status: currentSession.status,
-                connectedNumber: currentSession.connectedNumber,
-                qr: null
-            };
+            // Verify the underlying WebSocket is actually open (ws.OPEN === 1)
+            const wsState = currentSession.socket?.ws?.readyState;
+            if (wsState === undefined || wsState === 1) {
+                // Socket looks alive — don't recreate
+                return {
+                    status: currentSession.status,
+                    connectedNumber: currentSession.connectedNumber,
+                    qr: null
+                };
+            }
+            // WebSocket is dead despite status=connected — fall through to recreate
+            console.warn(`[UserSession] Dead socket detected for ${userId} (wsState=${wsState}), recreating...`);
         }
-        // If already connecting within the last 15 seconds, avoid resetting socket
+        // If already connecting within the last 15 seconds AND socket appears alive, avoid resetting
         if (currentSession.status === 'connecting' && currentSession.connectingSince && (Date.now() - currentSession.connectingSince < 15000)) {
-            return {
-                status: 'connecting',
-                connectedNumber: currentSession.connectedNumber,
-                qr: currentSession.qr
-            };
+            const wsState = currentSession.socket?.ws?.readyState;
+            if (wsState === undefined || wsState === 1) {
+                return {
+                    status: 'connecting',
+                    connectedNumber: currentSession.connectedNumber,
+                    qr: currentSession.qr
+                };
+            }
         }
         // Clean up previous socket before starting a new one
         if (currentSession.socket) {
@@ -46,10 +69,18 @@ async function startUserSession(userId) {
                 currentSession.socket.end?.();
             } catch (e) {}
         }
+        // Reset status so 15s guard does not block fresh reconnect
+        currentSession.status = 'reconnecting';
+        currentSession.connectingSince = null;
     }
 
+    // ── Acquire lock ──────────────────────────────────────────────────────────
+    startingSessionIds.add(normalizedUserId);
+
+    try {
+
     const sessionId = `user-${userId}`;
-    const { state, saveCreds } = await useMongoAuthState(sessionId);
+    const { state, saveCreds } = await usePgAuthState(sessionId);
 
     console.log(`[UserSession] Starting session for user ${userId}`);
 
@@ -284,7 +315,8 @@ async function startUserSession(userId) {
                 const added = indexModule.appendIncomingMessagesBatch(batch);
                 console.log(`[UserSession ${userId}] History sync: saved ${added} new messages`);
                 if (typeof indexModule.broadcastIncomingEvent === 'function') {
-                    const sPhone = phoneNum ? String(phoneNum).replace(/\D/g, '') : null;
+                    // Use sessionData.connectedNumber — phoneNum is scoped to connection.update handler
+                    const sPhone = sessionData.connectedNumber ? String(sessionData.connectedNumber).replace(/\D/g, '') : null;
                     indexModule.broadcastIncomingEvent('refresh', { count: added }, userId, sPhone);
                 }
             }
@@ -313,6 +345,17 @@ async function startUserSession(userId) {
         qr: sessionData.qr,
         connectedNumber: sessionData.connectedNumber
     };
+
+    } catch (err) {
+        console.error(`[UserSession] Failed to start session for user ${userId}:`, err.message);
+        // Remove broken entry from sessions map so next call can retry cleanly
+        const broken = sessions.get(userId);
+        if (broken && broken.status === 'connecting') sessions.delete(userId);
+        throw err;
+    } finally {
+        // Always release the per-userId lock so future calls can proceed
+        startingSessionIds.delete(normalizedUserId);
+    }
 }
 
 async function stopUserSession(userId) {
@@ -334,10 +377,8 @@ async function stopUserSession(userId) {
 
     try {
         const SessionAuth = require('./models/SessionAuth');
+        // Delete only this user's session auth keys (never admin keys — admin uses clearAdminWhatsAppCredentials in index.js)
         await SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } });
-        if (String(userId).trim().toUpperCase() === 'ADMIN') {
-            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
-        }
     } catch (e) {}
     
     try {
@@ -693,10 +734,15 @@ function startUserSessionWatchdog() {
                     const wsState = session.socket?.ws?.readyState;
                     if (wsState !== undefined && wsState !== 1) {
                         console.warn(`[Watchdog] User ${userId} websocket closed (state: ${wsState}), auto-reconnecting...`);
+                        // Mark as reconnecting so startUserSession's connected-guard doesn't short-circuit
+                        session.status = 'reconnecting';
+                        session.connectingSince = null;
                         startUserSession(userId).catch(e => console.error(`[Watchdog] User ${userId} reconnect err:`, e.message));
                     }
                 } else if (session.status === 'connecting' && session.connectingSince && (Date.now() - session.connectingSince > 45000)) {
                     console.warn(`[Watchdog] User ${userId} stuck connecting >45s, restarting...`);
+                    // Clear connectingSince so startUserSession's 15s guard doesn't block the retry
+                    session.connectingSince = null;
                     startUserSession(userId).catch(e => console.error(`[Watchdog] User ${userId} restart err:`, e.message));
                 }
             }
@@ -710,14 +756,20 @@ function startUserSessionWatchdog() {
                         const uId = match[1];
                         if (String(uId).trim().toUpperCase() === 'ADMIN') continue;
                         const active = sessions.get(uId);
-                        if (!active || active.status === 'disconnected') {
-                            const dbRec = await WhatsAppSession.findOne({ 
-                                $or: [{ ownerUserId: uId }, { sessionId: `user-${uId}` }] 
-                            }).lean();
-                            if (!dbRec || dbRec.status !== 'logged_out') {
-                                console.log(`[Watchdog] Reviving offline user session ${uId} to maintain 24/7 active status`);
-                                startUserSession(uId).catch(e => console.error(`[Watchdog] Revive err for ${uId}:`, e.message));
-                            }
+                        // Skip if session is active/connecting, or explicitly logged out — only revive disconnected/dropped sessions
+                        if (!active) {
+                            // Not in memory at all — check DB before reviving
+                        } else if (active.status === 'disconnected' || active.status === 'reconnecting') {
+                            // Fall through to revive
+                        } else {
+                            continue; // connected, connecting, waiting, or logged_out — skip
+                        }
+                        const dbRec = await WhatsAppSession.findOne({ 
+                            $or: [{ ownerUserId: uId }, { sessionId: `user-${uId}` }] 
+                        }).lean();
+                        if (!dbRec || dbRec.status !== 'logged_out') {
+                            console.log(`[Watchdog] Reviving offline user session ${uId} to maintain 24/7 active status`);
+                            startUserSession(uId).catch(e => console.error(`[Watchdog] Revive err for ${uId}:`, e.message));
                         }
                     }
                 }

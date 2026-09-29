@@ -144,7 +144,7 @@ app.get('/media/:filename', (req, res, next) => {
             }
 
             // 3. Check in Database models (IncomingMessageModel, MessageReportModel, PlanPurchaseRequest)
-            if (!isOwner && mongoose.connection.readyState === 1 && userId) {
+            if (!isOwner && dbConnection.readyState === 1 && userId) {
                 try {
                     const matchMsg = await IncomingMessageModel.exists({
                         ownerUserId: userId,
@@ -236,17 +236,40 @@ let lastConnectedTime = new Date().toISOString();
 let sendingQueue = [];
 
 /* =========================================================
-   REPORTS STORAGE (POSTGRESQL WITH JSON FALLBACK)
+   REPORTS STORAGE (POSTGRESQL AS PRIMARY WITH JSON BACKUP)
 ========================================================= */
+
+// ── Cache size constants ──────────────────────────────────────────────────────
+// These are RAM guards for the hot in-memory caches.
+// PostgreSQL holds the FULL dataset — records beyond these limits are never deleted,
+// they are just not kept in memory and are fetched from DB on demand via pagination.
+const MAX_INCOMING_CACHE = 5000;  // max messages kept in incomingMessagesCache
+const MAX_REPORTS_CACHE  = 5000;  // max reports loaded into messageReportsCache on startup
+// ─────────────────────────────────────────────────────────────────────────────
 
 const REPORTS_FILE = path.join(__dirname, 'message_reports.json');
 let messageReportsCache = null;
-let isMongoDataSynced = false;
+let isPostgresDataSynced = false;
+let apiSettingsCache = null;
 
-async function initMongoDataSync() {
-    if (mongoose.connection.readyState !== 1 || isMongoDataSynced) return;
+let reportsSaveTimer = null;
+function persistMessageReports() {
+    if (reportsSaveTimer) clearTimeout(reportsSaveTimer);
+    reportsSaveTimer = setTimeout(() => {
+        try {
+            if (messageReportsCache) {
+                fs.writeFileSync(REPORTS_FILE, JSON.stringify(messageReportsCache.slice(0, 5000), null, 2), 'utf-8');
+            }
+        } catch (e) {
+            console.warn('[persistMessageReports] Local file write warning:', e.message);
+        }
+    }, 1500);
+}
+
+async function initPostgresDataSync() {
+    if (dbConnection.readyState !== 1 || isPostgresDataSynced) return;
     try {
-        console.log('[PostgreSQL Data Sync] Initializing PostgreSQL persistence for reports, messages, and contacts...');
+        console.log('[PostgreSQL Data Sync] Initializing PostgreSQL persistence for reports, messages, contacts, and settings...');
 
         // 1. Sync Message Reports
         const reportCount = await MessageReportModel.countDocuments();
@@ -271,7 +294,9 @@ async function initMongoDataSync() {
                 console.warn('[PostgreSQL Data Sync] Message reports migration warning:', err.message);
             }
         }
-        const dbReports = await MessageReportModel.find().sort({ date: -1 }).limit(5000).lean();
+        // Seed hot cache with the most recent MAX_REPORTS_CACHE records.
+        // Older records are NOT deleted — they remain in PostgreSQL and are queried on demand.
+        const dbReports = await MessageReportModel.find().sort({ date: -1 }).limit(MAX_REPORTS_CACHE).lean();
         messageReportsCache = dbReports;
 
         // 2. Sync Incoming Messages
@@ -297,7 +322,9 @@ async function initMongoDataSync() {
                 console.warn('[PostgreSQL Data Sync] Incoming messages migration warning:', err.message);
             }
         }
-        const dbIncoming = await IncomingMessageModel.find().sort({ timestamp: -1 }).limit(5000).lean();
+        // Seed hot cache with the most recent MAX_INCOMING_CACHE messages.
+        // Older messages are NOT deleted — they remain in PostgreSQL for history sync and pagination.
+        const dbIncoming = await IncomingMessageModel.find().sort({ timestamp: -1 }).limit(MAX_INCOMING_CACHE).lean();
         if (dbIncoming.length > 0) {
             incomingMessagesCache = dbIncoming;
         }
@@ -339,28 +366,56 @@ async function initMongoDataSync() {
 
         // 4. Sync API Settings
         const apiSettingsDoc = await ApiSettingsModel.findOne({ key: 'default' }).lean();
-        if (!apiSettingsDoc && fs.existsSync(API_SETTINGS_FILE)) {
+        if (apiSettingsDoc) {
+            apiSettingsCache = apiSettingsDoc;
+        } else if (fs.existsSync(API_SETTINGS_FILE)) {
             try {
                 const data = fs.readFileSync(API_SETTINGS_FILE, 'utf-8');
                 const parsed = JSON.parse(data || '{}');
                 if (Object.keys(parsed).length > 0) {
                     await ApiSettingsModel.findOneAndUpdate({ key: 'default' }, { $set: { ...parsed, key: 'default' } }, { upsert: true });
+                    apiSettingsCache = parsed;
+                    console.log('[PostgreSQL Data Sync] Migrated API settings from JSON to PostgreSQL.');
                 }
             } catch {}
         }
 
-        isMongoDataSynced = true;
+        // 5. Sync Company Settings
+        try {
+            const { CompanySettings } = require('./db');
+            const compDoc = await CompanySettings.findOne({ key: 'company' }).lean();
+            const COMPANY_SETTINGS_FILE = path.join(__dirname, 'company_settings.json');
+            if (!compDoc && fs.existsSync(COMPANY_SETTINGS_FILE)) {
+                const compData = fs.readFileSync(COMPANY_SETTINGS_FILE, 'utf-8');
+                const parsedComp = JSON.parse(compData || '{}');
+                if (Object.keys(parsedComp).length > 0) {
+                    await CompanySettings.findOneAndUpdate(
+                        { key: 'company' },
+                        { $set: { ...parsedComp, key: 'company' } },
+                        { upsert: true }
+                    );
+                    console.log('[PostgreSQL Data Sync] Migrated company settings from JSON to PostgreSQL.');
+                }
+            }
+        } catch (compErr) {
+            console.warn('[PostgreSQL Data Sync] Company settings sync warning:', compErr.message);
+        }
+
+        isPostgresDataSynced = true;
         console.log('[PostgreSQL Data Sync] All database data successfully synced with PostgreSQL.');
     } catch (err) {
         console.error('[PostgreSQL Data Sync] Error:', err.message);
     }
 }
 
-if (mongoose.connection.readyState === 1) {
-    initMongoDataSync();
+// Backward-compatibility alias
+const initMongoDataSync = initPostgresDataSync;
+
+if (dbConnection.readyState === 1) {
+    initPostgresDataSync();
 }
-mongoose.connection.on('connected', () => {
-    initMongoDataSync();
+dbConnection.on('connected', () => {
+    initPostgresDataSync();
 });
 
 function getMessageReports(user = null) {
@@ -434,7 +489,16 @@ function appendMessageReport(record) {
     try {
         if (!record || !record.id) return;
 
-        // 1. Update in-memory cache
+        // 1. Save permanently to PostgreSQL as primary persistent store
+        if (dbConnection.readyState === 1) {
+            MessageReportModel.findOneAndUpdate(
+                { id: record.id },
+                { $set: record },
+                { upsert: true, new: true }
+            ).catch(mErr => console.warn('[PostgreSQL] MessageReport save warning:', mErr.message));
+        }
+
+        // 2. Update in-memory cache for instant real-time access
         if (!messageReportsCache) messageReportsCache = [];
         const existingIdx = messageReportsCache.findIndex(r => r.id === record.id);
         if (existingIdx >= 0) {
@@ -442,34 +506,13 @@ function appendMessageReport(record) {
         } else {
             messageReportsCache.unshift(record);
         }
-        if (messageReportsCache.length > 5000) {
-            messageReportsCache = messageReportsCache.slice(0, 5000);
+        if (messageReportsCache.length > MAX_REPORTS_CACHE) {
+            // Evict oldest from RAM — the record is permanently stored in PostgreSQL
+            messageReportsCache = messageReportsCache.slice(0, MAX_REPORTS_CACHE);
         }
 
-        // 2. Fallback to local JSON file
-        try {
-            let reports = [];
-            if (fs.existsSync(REPORTS_FILE)) {
-                const data = fs.readFileSync(REPORTS_FILE, 'utf-8');
-                reports = JSON.parse(data || '[]');
-            }
-            const fIdx = reports.findIndex(r => r.id === record.id);
-            if (fIdx >= 0) reports[fIdx] = { ...reports[fIdx], ...record };
-            else reports.unshift(record);
-            if (reports.length > 5000) reports = reports.slice(0, 5000);
-            fs.writeFileSync(REPORTS_FILE, JSON.stringify(reports, null, 2), 'utf-8');
-        } catch (fErr) {
-            console.warn('[appendMessageReport] Local file write warning:', fErr.message);
-        }
-
-        // 3. Save permanently to MongoDB Atlas
-        if (mongoose.connection.readyState === 1) {
-            MessageReportModel.findOneAndUpdate(
-                { id: record.id },
-                { $set: record },
-                { upsert: true, new: true }
-            ).catch(mErr => console.warn('[PostgreSQL] MessageReport save warning:', mErr.message));
-        }
+        // 3. Debounced fallback write to local JSON file
+        persistMessageReports();
     } catch (e) {
         console.error('Error appending message report:', e);
     }
@@ -568,7 +611,7 @@ function saveContact(c) {
         } catch {}
     }, 2000);
 
-    if (mongoose.connection.readyState === 1) {
+    if (dbConnection.readyState === 1) {
         ContactModel.findOneAndUpdate(
             { id: c.id },
             { $set: updated },
@@ -752,7 +795,7 @@ function clearUserIncomingMessages(ownerUserId) {
         persistIncomingMessages();
     }
 
-    if (mongoose.connection.readyState === 1) {
+    if (dbConnection.readyState === 1) {
         const filter = isTargetAdmin
             ? { $or: [{ ownerUserId: 'admin' }, { ownerUserId: 'ADMIN' }, { ownerUserId: null }] }
             : { ownerUserId: String(ownerUserId) };
@@ -786,7 +829,7 @@ function appendIncomingMessage(record) {
     messages.unshift(record);
     persistIncomingMessages();
 
-    if (mongoose.connection.readyState === 1) {
+    if (dbConnection.readyState === 1) {
         IncomingMessageModel.findOneAndUpdate(
             { id: record.id },
             { $set: record },
@@ -814,7 +857,7 @@ function appendIncomingMessagesBatch(records) {
         persistIncomingMessages();
     }
 
-    if (mongoose.connection.readyState === 1 && records.length > 0) {
+    if (dbConnection.readyState === 1 && records.length > 0) {
         const ops = records.filter(r => r && r.id).map(r => ({
             updateOne: {
                 filter: { id: r.id },
@@ -881,9 +924,9 @@ function updateIncomingReadStatus(id, isRead = true, callerUser = null) {
             }
             msg.isRead = isRead;
             persistIncomingMessages();
-            if (mongoose.connection.readyState === 1) {
+            if (dbConnection.readyState === 1) {
                 IncomingMessageModel.updateOne({ id }, { $set: { isRead } })
-                    .catch(err => console.warn('[Postgres/Mongo] update read status error:', err.message));
+                    .catch(err => console.warn('[PostgreSQL] update read status error:', err.message));
             }
             return true;
         }
@@ -908,6 +951,15 @@ function markChatAsRead(chatJid, callerUser = null) {
         });
         if (changed) {
             persistIncomingMessages();
+            if (dbConnection.readyState === 1) {
+                const filter = {
+                    $or: [{ chatJid: chatJid }, { from: chatJid }],
+                    isRead: false
+                };
+                if (callerUserId) filter.ownerUserId = callerUserId;
+                IncomingMessageModel.updateMany(filter, { $set: { isRead: true } })
+                    .catch(err => console.warn('[PostgreSQL] markChatAsRead error:', err.message));
+            }
         }
         return changed;
     } catch (e) {
@@ -930,6 +982,12 @@ function markAllIncomingRead(callerUser = null) {
         });
         if (changed) {
             persistIncomingMessages();
+            if (dbConnection.readyState === 1) {
+                const filter = { isRead: false };
+                if (callerUserId) filter.ownerUserId = callerUserId;
+                IncomingMessageModel.updateMany(filter, { $set: { isRead: true } })
+                    .catch(err => console.warn('[PostgreSQL] markAllIncomingRead error:', err.message));
+            }
         }
         return true;
     } catch (e) {
@@ -952,6 +1010,14 @@ function deleteChatMessages(chatJid, callerUser = null) {
         });
         incomingMessagesCache = filtered;
         persistIncomingMessages();
+        if (dbConnection.readyState === 1) {
+            const filter = {
+                $or: [{ chatJid: chatJid }, { from: chatJid }]
+            };
+            if (callerUserId) filter.ownerUserId = callerUserId;
+            IncomingMessageModel.deleteMany(filter)
+                .catch(err => console.warn('[PostgreSQL] deleteChatMessages error:', err.message));
+        }
         return true;
     } catch (e) {
         console.error('Error deleting chat messages:', e);
@@ -985,14 +1051,19 @@ function getApiSettings() {
         lastUsed: null,
         totalSent: 0
     };
-    try {
-        if (fs.existsSync(API_SETTINGS_FILE)) {
-            const data = fs.readFileSync(API_SETTINGS_FILE, 'utf-8');
-            const parsed = JSON.parse(data || '{}');
-            settings = { ...settings, ...parsed };
+    if (apiSettingsCache) {
+        settings = { ...settings, ...apiSettingsCache };
+    } else {
+        try {
+            if (fs.existsSync(API_SETTINGS_FILE)) {
+                const data = fs.readFileSync(API_SETTINGS_FILE, 'utf-8');
+                const parsed = JSON.parse(data || '{}');
+                settings = { ...settings, ...parsed };
+                apiSettingsCache = parsed;
+            }
+        } catch (e) {
+            console.error('Error reading API settings:', e);
         }
-    } catch (e) {
-        console.error('Error reading API settings:', e);
     }
     if (envToken) {
         settings.token = envToken;
@@ -1010,9 +1081,14 @@ function saveApiSettings(settings) {
         if (process.env.API_MASTER_TOKEN) {
             toSave.token = '';
         }
-        fs.writeFileSync(API_SETTINGS_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
+        apiSettingsCache = { ...toSave };
+        try {
+            fs.writeFileSync(API_SETTINGS_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
+        } catch (fErr) {
+            console.warn('[saveApiSettings] Local file write warning:', fErr.message);
+        }
 
-        if (mongoose.connection.readyState === 1) {
+        if (dbConnection.readyState === 1) {
             ApiSettingsModel.findOneAndUpdate(
                 { key: 'default' },
                 { $set: { ...toSave, key: 'default' } },
@@ -1167,6 +1243,31 @@ app.post('/api/whatsapp/connect', authRequired, adminRequired, async (req, res) 
     }
 });
 
+async function clearAdminWhatsAppCredentials() {
+    try {
+        const SessionAuth = require('./models/SessionAuth');
+        // 1. Delete canonical admin session and Baileys admin creds records
+        await SessionAuth.deleteMany({
+            $or: [
+                { id: 'admin' },
+                { id: 'admin_creds.json' },
+                { id: { $regex: '^admin_' } }
+            ]
+        });
+
+        // 2. Direct SQL cleanup ensuring canonical 'admin' and 'admin_creds.json' structure is wiped
+        const { connection } = require('./db');
+        if (connection?.pool) {
+            await connection.pool.query(
+                `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id LIKE 'admin_%'`
+            ).catch(() => {});
+        }
+        console.log('[Admin WhatsApp] Cleared canonical admin credentials (admin, admin_creds.json, admin_*) from database.');
+    } catch (e) {
+        console.error('[Admin WhatsApp] Error clearing admin credentials:', e.message);
+    }
+}
+
 app.post('/api/whatsapp/disconnect', authRequired, adminRequired, async (req, res) => {
     try {
         if (adminReconnectTimer) {
@@ -1198,27 +1299,12 @@ app.post('/api/whatsapp/disconnect', authRequired, adminRequired, async (req, re
             global.__waAdminSocket = null;
         }
 
-        // 3. Stop any bridged user sessions for admin phone or fallback
-        try {
-            const { stopUserSession, getSessionByPhoneOrUserId } = require('./userSessions');
-            const adminPhone = CONFIG_ADMIN_PHONE;
-            const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-            if (match?.userId) {
-                await stopUserSession(match.userId).catch(() => {});
-            }
-            if (CONFIG_ADMIN_DEFAULT_USER_ID) {
-                await stopUserSession(CONFIG_ADMIN_DEFAULT_USER_ID).catch(() => {});
-            }
-        } catch (e) {}
-
         connectionStatus = 'disconnected';
         connectedNumber = null;
         latestQR = null;
 
-        try {
-            const SessionAuth = require('./models/SessionAuth');
-            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
-        } catch (e) {}
+        // 3. Clear canonical admin WhatsApp credentials without affecting any user sessions
+        await clearAdminWhatsAppCredentials();
 
         clearUserIncomingMessages('admin');
 
@@ -1863,7 +1949,7 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
         } = req.query;
 
         let rawUserReports = [];
-        if (mongoose.connection.readyState === 1) {
+        if (dbConnection.readyState === 1) {
             try {
                 let dbQuery = {};
                 if (req.user.role !== 'admin') {
@@ -1897,7 +1983,7 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
                 }
                 rawUserReports = await MessageReportModel.find(dbQuery).sort({ date: -1 }).limit(5000).lean();
             } catch (dbErr) {
-                console.warn('[Reports API] MongoDB query warning:', dbErr.message);
+                console.warn('[Reports API] PostgreSQL query warning:', dbErr.message);
             }
         }
 
@@ -3293,6 +3379,8 @@ app.post('/api/group/message/send', handleSendText);
 
 let isStartingBot = false;
 let adminReconnectTimer = null;
+// True after a deliberate manual disconnect/logout — suppresses automatic reconnect until next intentional connect
+let adminManuallyDisconnected = false;
 
 async function startBot(forceNew = false) {
     if (isStartingBot) {
@@ -3300,6 +3388,8 @@ async function startBot(forceNew = false) {
         return;
     }
     isStartingBot = true;
+    // Any intentional start clears the manual-disconnect guard
+    adminManuallyDisconnected = false;
 
     if (adminReconnectTimer) {
         clearTimeout(adminReconnectTimer);
@@ -3322,9 +3412,8 @@ async function startBot(forceNew = false) {
 
         if (forceNew) {
             try {
-                const SessionAuth = require('./models/SessionAuth');
-                await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
-                console.log('[Admin WhatsApp] Fresh pairing requested: Previous admin credentials wiped.');
+                await clearAdminWhatsAppCredentials();
+                console.log('[Admin WhatsApp] Fresh pairing requested: Previous canonical admin credentials wiped.');
             } catch (wipeErr) {
                 console.warn('[Admin WhatsApp] Wipe error:', wipeErr.message);
             }
@@ -3333,7 +3422,7 @@ async function startBot(forceNew = false) {
             connectionStatus = 'connecting';
         }
 
-        const { state, saveCreds } = await useMongoAuthState('admin');
+        const { state, saveCreds } = await usePgAuthState('admin');
 
         // Pre-populate connectedNumber immediately from stored credentials if available
         if (state.creds?.me?.id) {
@@ -3429,19 +3518,21 @@ async function startBot(forceNew = false) {
                 const statusCode = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : null;
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut;
                 const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));
-                const shouldReconnect = !isLoggedOut && !isQRExpired;
+                // Never auto-reconnect after: explicit logout from WhatsApp app, QR expired, or a manual disconnect from our dashboard
+                const shouldReconnect = !isLoggedOut && !isQRExpired && !adminManuallyDisconnected;
 
-                console.log(`[Admin WhatsApp] Connection closed. StatusCode: ${statusCode}, Reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}`);
+                console.log(`[Admin WhatsApp] Connection closed. StatusCode: ${statusCode}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}, manualDisconnect: ${adminManuallyDisconnected}, willReconnect: ${shouldReconnect}`);
 
-                connectionStatus = isQRExpired ? 'disconnected' : (shouldReconnect ? 'connecting' : 'disconnected');
+                connectionStatus = shouldReconnect ? 'connecting' : 'disconnected';
                 if (!shouldReconnect) {
                     connectedNumber = null;
                     latestQR = null;
                     if (isLoggedOut) {
+                        // Mark as manual so catch-block and watchdog both skip reconnect
+                        adminManuallyDisconnected = true;
                         try {
-                            const SessionAuth = require('./models/SessionAuth');
-                            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
-                            console.log('[Admin WhatsApp] Cleared stale admin credentials after logout.');
+                            await clearAdminWhatsAppCredentials();
+                            console.log('[Admin WhatsApp] Cleared canonical admin credentials after logout.');
                         } catch (e) {}
                     }
                 }
@@ -3795,8 +3886,10 @@ module.exports = {
     unwrapMessage,
     extractMessageText,
     saveContact,
+    initPostgresDataSync,
     initMongoDataSync,
     invalidateApiTokenCache,
     clearUserIncomingMessages,
+    clearAdminWhatsAppCredentials,
     getLatestQR: () => latestQR
 };
