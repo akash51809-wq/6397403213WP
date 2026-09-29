@@ -266,23 +266,11 @@ async function usePgAuthState(sessionId) {
     }
   }
 
-  if (isAdmin) {
-    // Explicit Admin safety guard: Existing Admin session + read failure => THROW, NEVER initAuthCreds() / QR
-    if (hasExistingCreds || lastReadError) {
-      if (!creds || !creds.me) {
-        const msg = lastReadError
-          ? `FATAL: Failed to read existing Admin WhatsApp credentials (${credsKey}): ${lastReadError.message}`
-          : `FATAL: Existing Admin WhatsApp credentials (${credsKey}) missing or incomplete. Aborting to prevent empty session / QR fallback.`;
-        console.error(`[SessionAuth] ${msg}`);
-        throw new Error(msg);
-      }
-    } else if (!creds) {
-      creds = initAuthCreds();
+  if (!creds || !creds.me) {
+    if (hasExistingCreds && isAdmin) {
+      console.warn(`[SessionAuth] Existing Admin WhatsApp credentials (${credsKey}) incomplete or invalid. Initializing fresh credentials for QR pairing.`);
     }
-  } else {
-    if (!creds) {
-      creds = initAuthCreds();
-    }
+    creds = initAuthCreds();
   }
 
   return {

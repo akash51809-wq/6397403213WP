@@ -999,22 +999,15 @@ app.get('/api/status', authRequired, adminRequired, async (req, res) => {
 });
 
 app.get('/api/qr', authRequired, adminRequired, async (req, res) => {
-    // If admin is connected (dedicated or bridged active session), return connected
     const activeSock = getActiveAdminSocket();
     if (connectionStatus === 'connected' || (activeSock && typeof activeSock.sendMessage === 'function')) {
         const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
         return res.json({ status: 'connected', number: num });
     }
-    // If admin credentials exist in MongoDB, Admin is paired: NEVER return a QR code!
-    let hasAdminCredsInDb = false;
-    try {
-        const SessionAuth = require('./models/SessionAuth');
-        hasAdminCredsInDb = Boolean(await SessionAuth.exists({ id: 'admin_creds.json' }));
-    } catch {}
-    if (hasAdminCredsInDb) {
-        return res.json({ status: 'connecting', number: connectedNumber || CONFIG_ADMIN_PHONE, qr: null });
-    }
     if (!latestQR) {
+        if (!isStartingBot && connectionStatus === 'disconnected') {
+            startBot().catch(() => {});
+        }
         return res.json({ status: 'waiting' });
     }
     try {
@@ -1031,23 +1024,90 @@ app.get('/api/whatsapp/qr', authRequired, adminRequired, async (req, res) => {
         const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
         return res.json({ success: true, status: 'connected', number: num });
     }
-    // If admin credentials exist in MongoDB, Admin is paired: NEVER return a QR code!
-    let hasAdminCredsInDb = false;
-    try {
-        const SessionAuth = require('./models/SessionAuth');
-        hasAdminCredsInDb = Boolean(await SessionAuth.exists({ id: 'admin_creds.json' }));
-    } catch {}
-    if (hasAdminCredsInDb) {
-        return res.json({ success: true, status: 'connecting', number: connectedNumber || CONFIG_ADMIN_PHONE, qr: null });
-    }
     if (!latestQR) {
-        return res.json({ success: true, status: 'waiting' });
+        if (!isStartingBot && connectionStatus === 'disconnected') {
+            startBot().catch(() => {});
+        }
+        return res.json({ success: true, status: 'waiting', qr: null });
     }
     try {
         const qrImage = await QRCode.toDataURL(latestQR);
         res.json({ success: true, status: 'qr', qr: qrImage });
     } catch (error) {
         res.status(500).json({ success: false, status: 'error', message: error.message });
+    }
+});
+
+app.post('/api/whatsapp/connect', authRequired, adminRequired, async (req, res) => {
+    try {
+        const activeSock = getActiveAdminSocket();
+        if (connectionStatus === 'connected' && activeSock && typeof activeSock.sendMessage === 'function') {
+            const num = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
+            return res.json({ success: true, status: 'connected', number: num, message: 'Admin WhatsApp is already connected.' });
+        }
+
+        const force = Boolean(req.body?.force);
+        isStartingBot = false;
+        startBot(force).catch(e => console.error('[Admin WhatsApp] Connect error:', e.message));
+
+        let waited = 0;
+        while (!latestQR && connectionStatus !== 'connected' && waited < 2500) {
+            await new Promise(r => setTimeout(r, 250));
+            waited += 250;
+        }
+
+        let qrImage = null;
+        if (latestQR) {
+            try {
+                qrImage = await QRCode.toDataURL(latestQR);
+            } catch (e) {}
+        }
+
+        res.json({
+            success: true,
+            status: qrImage ? 'qr' : connectionStatus,
+            qr: qrImage,
+            number: connectedNumber || null,
+            message: qrImage ? 'QR code generated.' : 'WhatsApp connection initiated.'
+        });
+    } catch (err) {
+        console.error('Admin WhatsApp connect error:', err);
+        res.status(500).json({ success: false, message: err.message || 'WhatsApp connect failed' });
+    }
+});
+
+app.post('/api/whatsapp/disconnect', authRequired, adminRequired, async (req, res) => {
+    try {
+        if (adminReconnectTimer) {
+            clearTimeout(adminReconnectTimer);
+            adminReconnectTimer = null;
+        }
+        if (sock) {
+            try {
+                sock.ev?.removeAllListeners?.();
+                sock.end?.();
+            } catch (e) {}
+            sock = null;
+        }
+        global.__waAdminSocket = null;
+        connectionStatus = 'disconnected';
+        connectedNumber = null;
+        latestQR = null;
+
+        try {
+            const SessionAuth = require('./models/SessionAuth');
+            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+        } catch (e) {}
+
+        const { recordAdminWhatsAppSession } = require('./auth');
+        recordAdminWhatsAppSession({ status: 'disconnected', phone: null }).catch(() => {});
+
+        broadcastIncomingEvent('connection_status', { status: 'disconnected', number: null, role: 'admin' });
+
+        res.json({ success: true, message: 'Admin WhatsApp disconnected and session cleared.' });
+    } catch (err) {
+        console.error('Admin WhatsApp disconnect error:', err);
+        res.status(500).json({ success: false, message: err.message || 'Disconnect failed' });
     }
 });
 
@@ -3095,7 +3155,7 @@ app.post('/api/group/message/send', handleSendText);
 let isStartingBot = false;
 let adminReconnectTimer = null;
 
-async function startBot() {
+async function startBot(forceNew = false) {
     if (isStartingBot) {
         console.log('[AdminSocket] Startup already in progress, skipping concurrent call.');
         return;
@@ -3119,6 +3179,19 @@ async function startBot() {
             } finally {
                 sock = null;
             }
+        }
+
+        if (forceNew) {
+            try {
+                const SessionAuth = require('./models/SessionAuth');
+                await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+                console.log('[Admin WhatsApp] Fresh pairing requested: Previous admin credentials wiped.');
+            } catch (wipeErr) {
+                console.warn('[Admin WhatsApp] Wipe error:', wipeErr.message);
+            }
+            latestQR = null;
+            connectedNumber = null;
+            connectionStatus = 'connecting';
         }
 
         const { state, saveCreds } = await useMongoAuthState('admin');
@@ -3160,7 +3233,7 @@ async function startBot() {
             if (qr) {
                 // Check if admin phone is already active in user sessions, bridge and suppress QR
                 const activeAdmin = getActiveAdminSocket();
-                if (activeAdmin && typeof activeAdmin.sendMessage === 'function') {
+                if (activeAdmin && typeof activeAdmin.sendMessage === 'function' && activeAdmin !== newSock) {
                     console.log('[Admin WhatsApp] Admin phone already connected via active session. Suppressing QR.');
                     connectionStatus = 'connected';
                     latestQR = null;
@@ -3172,32 +3245,22 @@ async function startBot() {
                     return;
                 }
 
-                // Defensive guard: check if Admin credentials already exist in MongoDB
-                let hasAdminCredsInDb = false;
-                try {
-                    const SessionAuth = require('./models/SessionAuth');
-                    hasAdminCredsInDb = Boolean(await SessionAuth.exists({ id: 'admin_creds.json' }));
-                } catch (dbErr) {
-                    hasAdminCredsInDb = true; // Err on side of caution
-                }
-
-                if (hasAdminCredsInDb) {
-                    console.warn('\n[Admin WhatsApp] ADMIN QR BLOCKED: existing MongoDB Admin session detected. Re-authenticating instead of pairing new device...\n');
-                    connectionStatus = 'connecting';
-                    broadcastIncomingEvent('connection_status', { status: 'connecting', number: connectedNumber });
-
-                    if (adminReconnectTimer) clearTimeout(adminReconnectTimer);
-                    adminReconnectTimer = setTimeout(() => {
-                        adminReconnectTimer = null;
-                        startBot();
-                    }, 3000);
-                    return;
-                }
-
                 latestQR = qr;
                 connectionStatus = 'qr';
-                console.log('\nScan this QR code with WhatsApp:\n');
-                qrcodeTerminal.generate(qr, { small: true });
+                console.log('\n[Admin WhatsApp] Scan this QR code with WhatsApp:\n');
+                try {
+                    qrcodeTerminal.generate(qr, { small: true });
+                } catch (e) {}
+
+                try {
+                    const qrDataUrl = await QRCode.toDataURL(qr);
+                    broadcastIncomingEvent('connection_status', { 
+                        status: 'qr', 
+                        qr: qrDataUrl,
+                        role: 'admin'
+                    });
+                } catch (e) {}
+
                 const { recordAdminWhatsAppSession } = require('./auth');
                 recordAdminWhatsAppSession({ status: 'waiting' }).catch(() => {});
             }
@@ -3225,21 +3288,29 @@ async function startBot() {
 
             if (connection === 'close') {
                 const statusCode = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : null;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+                const shouldReconnect = !isLoggedOut;
+
+                console.log(`[Admin WhatsApp] Connection closed. StatusCode: ${statusCode}, Reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}`);
 
                 connectionStatus = shouldReconnect ? 'connecting' : 'disconnected';
                 if (!shouldReconnect) {
                     connectedNumber = null;
+                    latestQR = null;
+                    try {
+                        const SessionAuth = require('./models/SessionAuth');
+                        await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+                        console.log('[Admin WhatsApp] Cleared stale admin credentials after logout.');
+                    } catch (e) {}
                 }
                 if (global.__waAdminSocket === newSock) {
                     global.__waAdminSocket = null; // Clear so auth.js knows WhatsApp is disconnected
                 }
-                broadcastIncomingEvent('connection_status', { status: connectionStatus, number: connectedNumber });
+                broadcastIncomingEvent('connection_status', { status: connectionStatus, number: connectedNumber, role: 'admin' });
 
                 const { recordAdminWhatsAppSession } = require('./auth');
                 recordAdminWhatsAppSession({ status: shouldReconnect ? 'connecting' : 'disconnected', phone: connectedNumber }).catch(() => {});
 
-                console.log('Connection closed. Reconnecting:', shouldReconnect);
                 if (shouldReconnect) {
                     if (adminReconnectTimer) clearTimeout(adminReconnectTimer);
                     adminReconnectTimer = setTimeout(() => {
@@ -3575,5 +3646,6 @@ module.exports = {
     extractMessageText,
     saveContact,
     initMongoDataSync,
-    invalidateApiTokenCache
+    invalidateApiTokenCache,
+    getLatestQR: () => latestQR
 };

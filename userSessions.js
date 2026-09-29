@@ -159,6 +159,12 @@ async function startUserSession(userId) {
             if (shouldReconnect) {
                 setTimeout(() => startUserSession(userId), 3000);
             } else {
+                if (isLoggedOut) {
+                    try {
+                        const SessionAuth = require('./models/SessionAuth');
+                        SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } }).catch(() => {});
+                    } catch (e) {}
+                }
                 sessions.delete(userId);
             }
         } else if (connection === 'open') {
@@ -308,16 +314,24 @@ async function stopUserSession(userId) {
     const session = sessions.get(userId);
     if (session) {
         if (session.socket) {
-            session.socket.end(new Error('Session stopped by user'));
+            try {
+                session.socket.ev?.removeAllListeners?.();
+                session.socket.end(new Error('Session stopped by user'));
+            } catch (e) {}
         }
         sessions.delete(userId);
     }
+
+    try {
+        const SessionAuth = require('./models/SessionAuth');
+        await SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } });
+    } catch (e) {}
     
     await WhatsAppSession.updateOne(
         { ownerUserId: userId, role: 'user' },
         { status: 'disconnected', updatedAt: new Date() }
     );
-    console.log(`[UserSession] Session stopped for user ${userId}`);
+    console.log(`[UserSession] Session stopped and credentials cleared for user ${userId}`);
 }
 
 function getUserSession(userId) {

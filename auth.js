@@ -883,13 +883,30 @@ router.get('/api/user/whatsapp/qr', authRequired, async (req, res) => {
   try {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
-      console.warn('[UserSession] BLOCKED QR request for admin user ADMIN via user QR endpoint');
       const isConn = Boolean(global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function');
+      if (isConn) {
+        const num = (global.__waAdminSocket?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
+        return res.json({
+          success: true,
+          status: 'connected',
+          qr: null,
+          connectedNumber: num
+        });
+      }
+      try {
+        const indexMod = require('./index');
+        const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
+        if (latestQR) {
+          const QRCode = require('qrcode');
+          const qrDataUrl = await QRCode.toDataURL(latestQR);
+          return res.json({ success: true, status: 'qr', qr: qrDataUrl, connectedNumber: null });
+        }
+      } catch (e) {}
       return res.json({
         success: true,
-        status: isConn ? 'connected' : 'waiting',
+        status: 'waiting',
         qr: null,
-        connectedNumber: isConn ? (global.__waAdminSocket?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null) : null
+        connectedNumber: null
       });
     }
 
@@ -911,10 +928,27 @@ router.post('/api/user/whatsapp/connect', authRequired, async (req, res) => {
   try {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
-      console.warn('[UserSession] BLOCKED admin userId=ADMIN from user session connect endpoint');
-      return res.status(400).json({
-        success: false,
-        message: 'Admin WhatsApp session is managed automatically via dedicated sessionId=admin.'
+      const indexMod = require('./index');
+      if (typeof indexMod.startBot === 'function') {
+        indexMod.startBot(true).catch(e => console.warn('[Admin Connect] startBot error:', e.message));
+      }
+      let qrDataUrl = null;
+      let waited = 0;
+      while (waited < 2500) {
+        const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
+        if (latestQR) {
+          const QRCode = require('qrcode');
+          qrDataUrl = await QRCode.toDataURL(latestQR).catch(() => null);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 250));
+        waited += 250;
+      }
+      return res.json({
+        success: true,
+        message: 'Admin WhatsApp session started.',
+        status: qrDataUrl ? 'qr' : 'connecting',
+        qr: qrDataUrl
       });
     }
 
@@ -932,11 +966,25 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
   try {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
-      console.warn('[UserSession] BLOCKED admin userId=ADMIN from user session disconnect endpoint');
-      return res.status(400).json({
-        success: false,
-        message: 'Admin WhatsApp session cannot be disconnected via user session endpoint.'
-      });
+      const indexMod = require('./index');
+      if (global.__waAdminSocket) {
+        try {
+          global.__waAdminSocket.ev?.removeAllListeners?.();
+          global.__waAdminSocket.end?.();
+        } catch (e) {}
+        global.__waAdminSocket = null;
+      }
+      try {
+        const SessionAuth = require('./models/SessionAuth');
+        await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+      } catch (e) {}
+      if (typeof indexMod.recordAdminWhatsAppSession === 'function') {
+        indexMod.recordAdminWhatsAppSession({ status: 'disconnected', phone: null }).catch(() => {});
+      }
+      if (typeof indexMod.broadcastIncomingEvent === 'function') {
+        indexMod.broadcastIncomingEvent('connection_status', { status: 'disconnected', number: null, role: 'admin' });
+      }
+      return res.json({ success: true, message: 'Admin WhatsApp disconnected and session cleared.' });
     }
 
     const { stopUserSession } = require('./userSessions');

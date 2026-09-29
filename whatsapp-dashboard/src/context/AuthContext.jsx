@@ -241,8 +241,14 @@ export function AuthProvider({ children }) {
     setConnecting(true)
     setError('')
     try {
-      await api('/api/user/whatsapp/connect', { method: 'POST' })
+      if (isAdmin) {
+        await api('/api/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: true }) })
+      } else {
+        await api('/api/user/whatsapp/connect', { method: 'POST' })
+      }
       notify('WhatsApp session शुरू हो रहा है... QR कोड लोड हो रहा है...')
+      await loadQr()
+      await loadStatus()
       setTimeout(() => { loadQr(); loadStatus() }, 1500)
     } catch (e) {
       setError(e.message)
@@ -253,7 +259,11 @@ export function AuthProvider({ children }) {
 
   const disconnectUserWhatsApp = async () => {
     try {
-      await api('/api/user/whatsapp/disconnect', { method: 'POST' })
+      if (isAdmin) {
+        await api('/api/whatsapp/disconnect', { method: 'POST' })
+      } else {
+        await api('/api/user/whatsapp/disconnect', { method: 'POST' })
+      }
       setStatus({ status: 'disconnected', number: null, profileName: 'WhatsApp Account' })
       setQr(null)
       notify('WhatsApp disconnected.')

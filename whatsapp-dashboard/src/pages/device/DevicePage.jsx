@@ -31,11 +31,7 @@ export function DevicePage() {
   }, [loadStatus, loadQr])
 
   const onConnect = () => {
-    if (isAdmin) {
-      loadQr()
-    } else {
-      connectUserWhatsApp()
-    }
+    connectUserWhatsApp()
   }
 
   const onDisconnect = () => {
