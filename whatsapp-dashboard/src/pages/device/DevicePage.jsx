@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import '../../styles/device.css'
 
@@ -18,6 +18,7 @@ export function DevicePage() {
     planInfo
   } = useAuth()
 
+  const [disconnecting, setDisconnecting] = useState(false)
   const isConnected = status?.status === 'connected'
 
   useEffect(() => {
@@ -34,9 +35,16 @@ export function DevicePage() {
     connectUserWhatsApp()
   }
 
-  const onDisconnect = () => {
+  const onDisconnect = async () => {
     if (window.confirm('Are you sure you want to disconnect this WhatsApp session?')) {
-      disconnectUserWhatsApp()
+      setDisconnecting(true)
+      try {
+        await disconnectUserWhatsApp()
+      } catch (err) {
+        notify('Failed to disconnect: ' + (err.message || 'Error'))
+      } finally {
+        setDisconnecting(false)
+      }
     }
   }
 
@@ -101,8 +109,18 @@ export function DevicePage() {
               </span>
             </div>
 
-            <button type="button" className="btn" onClick={onDisconnect}>
-              Disconnect Session
+            <button 
+              type="button" 
+              className="btn" 
+              onClick={onDisconnect}
+              disabled={disconnecting}
+              style={{ 
+                opacity: disconnecting ? 0.6 : 1, 
+                cursor: disconnecting ? 'not-allowed' : 'pointer',
+                backgroundColor: disconnecting ? '#9ca3af' : undefined 
+              }}
+            >
+              {disconnecting ? 'Disconnecting...' : 'Disconnect Session'}
             </button>
           </article>
         ) : (

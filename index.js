@@ -946,6 +946,9 @@ let isSending = false;
 ========================================================= */
 
 function getActiveAdminSocket() {
+    if (connectionStatus === 'disconnected') {
+        return null;
+    }
     if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
         return global.__waAdminSocket;
     }
@@ -1082,14 +1085,44 @@ app.post('/api/whatsapp/disconnect', authRequired, adminRequired, async (req, re
             clearTimeout(adminReconnectTimer);
             adminReconnectTimer = null;
         }
+
+        // 1. Explicitly log out and end admin socket
         if (sock) {
             try {
                 sock.ev?.removeAllListeners?.();
+                if (typeof sock.logout === 'function') {
+                    await sock.logout().catch(() => {});
+                }
                 sock.end?.();
             } catch (e) {}
             sock = null;
         }
-        global.__waAdminSocket = null;
+
+        // 2. Disconnect global admin socket if separate
+        if (global.__waAdminSocket && global.__waAdminSocket !== sock) {
+            try {
+                global.__waAdminSocket.ev?.removeAllListeners?.();
+                if (typeof global.__waAdminSocket.logout === 'function') {
+                    await global.__waAdminSocket.logout().catch(() => {});
+                }
+                global.__waAdminSocket.end?.();
+            } catch (e) {}
+            global.__waAdminSocket = null;
+        }
+
+        // 3. Stop any bridged user sessions for admin phone or fallback
+        try {
+            const { stopUserSession, getSessionByPhoneOrUserId } = require('./userSessions');
+            const adminPhone = CONFIG_ADMIN_PHONE;
+            const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
+            if (match?.userId) {
+                await stopUserSession(match.userId).catch(() => {});
+            }
+            if (CONFIG_ADMIN_DEFAULT_USER_ID) {
+                await stopUserSession(CONFIG_ADMIN_DEFAULT_USER_ID).catch(() => {});
+            }
+        } catch (e) {}
+
         connectionStatus = 'disconnected';
         connectedNumber = null;
         latestQR = null;
@@ -3208,7 +3241,7 @@ async function startBot(forceNew = false) {
             auth: state,
             printQRInTerminal: false,
             browser: ["Chrome (Windows)", "Desktop", "10.0"],
-            syncFullHistory: true,
+            syncFullHistory: false,
             keepAliveIntervalMs: 30000,
             getMessage: async (key) => {
                 const all = getIncomingMessages();

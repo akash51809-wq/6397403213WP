@@ -264,11 +264,16 @@ export function AuthProvider({ children }) {
       } else {
         await api('/api/user/whatsapp/disconnect', { method: 'POST' })
       }
-      setStatus({ status: 'disconnected', number: null, profileName: 'WhatsApp Account' })
+      setStatus({ status: 'disconnected', number: null, profileName: 'WhatsApp Account', ready: false })
       setQr(null)
-      notify('WhatsApp disconnected.')
+      notify('WhatsApp session disconnected.')
+      setTimeout(() => {
+        loadStatus()
+        loadQr()
+      }, 800)
     } catch (e) {
       setError(e.message)
+      throw e
     }
   }
 
@@ -398,12 +403,14 @@ export function AuthProvider({ children }) {
 
   // Logout handler
   const logout = () => {
+    api('/api/auth/logout', { method: 'POST' }).catch(() => {})
     clearToken()
     localStorage.removeItem('wa_last_activity')
     sessionStorage.removeItem('wa_logout_reason')
     setLogin('')
     setCurrentUser({})
     notify('लॉगआउट सफल')
+    window.location.href = '/login'
   }
 
   const toggleSidebar = () => setSidebarOpen(prev => !prev)

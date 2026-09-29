@@ -969,11 +969,25 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
       const indexMod = require('./index');
       if (global.__waAdminSocket) {
         try {
+          if (typeof global.__waAdminSocket.logout === 'function') {
+            await global.__waAdminSocket.logout().catch(() => {});
+          }
           global.__waAdminSocket.ev?.removeAllListeners?.();
           global.__waAdminSocket.end?.();
         } catch (e) {}
         global.__waAdminSocket = null;
       }
+      try {
+        const { stopUserSession, getSessionByPhoneOrUserId } = require('./userSessions');
+        const adminPhone = CONFIG_ADMIN_PHONE;
+        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
+        if (match?.userId) {
+          await stopUserSession(match.userId).catch(() => {});
+        }
+        if (CONFIG_ADMIN_DEFAULT_USER_ID) {
+          await stopUserSession(CONFIG_ADMIN_DEFAULT_USER_ID).catch(() => {});
+        }
+      } catch (e) {}
       try {
         const SessionAuth = require('./models/SessionAuth');
         await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });

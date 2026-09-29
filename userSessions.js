@@ -61,7 +61,7 @@ async function startUserSession(userId) {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: true,
-        syncFullHistory: true
+        syncFullHistory: false
     });
 
     const sessionData = {
@@ -306,17 +306,17 @@ async function startUserSession(userId) {
 }
 
 async function stopUserSession(userId) {
-    if (String(userId || '').trim().toUpperCase() === 'ADMIN') {
-        console.warn(`[UserSession] BLOCKED stopUserSession for admin userId=${userId}`);
-        return;
-    }
+    if (!userId) return;
 
     const session = sessions.get(userId);
     if (session) {
         if (session.socket) {
             try {
                 session.socket.ev?.removeAllListeners?.();
-                session.socket.end(new Error('Session stopped by user'));
+                if (typeof session.socket.logout === 'function') {
+                    await session.socket.logout().catch(() => {});
+                }
+                session.socket.end?.(new Error('Session stopped by user'));
             } catch (e) {}
         }
         sessions.delete(userId);
@@ -325,12 +325,17 @@ async function stopUserSession(userId) {
     try {
         const SessionAuth = require('./models/SessionAuth');
         await SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } });
+        if (String(userId).trim().toUpperCase() === 'ADMIN') {
+            await SessionAuth.deleteMany({ id: { $regex: '^admin_' } });
+        }
     } catch (e) {}
     
-    await WhatsAppSession.updateOne(
-        { ownerUserId: userId, role: 'user' },
-        { status: 'disconnected', updatedAt: new Date() }
-    );
+    try {
+        await WhatsAppSession.updateOne(
+            { $or: [{ ownerUserId: userId }, { sessionId: `user-${userId}` }] },
+            { status: 'logged_out', updatedAt: new Date() }
+        );
+    } catch (e) {}
     console.log(`[UserSession] Session stopped and credentials cleared for user ${userId}`);
 }
 

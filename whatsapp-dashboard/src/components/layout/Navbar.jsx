@@ -100,7 +100,11 @@ export function Navbar() {
           type="button"
           className="icon-btn" 
           title="Logout" 
-          onClick={logout}
+          onClick={() => {
+            if (window.confirm('क्या आप लॉगआउट करना चाहते हैं?')) {
+              logout()
+            }
+          }}
           style={{ color: '#e85b63' }}
           aria-label="Logout"
         >
