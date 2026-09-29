@@ -381,7 +381,8 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
       continue;
     }
 
-    // Handle nested json array condition like 'sessions.tokenHash'
+    // Handle nested json condition like 'sessions.tokenHash' or 'data.encrypted'
+    let colName = `"${key}"`;
     if (key.includes('.')) {
       const [col, subProp] = key.split('.');
       if (col === 'sessions') {
@@ -389,10 +390,10 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
         params.push(String(value));
         pIdx++;
         continue;
+      } else {
+        colName = `"${col}"->>'${subProp}'`;
       }
     }
-
-    const colName = `"${key}"`;
 
     if (value instanceof RegExp) {
       const isCaseInsensitive = value.flags.includes('i');

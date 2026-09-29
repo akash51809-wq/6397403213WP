@@ -227,7 +227,7 @@ let lastConnectedTime = new Date().toISOString();
 let sendingQueue = [];
 
 /* =========================================================
-   REPORTS STORAGE (MONGODB ATLAS WITH JSON FALLBACK)
+   REPORTS STORAGE (POSTGRESQL WITH JSON FALLBACK)
 ========================================================= */
 
 const REPORTS_FILE = path.join(__dirname, 'message_reports.json');
@@ -237,7 +237,7 @@ let isMongoDataSynced = false;
 async function initMongoDataSync() {
     if (mongoose.connection.readyState !== 1 || isMongoDataSynced) return;
     try {
-        console.log('[Mongo Data Sync] Initializing MongoDB persistence for reports, messages, and contacts...');
+        console.log('[PostgreSQL Data Sync] Initializing PostgreSQL persistence for reports, messages, and contacts...');
 
         // 1. Sync Message Reports
         const reportCount = await MessageReportModel.countDocuments();
@@ -255,11 +255,11 @@ async function initMongoDataSync() {
                     }));
                     if (ops.length > 0) {
                         await MessageReportModel.bulkWrite(ops, { ordered: false });
-                        console.log(`[Mongo Data Sync] Migrated ${ops.length} message reports from JSON to MongoDB.`);
+                        console.log(`[PostgreSQL Data Sync] Migrated ${ops.length} message reports from JSON to PostgreSQL.`);
                     }
                 }
             } catch (err) {
-                console.warn('[Mongo Data Sync] Message reports migration warning:', err.message);
+                console.warn('[PostgreSQL Data Sync] Message reports migration warning:', err.message);
             }
         }
         const dbReports = await MessageReportModel.find().sort({ date: -1 }).limit(5000).lean();
@@ -281,11 +281,11 @@ async function initMongoDataSync() {
                     }));
                     if (ops.length > 0) {
                         await IncomingMessageModel.bulkWrite(ops, { ordered: false });
-                        console.log(`[Mongo Data Sync] Migrated ${ops.length} incoming messages from JSON to MongoDB.`);
+                        console.log(`[PostgreSQL Data Sync] Migrated ${ops.length} incoming messages from JSON to PostgreSQL.`);
                     }
                 }
             } catch (err) {
-                console.warn('[Mongo Data Sync] Incoming messages migration warning:', err.message);
+                console.warn('[PostgreSQL Data Sync] Incoming messages migration warning:', err.message);
             }
         }
         const dbIncoming = await IncomingMessageModel.find().sort({ timestamp: -1 }).limit(5000).lean();
@@ -309,11 +309,11 @@ async function initMongoDataSync() {
                     }));
                     if (ops.length > 0) {
                         await ContactModel.bulkWrite(ops, { ordered: false });
-                        console.log(`[Mongo Data Sync] Migrated ${ops.length} contacts from JSON to MongoDB.`);
+                        console.log(`[PostgreSQL Data Sync] Migrated ${ops.length} contacts from JSON to PostgreSQL.`);
                     }
                 }
             } catch (err) {
-                console.warn('[Mongo Data Sync] Contacts migration warning:', err.message);
+                console.warn('[PostgreSQL Data Sync] Contacts migration warning:', err.message);
             }
         }
         const dbContacts = await ContactModel.find().lean();
@@ -459,7 +459,7 @@ function appendMessageReport(record) {
                 { id: record.id },
                 { $set: record },
                 { upsert: true, new: true }
-            ).catch(mErr => console.warn('[Mongo] MessageReport save warning:', mErr.message));
+            ).catch(mErr => console.warn('[PostgreSQL] MessageReport save warning:', mErr.message));
         }
     } catch (e) {
         console.error('Error appending message report:', e);
@@ -564,7 +564,7 @@ function saveContact(c) {
             { id: c.id },
             { $set: updated },
             { upsert: true }
-        ).catch(err => console.warn('[Mongo] Save contact warning:', err.message));
+        ).catch(err => console.warn('[PostgreSQL] Save contact warning:', err.message));
     }
 }
 
@@ -703,7 +703,7 @@ function appendIncomingMessage(record) {
             { id: record.id },
             { $set: record },
             { upsert: true }
-        ).catch(err => console.warn('[Mongo] Save incoming message error:', err.message));
+        ).catch(err => console.warn('[PostgreSQL] Save incoming message error:', err.message));
     }
 
     return true;
@@ -736,7 +736,7 @@ function appendIncomingMessagesBatch(records) {
         }));
         if (ops.length > 0) {
             IncomingMessageModel.bulkWrite(ops, { ordered: false })
-                .catch(err => console.warn('[Mongo] Batch incoming save error:', err.message));
+                .catch(err => console.warn('[PostgreSQL] Batch incoming save error:', err.message));
         }
     }
 
@@ -929,7 +929,7 @@ function saveApiSettings(settings) {
                 { key: 'default' },
                 { $set: { ...toSave, key: 'default' } },
                 { upsert: true }
-            ).catch(err => console.warn('[Mongo] Save API settings error:', err.message));
+            ).catch(err => console.warn('[PostgreSQL] Save API settings error:', err.message));
         }
 
         return true;
@@ -3655,7 +3655,7 @@ const adminWatchdog = setInterval(async () => {
             const SessionAuth = require('./models/SessionAuth');
             const hasCreds = await SessionAuth.exists({ id: 'admin_creds.json' });
             if (hasCreds) {
-                console.log('[AdminWatchdog] Admin WhatsApp offline, auto-reconnecting from MongoDB...');
+                console.log('[AdminWatchdog] Admin WhatsApp offline, auto-reconnecting from PostgreSQL...');
                 startBot().catch(e => console.error('[AdminWatchdog] Reconnect err:', e.message));
             }
         } catch (e) {

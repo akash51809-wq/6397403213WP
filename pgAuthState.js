@@ -310,14 +310,18 @@ async function usePgAuthState(sessionId) {
 
 async function migrateUnencryptedSessionAuth() {
   try {
-    const unencryptedRecords = await SessionAuth.find({
-      $or: [
-        { 'data.encrypted': { $ne: true } },
-        { 'data.encrypted': null }
-      ]
-    }).lean();
+    const allRecords = await SessionAuth.find({}).lean();
+    if (!Array.isArray(allRecords) || allRecords.length === 0) {
+      return 0;
+    }
 
-    if (!Array.isArray(unencryptedRecords) || unencryptedRecords.length === 0) {
+    const unencryptedRecords = allRecords.filter(record => {
+      if (!record || !record.id || !record.data) return false;
+      const d = record.data;
+      return !(d && d.encrypted === true && d.iv && d.tag);
+    });
+
+    if (unencryptedRecords.length === 0) {
       return 0;
     }
 
