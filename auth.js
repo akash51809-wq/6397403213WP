@@ -2307,7 +2307,7 @@ router.post('/api/admin/plan-requests/:requestId/reject', authRequired, adminReq
   }
 });
 
-// 11. Public: Get company branding settings (Company Name, Favicon, Logo, Login Banner)
+// 11. Public: Get company branding and website settings (Company Name, Favicon, Logo, Hero, Contact Us, Footer, Social)
 router.get('/api/settings/company', async (req, res) => {
   try {
     let settings = null;
@@ -2318,7 +2318,31 @@ router.get('/api/settings/company', async (req, res) => {
           companyName: doc.companyName || '',
           faviconUrl: doc.faviconUrl || '',
           logoUrl: doc.logoUrl || '',
-          bannerUrl: doc.bannerUrl || ''
+          bannerUrl: doc.bannerUrl || '',
+          websiteTitle: doc.websiteTitle || '',
+          websiteTagline: doc.websiteTagline || '',
+          heroBadge: doc.heroBadge || '',
+          heroTitle: doc.heroTitle || '',
+          heroSubtitle: doc.heroSubtitle || '',
+          heroDescription: doc.heroDescription || '',
+          ctaText: doc.ctaText || '',
+          ctaLink: doc.ctaLink || '',
+          contactEmail: doc.contactEmail || '',
+          contactPhone: doc.contactPhone || '',
+          contactWhatsApp: doc.contactWhatsApp || '',
+          contactAddress: doc.contactAddress || '',
+          contactBusinessEnquiry: doc.contactBusinessEnquiry || '',
+          workingHours: doc.workingHours || '',
+          footerAbout: doc.footerAbout || '',
+          footerCopyright: doc.footerCopyright || '',
+          developerCredit: doc.developerCredit || '',
+          socialFacebook: doc.socialFacebook || '',
+          socialTwitter: doc.socialTwitter || '',
+          socialInstagram: doc.socialInstagram || '',
+          socialLinkedin: doc.socialLinkedin || '',
+          socialYoutube: doc.socialYoutube || '',
+          customCss: doc.customCss || '',
+          customJs: doc.customJs || ''
         };
       }
     }
@@ -2328,7 +2352,31 @@ router.get('/api/settings/company', async (req, res) => {
         companyName: fileSettings.companyName || '',
         faviconUrl: fileSettings.faviconUrl || '',
         logoUrl: fileSettings.logoUrl || '',
-        bannerUrl: fileSettings.bannerUrl || ''
+        bannerUrl: fileSettings.bannerUrl || '',
+        websiteTitle: fileSettings.websiteTitle || '',
+        websiteTagline: fileSettings.websiteTagline || '',
+        heroBadge: fileSettings.heroBadge || '',
+        heroTitle: fileSettings.heroTitle || '',
+        heroSubtitle: fileSettings.heroSubtitle || '',
+        heroDescription: fileSettings.heroDescription || '',
+        ctaText: fileSettings.ctaText || '',
+        ctaLink: fileSettings.ctaLink || '',
+        contactEmail: fileSettings.contactEmail || '',
+        contactPhone: fileSettings.contactPhone || '',
+        contactWhatsApp: fileSettings.contactWhatsApp || '',
+        contactAddress: fileSettings.contactAddress || '',
+        contactBusinessEnquiry: fileSettings.contactBusinessEnquiry || '',
+        workingHours: fileSettings.workingHours || '',
+        footerAbout: fileSettings.footerAbout || '',
+        footerCopyright: fileSettings.footerCopyright || '',
+        developerCredit: fileSettings.developerCredit || '',
+        socialFacebook: fileSettings.socialFacebook || '',
+        socialTwitter: fileSettings.socialTwitter || '',
+        socialInstagram: fileSettings.socialInstagram || '',
+        socialLinkedin: fileSettings.socialLinkedin || '',
+        socialYoutube: fileSettings.socialYoutube || '',
+        customCss: fileSettings.customCss || '',
+        customJs: fileSettings.customJs || ''
       };
       if (connection.readyState === 1 && (settings.companyName || settings.faviconUrl || settings.logoUrl || settings.bannerUrl)) {
         CompanySettings.findOneAndUpdate(
@@ -2345,15 +2393,39 @@ router.get('/api/settings/company', async (req, res) => {
   }
 });
 
-// 12. Admin: Update company branding settings (Company Name, Favicon, Logo, Login Banner)
+// 12. Admin: Update company branding & website settings
 router.post('/api/settings/company', express.json({ limit: '15mb' }), authRequired, adminRequired, async (req, res) => {
   try {
-    const { companyName, faviconUrl, logoUrl, bannerUrl } = req.body || {};
+    const body = req.body || {};
     const updated = {
-      companyName: companyName !== undefined ? String(companyName).trim() : '',
-      faviconUrl: faviconUrl !== undefined ? String(faviconUrl).trim() : '',
-      logoUrl: logoUrl !== undefined ? String(logoUrl).trim() : '',
-      bannerUrl: bannerUrl !== undefined ? String(bannerUrl).trim() : '',
+      companyName: body.companyName !== undefined ? String(body.companyName).trim() : '',
+      faviconUrl: body.faviconUrl !== undefined ? String(body.faviconUrl).trim() : '',
+      logoUrl: body.logoUrl !== undefined ? String(body.logoUrl).trim() : '',
+      bannerUrl: body.bannerUrl !== undefined ? String(body.bannerUrl).trim() : '',
+      websiteTitle: body.websiteTitle !== undefined ? String(body.websiteTitle).trim() : '',
+      websiteTagline: body.websiteTagline !== undefined ? String(body.websiteTagline).trim() : '',
+      heroBadge: body.heroBadge !== undefined ? String(body.heroBadge).trim() : '',
+      heroTitle: body.heroTitle !== undefined ? String(body.heroTitle).trim() : '',
+      heroSubtitle: body.heroSubtitle !== undefined ? String(body.heroSubtitle).trim() : '',
+      heroDescription: body.heroDescription !== undefined ? String(body.heroDescription).trim() : '',
+      ctaText: body.ctaText !== undefined ? String(body.ctaText).trim() : '',
+      ctaLink: body.ctaLink !== undefined ? String(body.ctaLink).trim() : '',
+      contactEmail: body.contactEmail !== undefined ? String(body.contactEmail).trim() : '',
+      contactPhone: body.contactPhone !== undefined ? String(body.contactPhone).trim() : '',
+      contactWhatsApp: body.contactWhatsApp !== undefined ? String(body.contactWhatsApp).trim() : '',
+      contactAddress: body.contactAddress !== undefined ? String(body.contactAddress).trim() : '',
+      contactBusinessEnquiry: body.contactBusinessEnquiry !== undefined ? String(body.contactBusinessEnquiry).trim() : '',
+      workingHours: body.workingHours !== undefined ? String(body.workingHours).trim() : '',
+      footerAbout: body.footerAbout !== undefined ? String(body.footerAbout).trim() : '',
+      footerCopyright: body.footerCopyright !== undefined ? String(body.footerCopyright).trim() : '',
+      developerCredit: body.developerCredit !== undefined ? String(body.developerCredit).trim() : '',
+      socialFacebook: body.socialFacebook !== undefined ? String(body.socialFacebook).trim() : '',
+      socialTwitter: body.socialTwitter !== undefined ? String(body.socialTwitter).trim() : '',
+      socialInstagram: body.socialInstagram !== undefined ? String(body.socialInstagram).trim() : '',
+      socialLinkedin: body.socialLinkedin !== undefined ? String(body.socialLinkedin).trim() : '',
+      socialYoutube: body.socialYoutube !== undefined ? String(body.socialYoutube).trim() : '',
+      customCss: body.customCss !== undefined ? String(body.customCss).trim() : '',
+      customJs: body.customJs !== undefined ? String(body.customJs).trim() : '',
       updatedAt: new Date()
     };
 
@@ -2366,11 +2438,10 @@ router.post('/api/settings/company', express.json({ limit: '15mb' }), authRequir
     }
     saveCompanySettingsFile(updated);
 
-
     res.json({
       success: true,
       settings: updated,
-      message: 'Company settings saved successfully!'
+      message: 'Company & Website settings saved successfully!'
     });
   } catch (error) {
     console.error('Save company settings error:', error);

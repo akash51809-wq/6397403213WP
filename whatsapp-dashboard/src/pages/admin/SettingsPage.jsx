@@ -32,10 +32,38 @@ function SInput({ type = 'text', value, onChange, placeholder, ...rest }) {
   );
 }
 
-// ─── Tab 1: Company & Branding (Admin Only) ──────────────────────────────────
+// ─── Tab 1: Company & Website Settings (Admin Only) ──────────────────────────
 function CompanyTab({ notify }) {
   const { companySettings, updateCompanySettings } = useAuth();
-  const [form, setForm] = useState({ companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' });
+  const [activeSubTab, setActiveSubTab] = useState('branding'); // 'branding' | 'website' | 'contact' | 'footer'
+  const [form, setForm] = useState({
+    companyName: '',
+    faviconUrl: '',
+    logoUrl: '',
+    bannerUrl: '',
+    websiteTitle: '',
+    websiteTagline: '',
+    heroBadge: '',
+    heroTitle: '',
+    heroSubtitle: '',
+    heroDescription: '',
+    ctaText: '',
+    ctaLink: '',
+    contactEmail: '',
+    contactPhone: '',
+    contactWhatsApp: '',
+    contactAddress: '',
+    contactBusinessEnquiry: '',
+    workingHours: '',
+    footerAbout: '',
+    footerCopyright: '',
+    developerCredit: '',
+    socialFacebook: '',
+    socialTwitter: '',
+    socialInstagram: '',
+    socialLinkedin: '',
+    socialYoutube: ''
+  });
   const [saving, setSaving] = useState(false);
   const [previewTheme, setPreviewTheme] = useState('light');
   const faviconInputRef = useRef(null);
@@ -48,7 +76,29 @@ function CompanyTab({ notify }) {
         companyName: companySettings.companyName || '',
         faviconUrl: companySettings.faviconUrl || '',
         logoUrl: companySettings.logoUrl || '',
-        bannerUrl: companySettings.bannerUrl || ''
+        bannerUrl: companySettings.bannerUrl || '',
+        websiteTitle: companySettings.websiteTitle || '',
+        websiteTagline: companySettings.websiteTagline || '',
+        heroBadge: companySettings.heroBadge || '',
+        heroTitle: companySettings.heroTitle || '',
+        heroSubtitle: companySettings.heroSubtitle || '',
+        heroDescription: companySettings.heroDescription || '',
+        ctaText: companySettings.ctaText || '',
+        ctaLink: companySettings.ctaLink || '',
+        contactEmail: companySettings.contactEmail || '',
+        contactPhone: companySettings.contactPhone || '',
+        contactWhatsApp: companySettings.contactWhatsApp || '',
+        contactAddress: companySettings.contactAddress || '',
+        contactBusinessEnquiry: companySettings.contactBusinessEnquiry || '',
+        workingHours: companySettings.workingHours || '',
+        footerAbout: companySettings.footerAbout || '',
+        footerCopyright: companySettings.footerCopyright || '',
+        developerCredit: companySettings.developerCredit || '',
+        socialFacebook: companySettings.socialFacebook || '',
+        socialTwitter: companySettings.socialTwitter || '',
+        socialInstagram: companySettings.socialInstagram || '',
+        socialLinkedin: companySettings.socialLinkedin || '',
+        socialYoutube: companySettings.socialYoutube || ''
       });
     }
   }, [companySettings]);
@@ -83,7 +133,7 @@ function CompanyTab({ notify }) {
       const res = await apiPost('/api/settings/company', form);
       if (res.success) {
         if (updateCompanySettings) updateCompanySettings(res.settings || form);
-        notify('Company settings saved successfully!', 'success');
+        notify('Company & Website settings saved successfully!', 'success');
       } else {
         notify(res.message || 'Save failed', 'error');
       }
@@ -95,16 +145,42 @@ function CompanyTab({ notify }) {
   };
 
   const resetDefaults = async () => {
-    if (!window.confirm('Reset company branding (Name, Logo, Favicon, Banner) to default?')) return;
-    const defaults = { companyName: '', faviconUrl: '', logoUrl: '', bannerUrl: '' };
+    if (!window.confirm('Reset all website branding, contact info, and hero copy to defaults?')) return;
+    const defaults = {
+      companyName: 'Easy Recharge Solution',
+      faviconUrl: '',
+      logoUrl: '',
+      bannerUrl: '',
+      websiteTitle: 'Easy Recharge Solution — WhatsApp Automation',
+      websiteTagline: 'WHATSAPP BUSINESS AUTOMATION',
+      heroBadge: 'WHATSAPP BUSINESS AUTOMATION',
+      heroTitle: 'Automate WhatsApp.',
+      heroSubtitle: 'Grow your business.',
+      heroDescription: 'Manage WhatsApp sessions, messaging, campaigns, contacts, API workflows and reports from one fast, organized workspace.',
+      ctaText: 'Login',
+      ctaLink: '/login',
+      contactEmail: 'easyrechargesolution@gmail.com',
+      contactPhone: '+91 88404 57632',
+      contactWhatsApp: '8840457632',
+      contactAddress: 'Meerpur, Prayagraj, Uttar Pradesh, India',
+      contactBusinessEnquiry: 'API integration, WhatsApp automation और business workflow requirements.',
+      workingHours: 'Mon - Sat: 9:00 AM - 7:00 PM',
+      footerAbout: 'Messaging workflows, developer APIs and campaign tools for modern businesses.',
+      footerCopyright: '© 2026 Easy Recharge Solution. All rights reserved.',
+      developerCredit: 'PRINCE GOYAL',
+      socialFacebook: '',
+      socialTwitter: '',
+      socialInstagram: '',
+      socialLinkedin: '',
+      socialYoutube: ''
+    };
     setForm(defaults);
     setSaving(true);
     try {
       const res = await apiPost('/api/settings/company', defaults);
-
       if (res.success) {
         if (updateCompanySettings) updateCompanySettings(defaults);
-        notify('Default branding restored!', 'success');
+        notify('Default website settings restored!', 'success');
       }
     } catch (err) {
       notify('Reset failed: ' + err.message, 'error');
@@ -114,110 +190,351 @@ function CompanyTab({ notify }) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 20 }}>
-      {/* Settings Form */}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20 }}>
+      {/* Settings Form Column */}
       <article className="card settings-form" style={{ width: '100%', maxWidth: 'none' }}>
         <div className="scard-head">
           <div>
-            <h3>Company Branding & Identity</h3>
-            <p>Customize your dashboard website name, browser tab icon (favicon), and top navbar logo.</p>
+            <h3>Company &amp; Front Website Settings</h3>
+            <p>Customize branding, landing page hero copy, Contact Us section, and footer in real-time.</p>
           </div>
           <button type="button" className="btn secondary" onClick={resetDefaults} style={{ padding: '6px 12px', fontSize: 12 }}>
             Reset Defaults
           </button>
         </div>
+
+        {/* Sub-tab Navigation */}
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'rgba(0,0,0,0.02)', borderBottom: '1px solid rgba(0,0,0,0.06)', flexWrap: 'wrap' }}>
+          {[
+            { id: 'branding', icon: '🏢', label: '1. Branding & Logo' },
+            { id: 'website',  icon: '🌐', label: '2. Hero & Website' },
+            { id: 'contact',  icon: '📞', label: '3. Contact Us Section' },
+            { id: 'footer',   icon: '📄', label: '4. Footer & Social' }
+          ].map(st => (
+            <button
+              key={st.id}
+              type="button"
+              className={`btn ${activeSubTab === st.id ? 'primary' : 'secondary'}`}
+              onClick={() => setActiveSubTab(st.id)}
+              style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 6 }}
+            >
+              <span>{st.icon}</span>
+              <strong>{st.label}</strong>
+            </button>
+          ))}
+        </div>
+
         <div className="card-body">
           <form onSubmit={save}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="field">
-                <label>COMPANY / WEBSITE NAME</label>
-                <SInput
-                  value={form.companyName}
-                  onChange={v => setForm(f => ({ ...f, companyName: v }))}
-                  placeholder="e.g. Easy Recharge / My WhatsApp Portal"
-                />
-              </div>
 
-              <div className="field">
-                <label>WEBSITE FAVICON (Browser Tab Icon)</label>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input
-                    type="file"
-                    ref={faviconInputRef}
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={e => handleImageFile(e.target.files?.[0], 'favicon')}
-                  />
-                  <button type="button" className="btn secondary" onClick={() => faviconInputRef.current?.click()} style={{ padding: '8px 14px' }}>
-                    📁 Choose Favicon File
-                  </button>
-                  {form.faviconUrl && (
-                    <img src={form.faviconUrl} alt="Favicon" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', objectFit: 'contain' }} />
-                  )}
-                  {form.faviconUrl && (
-                    <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, faviconUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
+              {/* SECTION 1: BRANDING & LOGO */}
+              {activeSubTab === 'branding' && (
+                <>
+                  <div className="field">
+                    <label>COMPANY / PORTAL NAME</label>
+                    <SInput
+                      value={form.companyName}
+                      onChange={v => setForm(f => ({ ...f, companyName: v }))}
+                      placeholder="e.g. Easy Recharge Solution"
+                    />
+                    <small style={{ color: '#64748b', fontSize: 11, marginTop: 4, display: 'block' }}>
+                      Appears on header navbar, tab titles, invoices, and user panels.
+                    </small>
+                  </div>
 
-              <div className="field">
-                <label>WEBSITE LOGO (Sidebar / Header)</label>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input
-                    type="file"
-                    ref={logoInputRef}
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={e => handleImageFile(e.target.files?.[0], 'logo')}
-                  />
-                  <button type="button" className="btn secondary" onClick={() => logoInputRef.current?.click()} style={{ padding: '8px 14px' }}>
-                    📁 Choose Logo File
-                  </button>
-                  {form.logoUrl && (
-                    <img src={form.logoUrl} alt="Logo" style={{ maxHeight: 34, maxWidth: 120, objectFit: 'contain', background: '#f1f5f9', padding: 4, borderRadius: 6 }} />
-                  )}
-                  {form.logoUrl && (
-                    <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, logoUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
+                  <div className="field">
+                    <label>WEBSITE FAVICON (Browser Tab Icon)</label>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="file"
+                        ref={faviconInputRef}
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={e => handleImageFile(e.target.files?.[0], 'favicon')}
+                      />
+                      <button type="button" className="btn secondary" onClick={() => faviconInputRef.current?.click()} style={{ padding: '8px 14px' }}>
+                        📁 Choose Favicon File
+                      </button>
+                      {form.faviconUrl && (
+                        <img src={form.faviconUrl} alt="Favicon" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #cbd5e1', objectFit: 'contain' }} />
+                      )}
+                      {form.faviconUrl && (
+                        <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, faviconUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-              <div className="field">
-                <label>LOGIN PAGE BANNER (Right-side Image/Graphic)</label>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <input
-                    type="file"
-                    ref={bannerInputRef}
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={e => handleImageFile(e.target.files?.[0], 'banner')}
-                  />
-                  <button type="button" className="btn secondary" onClick={() => bannerInputRef.current?.click()} style={{ padding: '8px 14px' }}>
-                    📁 Choose Banner File
-                  </button>
-                  {form.bannerUrl && (
-                    <img src={form.bannerUrl} alt="Login Banner" style={{ maxHeight: 42, maxWidth: 100, objectFit: 'cover', borderRadius: 6, border: '1px solid #cbd5e1' }} />
-                  )}
-                  {form.bannerUrl && (
-                    <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, bannerUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <small style={{ color: '#64748b', fontSize: 11, marginTop: 4, display: 'block' }}>
-                  Displays on the right side of the Login &amp; Signup page.
-                </small>
-              </div>
+                  <div className="field">
+                    <label>WEBSITE LOGO (Sidebar / Header / Marketing Nav)</label>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="file"
+                        ref={logoInputRef}
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={e => handleImageFile(e.target.files?.[0], 'logo')}
+                      />
+                      <button type="button" className="btn secondary" onClick={() => logoInputRef.current?.click()} style={{ padding: '8px 14px' }}>
+                        📁 Choose Logo File
+                      </button>
+                      {form.logoUrl && (
+                        <img src={form.logoUrl} alt="Logo" style={{ maxHeight: 34, maxWidth: 120, objectFit: 'contain', background: '#f1f5f9', padding: 4, borderRadius: 6 }} />
+                      )}
+                      {form.logoUrl && (
+                        <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, logoUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-              <div style={{ marginTop: 8 }}>
-                <button type="submit" className="btn primary" disabled={saving}>
-                  {saving ? 'Saving...' : '💾 Save Company Settings'}
+                  <div className="field">
+                    <label>LOGIN &amp; SIGNUP PAGE BANNER (Right-side Graphic)</label>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="file"
+                        ref={bannerInputRef}
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={e => handleImageFile(e.target.files?.[0], 'banner')}
+                      />
+                      <button type="button" className="btn secondary" onClick={() => bannerInputRef.current?.click()} style={{ padding: '8px 14px' }}>
+                        📁 Choose Banner File
+                      </button>
+                      {form.bannerUrl && (
+                        <img src={form.bannerUrl} alt="Login Banner" style={{ maxHeight: 42, maxWidth: 100, objectFit: 'cover', borderRadius: 6, border: '1px solid #cbd5e1' }} />
+                      )}
+                      {form.bannerUrl && (
+                        <button type="button" className="btn secondary" onClick={() => setForm(f => ({ ...f, bannerUrl: '' }))} style={{ padding: '4px 10px', fontSize: 12 }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <small style={{ color: '#64748b', fontSize: 11, marginTop: 4, display: 'block' }}>
+                      Displays prominently on the right half of the Login &amp; Signup screens.
+                    </small>
+                  </div>
+                </>
+              )}
+
+              {/* SECTION 2: HERO & WEBSITE COPY */}
+              {activeSubTab === 'website' && (
+                <>
+                  <div className="field">
+                    <label>WEBSITE BROWSER TITLE (SEO &amp; Tab Header)</label>
+                    <SInput
+                      value={form.websiteTitle}
+                      onChange={v => setForm(f => ({ ...f, websiteTitle: v }))}
+                      placeholder="e.g. Easy Recharge Solution — WhatsApp Automation"
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>HERO BADGE / TAGLINE (Above Headline)</label>
+                    <SInput
+                      value={form.heroBadge}
+                      onChange={v => setForm(f => ({ ...f, heroBadge: v }))}
+                      placeholder="e.g. WHATSAPP BUSINESS AUTOMATION"
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>HERO MAIN HEADLINE (Typing Line 1)</label>
+                    <SInput
+                      value={form.heroTitle}
+                      onChange={v => setForm(f => ({ ...f, heroTitle: v }))}
+                      placeholder="e.g. Automate WhatsApp."
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>HERO SUB-HEADLINE (Typing Line 2)</label>
+                    <SInput
+                      value={form.heroSubtitle}
+                      onChange={v => setForm(f => ({ ...f, heroSubtitle: v }))}
+                      placeholder="e.g. Grow your business."
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>HERO DESCRIPTION PARAGRAPH</label>
+                    <textarea
+                      className="sinput"
+                      rows={3}
+                      value={form.heroDescription}
+                      onChange={e => setForm(f => ({ ...f, heroDescription: e.target.value }))}
+                      placeholder="e.g. Manage WhatsApp sessions, messaging, campaigns, contacts, API workflows and reports from one fast workspace."
+                      style={{ resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="field">
+                      <label>CTA BUTTON TEXT</label>
+                      <SInput
+                        value={form.ctaText}
+                        onChange={v => setForm(f => ({ ...f, ctaText: v }))}
+                        placeholder="e.g. Login / Get Started"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>CTA BUTTON LINK</label>
+                      <SInput
+                        value={form.ctaLink}
+                        onChange={v => setForm(f => ({ ...f, ctaLink: v }))}
+                        placeholder="e.g. /login"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* SECTION 3: CONTACT US SECTION */}
+              {activeSubTab === 'contact' && (
+                <>
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#166534' }}>
+                    💡 <strong>Live Dynamic Contact Us:</strong> Changing these details will automatically update the Contact Page, WhatsApp 1-Click chat link, and landing page contact cards immediately.
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="field">
+                      <label>SUPPORT EMAIL</label>
+                      <SInput
+                        type="email"
+                        value={form.contactEmail}
+                        onChange={v => setForm(f => ({ ...f, contactEmail: v }))}
+                        placeholder="e.g. support@yourcompany.com"
+                      />
+                    </div>
+                    <div className="field">
+                      <label>PHONE / CALLING NUMBER</label>
+                      <SInput
+                        value={form.contactPhone}
+                        onChange={v => setForm(f => ({ ...f, contactPhone: v }))}
+                        placeholder="e.g. +91 88404 57632"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label>WHATSAPP NUMBER (For 1-Click Floating Chat Button)</label>
+                    <SInput
+                      value={form.contactWhatsApp}
+                      onChange={v => setForm(f => ({ ...f, contactWhatsApp: v }))}
+                      placeholder="e.g. 918840457632 (with country code, no + or spaces)"
+                    />
+                    <small style={{ color: '#64748b', fontSize: 11, marginTop: 4, display: 'block' }}>
+                      Users tapping the floating ✆ WhatsApp icon on your website will directly open chat with this number.
+                    </small>
+                  </div>
+
+                  <div className="field">
+                    <label>OFFICE ADDRESS / LOCATION</label>
+                    <textarea
+                      className="sinput"
+                      rows={2}
+                      value={form.contactAddress}
+                      onChange={e => setForm(f => ({ ...f, contactAddress: e.target.value }))}
+                      placeholder="e.g. Meerpur, Prayagraj, Uttar Pradesh, India"
+                      style={{ resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>BUSINESS ENQUIRY &amp; SUPPORT NOTE</label>
+                    <SInput
+                      value={form.contactBusinessEnquiry}
+                      onChange={v => setForm(f => ({ ...f, contactBusinessEnquiry: v }))}
+                      placeholder="e.g. API integration, WhatsApp automation and custom business solutions."
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label>WORKING / SUPPORT HOURS</label>
+                    <SInput
+                      value={form.workingHours}
+                      onChange={v => setForm(f => ({ ...f, workingHours: v }))}
+                      placeholder="e.g. Mon - Sat: 9:00 AM - 7:00 PM"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* SECTION 4: FOOTER & SOCIAL */}
+              {activeSubTab === 'footer' && (
+                <>
+                  <div className="field">
+                    <label>FOOTER ABOUT SUMMARY</label>
+                    <textarea
+                      className="sinput"
+                      rows={2}
+                      value={form.footerAbout}
+                      onChange={e => setForm(f => ({ ...f, footerAbout: e.target.value }))}
+                      placeholder="e.g. Messaging workflows, developer APIs and campaign tools for modern businesses."
+                      style={{ resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="field">
+                      <label>FOOTER COPYRIGHT TEXT</label>
+                      <SInput
+                        value={form.footerCopyright}
+                        onChange={v => setForm(f => ({ ...f, footerCopyright: v }))}
+                        placeholder="e.g. © 2026 Easy Recharge Solution. All rights reserved."
+                      />
+                    </div>
+                    <div className="field">
+                      <label>DEVELOPER / OWNER CREDIT NAME</label>
+                      <SInput
+                        value={form.developerCredit}
+                        onChange={v => setForm(f => ({ ...f, developerCredit: v }))}
+                        placeholder="e.g. PRINCE GOYAL"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, marginTop: 4 }}>
+                    <label style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 8, display: 'block' }}>
+                      SOCIAL MEDIA PROFILES (Optional)
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <SInput
+                        value={form.socialFacebook}
+                        onChange={v => setForm(f => ({ ...f, socialFacebook: v }))}
+                        placeholder="Facebook URL"
+                      />
+                      <SInput
+                        value={form.socialTwitter}
+                        onChange={v => setForm(f => ({ ...f, socialTwitter: v }))}
+                        placeholder="Twitter / X URL"
+                      />
+                      <SInput
+                        value={form.socialInstagram}
+                        onChange={v => setForm(f => ({ ...f, socialInstagram: v }))}
+                        placeholder="Instagram URL"
+                      />
+                      <SInput
+                        value={form.socialLinkedin}
+                        onChange={v => setForm(f => ({ ...f, socialLinkedin: v }))}
+                        placeholder="LinkedIn URL"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Submit Button */}
+              <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button type="submit" className="btn primary" disabled={saving} style={{ padding: '10px 24px', fontSize: 14 }}>
+                  {saving ? 'Saving...' : '💾 Save All Website Settings'}
                 </button>
+                <small style={{ color: '#64748b' }}>Changes apply immediately to marketing site and user panel.</small>
               </div>
+
             </div>
           </form>
         </div>
@@ -227,12 +544,12 @@ function CompanyTab({ notify }) {
       <article className="card" style={{ width: '100%', maxWidth: 'none' }}>
         <div className="scard-head">
           <div>
-            <h3>Live Branding Preview</h3>
-            <p>See exactly how your branding appears to users across the browser</p>
+            <h3>Live Front Website &amp; Branding Preview</h3>
+            <p>Real-time visual preview of your changes as users see them</p>
           </div>
         </div>
         <div className="card-body">
-          {/* Browser Tab Preview */}
+          {/* 1. Browser Tab Preview */}
           <div className="preview-box">
             <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>1. BROWSER TAB PREVIEW</small>
             <div className="browser-tab-mock">
@@ -242,22 +559,22 @@ function CompanyTab({ notify }) {
                 <span style={{ fontSize: 14 }}>⚡</span>
               )}
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {form.companyName || 'WhatsApp Automation'}
+                {form.websiteTitle || (form.companyName ? `${form.companyName} — WhatsApp Automation` : 'Easy Recharge Solution — WhatsApp Automation')}
               </span>
               <span className="tab-close">×</span>
             </div>
           </div>
 
-          {/* Menu Bar Logo Preview */}
+          {/* 2. Header & Logo Preview */}
           <div className="preview-box" style={{ marginTop: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <small style={{ fontWeight: 800, color: '#718078' }}>2. MENU BAR LOGO PREVIEW</small>
+              <small style={{ fontWeight: 800, color: '#718078' }}>2. WEBSITE NAVBAR &amp; LOGO PREVIEW</small>
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
                   type="button"
                   className={`btn ${previewTheme === 'light' ? 'primary' : 'secondary'}`}
                   onClick={() => setPreviewTheme('light')}
-                  style={{ padding: '4px 8px', fontSize: 11 }}
+                  style={{ padding: '3px 8px', fontSize: 11 }}
                 >
                   Light
                 </button>
@@ -265,55 +582,110 @@ function CompanyTab({ notify }) {
                   type="button"
                   className={`btn ${previewTheme === 'dark' ? 'primary' : 'secondary'}`}
                   onClick={() => setPreviewTheme('dark')}
-                  style={{ padding: '4px 8px', fontSize: 11 }}
+                  style={{ padding: '3px 8px', fontSize: 11 }}
                 >
                   Dark
                 </button>
               </div>
             </div>
-            <div className={`sidebar-logo-mock ${previewTheme}`}>
+            <div className={`sidebar-logo-mock ${previewTheme}`} style={{ padding: '10px 14px', borderRadius: 8 }}>
               {form.logoUrl ? (
-                <img src={form.logoUrl} alt="Brand Logo" />
+                <img src={form.logoUrl} alt="Brand Logo" style={{ maxHeight: 32, objectFit: 'contain' }} />
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(145deg, #35c987, #0f9b61)', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900 }}>⚡</div>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(145deg, #35c987, #0f9b61)', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900 }}>⚡</div>
                   <div>
-                    <strong style={{ display: 'block', fontSize: 13 }}>{form.companyName || 'WhatsApp Automation'}</strong>
-                    <small style={{ display: 'block', fontSize: 9, opacity: 0.7 }}>WhatsApp Automation</small>
+                    <strong style={{ display: 'block', fontSize: 13 }}>{form.companyName || 'Easy Recharge Solution'}</strong>
+                    <small style={{ display: 'block', fontSize: 9, opacity: 0.7 }}>WHATSAPP AUTOMATION</small>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Login Banner Preview */}
+          {/* 3. Hero Section Preview */}
           <div className="preview-box" style={{ marginTop: 14 }}>
-            <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>3. LOGIN PAGE BANNER PREVIEW</small>
-            <div style={{ 
-              height: 110, 
-              borderRadius: 10, 
-              background: form.bannerUrl ? `url(${form.bannerUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #133e2b, #0d281c)', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
+            <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>3. HERO BANNER LIVE PREVIEW</small>
+            <div style={{
+              background: 'linear-gradient(145deg, #091a13, #0d281c)',
               color: '#fff',
-              position: 'relative',
-              overflow: 'hidden',
-              border: '1px solid rgba(0,0,0,0.1)'
+              padding: '16px',
+              borderRadius: 10,
+              border: '1px solid rgba(53, 201, 135, 0.2)'
             }}>
-              <div style={{ 
-                background: 'rgba(0,0,0,0.4)', 
-                backdropFilter: 'blur(4px)', 
-                padding: '6px 14px', 
-                borderRadius: 8, 
-                fontSize: 12,
-                fontWeight: 600,
-                textAlign: 'center'
-              }}>
-                {form.bannerUrl ? '✓ Custom Banner Active' : 'Default Forest Green Theme'}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(53,201,135,0.15)', color: '#35c987', padding: '3px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700, marginBottom: 8 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#35c987' }}></span>
+                {form.heroBadge || form.websiteTagline || 'WHATSAPP BUSINESS AUTOMATION'}
+              </div>
+              <h4 style={{ margin: '4px 0 2px 0', fontSize: 16, color: '#f8fafc', fontWeight: 800 }}>
+                {form.heroTitle || 'Automate WhatsApp.'}
+              </h4>
+              <h5 style={{ margin: '0 0 8px 0', fontSize: 14, color: '#35c987', fontWeight: 700, fontStyle: 'italic' }}>
+                {form.heroSubtitle || 'Grow your business.'}
+              </h5>
+              <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', lineHeight: 1.4 }}>
+                {form.heroDescription || 'Manage WhatsApp sessions, messaging, campaigns, contacts, API workflows and reports from one fast workspace.'}
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <span style={{ display: 'inline-block', background: 'linear-gradient(135deg, #35c987, #0f9b61)', color: '#fff', padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                  {form.ctaText || 'Login'} →
+                </span>
               </div>
             </div>
           </div>
+
+          {/* 4. Contact Us Preview */}
+          <div className="preview-box" style={{ marginTop: 14 }}>
+            <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>4. CONTACT US SECTION LIVE PREVIEW</small>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 14px', fontSize: 11 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>✉</span>
+                  <div>
+                    <strong>Email:</strong> <span style={{ color: '#0f766e' }}>{form.contactEmail || 'easyrechargesolution@gmail.com'}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>☎</span>
+                  <div>
+                    <strong>Phone:</strong> <span style={{ color: '#0f766e' }}>{form.contactPhone || '+91 88404 57632'}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>💬</span>
+                  <div>
+                    <strong>1-Click WhatsApp:</strong> <span style={{ color: '#15803d', fontWeight: 600 }}>+{form.contactWhatsApp || '918840457632'}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>📍</span>
+                  <div>
+                    <strong>Location:</strong> <span style={{ color: '#475569' }}>{form.contactAddress || 'Meerpur, Prayagraj, Uttar Pradesh, India'}</span>
+                  </div>
+                </div>
+                {form.workingHours && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>⏰</span>
+                    <div>
+                      <strong>Hours:</strong> <span style={{ color: '#475569' }}>{form.workingHours}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 5. Footer Preview */}
+          <div className="preview-box" style={{ marginTop: 14 }}>
+            <small style={{ display: 'block', fontWeight: 800, color: '#718078', marginBottom: 6 }}>5. FOOTER &amp; DEVELOPER CREDIT PREVIEW</small>
+            <div style={{ background: '#0f172a', color: '#94a3b8', borderRadius: 8, padding: '10px 14px', fontSize: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <span>{form.footerCopyright || `© 2026 ${form.companyName || 'Easy Recharge Solution'}. All rights reserved.`}</span>
+                <span>Developed by <strong style={{ color: '#fff' }}>{form.developerCredit || 'PRINCE GOYAL'}</strong></span>
+              </div>
+            </div>
+          </div>
+
         </div>
       </article>
     </div>
