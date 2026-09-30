@@ -109,23 +109,21 @@ async function startUserSession(userId) {
 
     sessions.set(userId, sessionData);
 
-    let sessionRecord = await WhatsAppSession.findOne({ 
-        $or: [{ ownerUserId: userId }, { sessionId: sessionId }] 
-    });
-    if (!sessionRecord) {
-        sessionRecord = new WhatsAppSession({
-            sessionId: sessionId,
-            ownerUserId: userId,
-            role: isAdminSlot ? 'admin' : 'user',
-            status: 'connecting',
-            createdAt: new Date(),
-            updatedAt: new Date()
-        });
-    } else {
-        sessionRecord.status = 'connecting';
-        sessionRecord.updatedAt = new Date();
+    try {
+        await WhatsAppSession.updateOne(
+            { $or: [{ ownerUserId: userId }, { sessionId: sessionId }] },
+            {
+                sessionId: sessionId,
+                ownerUserId: userId,
+                role: isAdminSlot ? 'admin' : 'user',
+                status: 'connecting',
+                updatedAt: new Date()
+            },
+            { upsert: true }
+        );
+    } catch (sRecErr) {
+        console.warn(`[UserSession ${userId}] Session record init notice:`, sRecErr.message);
     }
-    await sessionRecord.save();
 
     socket.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;

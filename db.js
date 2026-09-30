@@ -723,221 +723,251 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     }
   }
 
-  const Model = {
-    tableName,
-    primaryKey,
-
-    find(filter = {}, projection = null) {
-      return new QueryBuilder(filter, projection, false);
-    },
-
-    findOne(filter = {}, projection = null) {
-      return new QueryBuilder(filter, projection, true);
-    },
-
-    async create(data) {
-      if (Array.isArray(data)) {
-        const results = [];
-        for (const item of data) {
-          results.push(await this.create(item));
-        }
-        return results;
-      }
-
-      const raw = { ...defaultFields, ...data };
-      if (!raw.createdAt) raw.createdAt = new Date();
-      if (!raw.updatedAt) raw.updatedAt = new Date();
-
-      const cols = [];
-      const placeholders = [];
-      const values = [];
-      let idx = 1;
-
-      for (const [k, v] of Object.entries(raw)) {
-        if (v === undefined || k.startsWith('$')) continue;
-        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
-
-        cols.push(`"${k}"`);
-        placeholders.push(`$${idx}`);
-        let val = v;
-        if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
-          val = JSON.stringify(val);
-        }
-        values.push(val);
-        idx++;
-      }
-
-      if (cols.length === 0) return null;
-
-      const sql = `INSERT INTO "${tableName}" (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-      const res = await query(sql, values);
-      return wrapRow(res.rows[0]);
-    },
-
-    async updateOne(filter, update, options = {}) {
-      const { setFields, setOnInsertFields } = extractUpdateFields(update);
-
-      const existing = await this.findOne(filter);
-      if (!existing) {
-        if (options.upsert) {
-          const cleanFilter = {};
-          for (const [k, v] of Object.entries(filter)) {
-            if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
-              cleanFilter[k] = v;
-            }
-          }
-          const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
-          try {
-            await this.create(insertData);
-            return { modifiedCount: 1, upserted: true };
-          } catch (createErr) {
-            if (createErr && createErr.code === '23505') {
-              return this.updateOne(filter, update, { ...options, upsert: false });
-            }
-            throw createErr;
-          }
-        }
-        return { modifiedCount: 0 };
-      }
-
-      const pkVal = existing[primaryKey];
-      setFields.updatedAt = new Date();
-
-      const cols = [];
-      const vals = [];
-      let idx = 1;
-
-      for (const [k, v] of Object.entries(setFields)) {
-        if (k === primaryKey || k.startsWith('$')) continue;
-        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
-
-        cols.push(`"${k}" = $${idx}`);
-        let val = v;
-        if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
-          val = JSON.stringify(val);
-        }
-        vals.push(val);
-        idx++;
-      }
-
-      if (cols.length === 0) {
-        return { modifiedCount: 0 };
-      }
-
-      vals.push(pkVal);
-      const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE "${primaryKey}" = $${idx}`;
-      await query(sql, vals);
-      return { modifiedCount: 1 };
-    },
-
-    async findOneAndUpdate(filter, update, options = {}) {
-      const { setFields, setOnInsertFields } = extractUpdateFields(update);
-
-      const existing = await this.findOne(filter);
-      if (!existing) {
-        if (options.upsert) {
-          const cleanFilter = {};
-          for (const [k, v] of Object.entries(filter)) {
-            if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
-              cleanFilter[k] = v;
-            }
-          }
-          const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
-          try {
-            return await this.create(insertData);
-          } catch (createErr) {
-            if (createErr && createErr.code === '23505') {
-              return this.findOneAndUpdate(filter, update, { ...options, upsert: false });
-            }
-            throw createErr;
-          }
-        }
-        return null;
-      }
-
-      const pkVal = existing[primaryKey];
-      setFields.updatedAt = new Date();
-
-      const cols = [];
-      const vals = [];
-      let idx = 1;
-
-      for (const [k, v] of Object.entries(setFields)) {
-        if (k === primaryKey || k.startsWith('$')) continue;
-        if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
-
-        cols.push(`"${k}" = $${idx}`);
-        let val = v;
-        if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
-          val = JSON.stringify(val);
-        }
-        vals.push(val);
-        idx++;
-      }
-
-      if (cols.length === 0) {
-        return existing;
-      }
-
-      vals.push(pkVal);
-      const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE "${primaryKey}" = $${idx} RETURNING *`;
-      const res = await query(sql, vals);
-      return wrapRow(res.rows[0]);
-    },
-
-    async findOneAndDelete(filter) {
-      const doc = await this.findOne(filter);
-      if (!doc) return null;
-      await this.deleteOne(filter);
-      return doc;
-    },
-
-    async deleteOne(filter) {
-      const { clause, params } = parseFilter(filter, 1, jsonColumns);
-      const sql = `DELETE FROM "${tableName}" WHERE "${primaryKey}" IN (SELECT "${primaryKey}" FROM "${tableName}" WHERE ${clause} LIMIT 1)`;
-      const res = await query(sql, params);
-      return { deletedCount: res.rowCount };
-    },
-
-    async deleteMany(filter = {}) {
-      const { clause, params } = parseFilter(filter, 1, jsonColumns);
-      const sql = `DELETE FROM "${tableName}" WHERE ${clause}`;
-      const res = await query(sql, params);
-      return { deletedCount: res.rowCount };
-    },
-
-    async countDocuments(filter = {}) {
-      const { clause, params } = parseFilter(filter, 1, jsonColumns);
-      const sql = `SELECT COUNT(*)::int AS count FROM "${tableName}" WHERE ${clause}`;
-      const res = await query(sql, params);
-      return (res.rows && res.rows[0] && res.rows[0].count) || 0;
-    },
-
-    async exists(filter = {}) {
-      const { clause, params } = parseFilter(filter, 1, jsonColumns);
-      const sql = `SELECT 1 FROM "${tableName}" WHERE ${clause} LIMIT 1`;
-      const res = await query(sql, params);
-      return Boolean(res.rows && res.rows.length > 0);
-    },
-
-    async bulkWrite(ops, options = {}) {
-      let upsertedCount = 0;
-      let modifiedCount = 0;
-
-      for (const op of ops) {
-        if (op.updateOne) {
-          const { filter, update, upsert } = op.updateOne;
-          const result = await this.updateOne(filter, update, { upsert });
-          if (result && result[primaryKey]) upsertedCount++;
-          else modifiedCount++;
-        } else if (op.insertOne) {
-          await this.create(op.insertOne.document);
-          upsertedCount++;
-        }
-      }
-
-      return { upsertedCount, modifiedCount };
+  function Model(data = {}) {
+    if (!(this instanceof Model)) {
+      return new Model(data);
     }
+    const raw = { ...defaultFields, ...data };
+    Object.assign(this, raw);
+
+    this.save = async function() {
+      const pkVal = this[primaryKey];
+      if (pkVal) {
+        const existing = await Model.findOne({ [primaryKey]: pkVal });
+        if (existing) {
+          await Model.updateOne({ [primaryKey]: pkVal }, { $set: this });
+          return this;
+        }
+      }
+      const created = await Model.create(this);
+      if (created) {
+        Object.assign(this, created);
+      }
+      return this;
+    };
+
+    this.toJSON = function() {
+      return toLean(this);
+    };
+
+    this.toObject = function() {
+      return toLean(this);
+    };
+  }
+
+  Model.tableName = tableName;
+  Model.primaryKey = primaryKey;
+
+  Model.find = function(filter = {}, projection = null) {
+    return new QueryBuilder(filter, projection, false);
+  };
+
+  Model.findOne = function(filter = {}, projection = null) {
+    return new QueryBuilder(filter, projection, true);
+  };
+
+  Model.create = async function(data) {
+    if (Array.isArray(data)) {
+      const results = [];
+      for (const item of data) {
+        results.push(await Model.create(item));
+      }
+      return results;
+    }
+
+    const raw = { ...defaultFields, ...data };
+    if (!raw.createdAt) raw.createdAt = new Date();
+    if (!raw.updatedAt) raw.updatedAt = new Date();
+
+    const cols = [];
+    const placeholders = [];
+    const values = [];
+    let idx = 1;
+
+    for (const [k, v] of Object.entries(raw)) {
+      if (v === undefined || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}"`);
+      placeholders.push(`$${idx}`);
+      let val = v;
+      if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      values.push(val);
+      idx++;
+    }
+
+    if (cols.length === 0) return null;
+
+    const sql = `INSERT INTO "${tableName}" (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+    const res = await query(sql, values);
+    return wrapRow(res.rows[0]);
+  };
+
+  Model.updateOne = async function(filter, update, options = {}) {
+    const { setFields, setOnInsertFields } = extractUpdateFields(update);
+
+    const existing = await Model.findOne(filter);
+    if (!existing) {
+      if (options.upsert) {
+        const cleanFilter = {};
+        for (const [k, v] of Object.entries(filter)) {
+          if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
+            cleanFilter[k] = v;
+          }
+        }
+        const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
+        try {
+          await Model.create(insertData);
+          return { modifiedCount: 1, upserted: true };
+        } catch (createErr) {
+          if (createErr && createErr.code === '23505') {
+            return Model.updateOne(filter, update, { ...options, upsert: false });
+          }
+          throw createErr;
+        }
+      }
+      return { modifiedCount: 0 };
+    }
+
+    const pkVal = existing[primaryKey];
+    setFields.updatedAt = new Date();
+
+    const cols = [];
+    const vals = [];
+    let idx = 1;
+
+    for (const [k, v] of Object.entries(setFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = $${idx}`);
+      let val = v;
+      if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      vals.push(val);
+      idx++;
+    }
+
+    if (cols.length === 0) {
+      return { modifiedCount: 0 };
+    }
+
+    vals.push(pkVal);
+    const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE "${primaryKey}" = $${idx}`;
+    await query(sql, vals);
+    return { modifiedCount: 1 };
+  };
+
+  Model.findOneAndUpdate = async function(filter, update, options = {}) {
+    const { setFields, setOnInsertFields } = extractUpdateFields(update);
+
+    const existing = await Model.findOne(filter);
+    if (!existing) {
+      if (options.upsert) {
+        const cleanFilter = {};
+        for (const [k, v] of Object.entries(filter)) {
+          if (!k.startsWith('$') && (typeof v !== 'object' || v === null || v instanceof Date)) {
+            cleanFilter[k] = v;
+          }
+        }
+        const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
+        try {
+          return await Model.create(insertData);
+        } catch (createErr) {
+          if (createErr && createErr.code === '23505') {
+            return Model.findOneAndUpdate(filter, update, { ...options, upsert: false });
+          }
+          throw createErr;
+        }
+      }
+      return null;
+    }
+
+    const pkVal = existing[primaryKey];
+    setFields.updatedAt = new Date();
+
+    const cols = [];
+    const vals = [];
+    let idx = 1;
+
+    for (const [k, v] of Object.entries(setFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = $${idx}`);
+      let val = v;
+      if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      vals.push(val);
+      idx++;
+    }
+
+    if (cols.length === 0) {
+      return existing;
+    }
+
+    vals.push(pkVal);
+    const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE "${primaryKey}" = $${idx} RETURNING *`;
+    const res = await query(sql, vals);
+    return wrapRow(res.rows[0]);
+  };
+
+  Model.findOneAndDelete = async function(filter) {
+    const doc = await Model.findOne(filter);
+    if (!doc) return null;
+    await Model.deleteOne(filter);
+    return doc;
+  };
+
+  Model.deleteOne = async function(filter) {
+    const { clause, params } = parseFilter(filter, 1, jsonColumns);
+    const sql = `DELETE FROM "${tableName}" WHERE "${primaryKey}" IN (SELECT "${primaryKey}" FROM "${tableName}" WHERE ${clause} LIMIT 1)`;
+    const res = await query(sql, params);
+    return { deletedCount: res.rowCount };
+  };
+
+  Model.deleteMany = async function(filter = {}) {
+    const { clause, params } = parseFilter(filter, 1, jsonColumns);
+    const sql = `DELETE FROM "${tableName}" WHERE ${clause}`;
+    const res = await query(sql, params);
+    return { deletedCount: res.rowCount };
+  };
+
+  Model.countDocuments = async function(filter = {}) {
+    const { clause, params } = parseFilter(filter, 1, jsonColumns);
+    const sql = `SELECT COUNT(*)::int AS count FROM "${tableName}" WHERE ${clause}`;
+    const res = await query(sql, params);
+    return (res.rows && res.rows[0] && res.rows[0].count) || 0;
+  };
+
+  Model.exists = async function(filter = {}) {
+    const { clause, params } = parseFilter(filter, 1, jsonColumns);
+    const sql = `SELECT 1 FROM "${tableName}" WHERE ${clause} LIMIT 1`;
+    const res = await query(sql, params);
+    return Boolean(res.rows && res.rows.length > 0);
+  };
+
+  Model.bulkWrite = async function(ops, options = {}) {
+    let upsertedCount = 0;
+    let modifiedCount = 0;
+
+    for (const op of ops) {
+      if (op.updateOne) {
+        const { filter, update, upsert } = op.updateOne;
+        const result = await Model.updateOne(filter, update, { upsert });
+        if (result && result[primaryKey]) upsertedCount++;
+        else modifiedCount++;
+      } else if (op.insertOne) {
+        await Model.create(op.insertOne.document);
+        upsertedCount++;
+      }
+    }
+
+    return { upsertedCount, modifiedCount };
   };
 
   return Model;

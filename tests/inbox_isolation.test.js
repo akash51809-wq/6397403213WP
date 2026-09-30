@@ -119,8 +119,8 @@ test('6. Message Report: Only Panel and API sent messages appear in reports (mob
         'getMessageReports must NOT merge raw mobile incoming/outgoing messages into message reports'
     );
     assert.ok(
-        indexContent.includes("list = list.filter(r => r && r.source !== 'direct')"),
-        'getMessageReports must filter out source === direct'
+        indexContent.includes("VALID_SYSTEM_SOURCES") && indexContent.includes("r.source !== 'direct'"),
+        'getMessageReports must filter out source === direct and only include valid system sources'
     );
 
     // 2. handleIncomingMessageFromSocket must not call appendMessageReport for socket sync

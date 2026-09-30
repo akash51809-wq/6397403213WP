@@ -66,19 +66,26 @@ export function ReportsPage() {
   // Filter computation
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
+      // Strict System Sources filter: Only show messages sent from this system (Panel / API / Group / Campaign / TTS)
+      const VALID_SOURCES = ['web', 'api', 'group', 'campaign', 'schedule', 'scheduler', 'panel', 'bulk', 'tts'];
+      const src = String(r.source || '').toLowerCase();
+      if (!src || !VALID_SOURCES.includes(src) || src === 'direct') {
+        return false;
+      }
+
       // 0. Admin Scope Separation (Admin Msg Report vs User Msg Report)
       if (isAdmin) {
-        const isFromAdmin = !r.ownerUserId || r.ownerUserId === 'admin' || r.ownerUserId === 'ADMIN' || (currentUser?.userId && r.ownerUserId === currentUser.userId)
+        const isFromAdmin = !r.ownerUserId || r.ownerUserId === 'admin' || r.ownerUserId === 'ADMIN' || (currentUser?.userId && r.ownerUserId === currentUser.userId);
         if (adminScope === 'admin') {
-          if (!isFromAdmin) return false
+          if (!isFromAdmin) return false;
         } else if (adminScope === 'users') {
-          if (isFromAdmin) return false
+          if (isFromAdmin) return false;
           // User account filter
           if (userFilter.trim()) {
-            const uq = userFilter.toLowerCase().trim()
-            const uId = String(r.ownerUserId || '').toLowerCase()
-            const uFrom = String(r.from || r.session || '').toLowerCase()
-            if (!uId.includes(uq) && !uFrom.includes(uq)) return false
+            const uq = userFilter.toLowerCase().trim();
+            const uId = String(r.ownerUserId || '').toLowerCase();
+            const uFrom = String(r.from || r.session || '').toLowerCase();
+            if (!uId.includes(uq) && !uFrom.includes(uq)) return false;
           }
         }
       }
