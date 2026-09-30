@@ -144,7 +144,9 @@ async function initTables(pool) {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenHash" VARCHAR(128) UNIQUE;`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenPrefix" VARCHAR(20);`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenLast4" VARCHAR(10);`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "email" TEXT DEFAULT '';`,
     `CREATE INDEX IF NOT EXISTS idx_users_username ON users("username");`,
+    `CREATE INDEX IF NOT EXISTS idx_users_email ON users("email");`,
     `CREATE INDEX IF NOT EXISTS idx_users_mobile ON users("mobile");`,
     `CREATE INDEX IF NOT EXISTS idx_users_apiToken ON users("apiToken");`,
     `CREATE INDEX IF NOT EXISTS idx_users_apiTokenHash ON users("apiTokenHash");`,
@@ -1024,6 +1026,7 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
 // Pre-define all application models with exact column constraints
 const User = createModel('users', 'userId', {
   name: '',
+  email: '',
   role: 'user',
   plan: 'Standard',
   status: 'active',
@@ -1033,7 +1036,7 @@ const User = createModel('users', 'userId', {
   sessions: [],
   autoSendImage: { enabled: false, imageUrl: '', fileName: '' }
 }, ['sessions', 'autoSendImage'], [
-  'userId', 'username', 'name', 'mobile', 'passwordHash', 'apiToken', 'apiTokenHash', 'apiTokenPrefix', 'apiTokenLast4', 'role',
+  'userId', 'username', 'name', 'email', 'mobile', 'passwordHash', 'apiToken', 'apiTokenHash', 'apiTokenPrefix', 'apiTokenLast4', 'role',
   'plan', 'planExpiresAt', 'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
 ]);
 

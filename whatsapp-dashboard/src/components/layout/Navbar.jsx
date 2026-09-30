@@ -1,5 +1,5 @@
 import React from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
 const pageMeta = {
@@ -44,6 +44,7 @@ export function Navbar() {
   } = useAuth()
 
   const location = useLocation()
+  const navigate = useNavigate()
   const meta = pageMeta[location.pathname] || { title: 'Dashboard', eyebrow: 'WHATSAPP AUTOMATION' }
 
   const username = currentUser?.name || currentUser?.username || 'Prince Goyal'
@@ -92,7 +93,12 @@ export function Navbar() {
           ♧
         </button>
 
-        <div className="user" title={`Logged in as ${username}`}>
+        <div 
+          className="user" 
+          title={`Logged in as ${username}${currentUser?.email ? ` (${currentUser.email})` : ''} - Click to edit profile & email`}
+          onClick={() => navigate(isAdmin ? '/admin/settings' : '/settings')}
+          style={{ cursor: 'pointer' }}
+        >
           {status?.profilePicUrl ? (
             <img 
               src={status.profilePicUrl} 
@@ -105,7 +111,7 @@ export function Navbar() {
           )}
           <div>
             <strong>{username}</strong>
-            <small>{roleLabel}</small>
+            <small>{currentUser?.email || roleLabel}</small>
           </div>
         </div>
 

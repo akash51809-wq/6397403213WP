@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext'
 import Toast from '../common/Toast'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
+import EmailPromptModal from '../modals/EmailPromptModal'
 
 export function Layout() {
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toast, error, setError, companySettings } = useAuth()
@@ -27,6 +28,7 @@ export function Layout() {
       <main className="main">
         <Navbar />
         <Toast toast={toast} error={error} onClearError={() => setError('')} />
+        <EmailPromptModal />
         <Outlet />
         <footer className="footer">
           © 2026 {companySettings?.companyName || "WhatsApp Automation"} · All rights reserved.

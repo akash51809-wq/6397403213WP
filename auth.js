@@ -16,6 +16,13 @@ const {
   MediaFile
 } = require('./db');
 const { mediaStorage, MEDIA_DIR, inferMimeType, sanitizeFilename } = require('./mediaStorage');
+const { 
+  getSmtpConfig, 
+  saveSmtpConfig, 
+  sendEmail, 
+  sendNotificationEmail, 
+  sendTestEmail 
+} = require('./emailService');
 
 
 const router = express.Router();
@@ -693,6 +700,87 @@ const changePasswordHandler = async (req, res) => {
 router.post('/api/auth/change-password', passwordLimiter, authRequired, changePasswordHandler);
 router.post('/api/user/change-password', passwordLimiter, authRequired, changePasswordHandler);
 router.post('/api/admin/change-password', passwordLimiter, authRequired, changePasswordHandler);
+
+/* =========================================================
+   USER PROFILE MANAGEMENT APIs (All users)
+========================================================= */
+
+router.get('/api/user/profile', authRequired, async (req, res) => {
+  try {
+    const user = req.user;
+    res.json({
+      success: true,
+      profile: {
+        userId: user.userId,
+        username: user.username,
+        name: user.name || '',
+        email: user.email || '',
+        mobile: user.mobile || null,
+        role: user.role,
+        plan: user.plan || 'Demo Plan',
+        planExpiresAt: user.planExpiresAt || null,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/api/user/profile', authRequired, async (req, res) => {
+  try {
+    const user = req.user;
+    const { name, email } = req.body || {};
+    
+    if (name !== undefined) {
+      user.name = String(name).trim();
+    }
+    
+    const wasEmailEmpty = !user.email;
+    if (email !== undefined) {
+      const cleanEmail = String(email).trim().toLowerCase();
+      if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        return res.status(400).json({ success: false, message: 'कृपया एक मान्य ईमेल आईडी (Valid Email Address) दर्ज करें।' });
+      }
+      user.email = cleanEmail;
+    }
+    
+    user.updatedAt = new Date();
+    await user.save();
+
+    // Send welcome / confirmation notification if email was just registered
+    if (wasEmailEmpty && user.email) {
+      sendNotificationEmail(user.email, {
+        type: 'welcome',
+        title: 'Welcome to WhatsApp Automation Portal',
+        details: {
+          name: user.name || user.username,
+          username: user.username,
+          mobile: user.mobile,
+          plan: user.plan || 'Demo Plan'
+        }
+      }).catch(e => console.warn('[EmailService] Profile update welcome email error:', e.message));
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile सफलतापूर्वक अपडेट हो गई!',
+      profile: {
+        userId: user.userId,
+        username: user.username,
+        name: user.name || '',
+        email: user.email || '',
+        mobile: user.mobile || null,
+        role: user.role,
+        plan: user.plan,
+        planExpiresAt: user.planExpiresAt
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Profile update failed' });
+  }
+});
 
 /* =========================================================
    ADMIN USER MANAGEMENT APIs (Admin only)
@@ -1909,6 +1997,7 @@ router.get('/api/auth/me', authRequired, async (req, res) => {
       userId: user.userId, 
       username: user.username, 
       name: user.name || '',
+      email: user.email || '',
       mobile: user.mobile || null, 
       role: user.role,
       plan: user.plan || 'Demo Plan',
@@ -2279,6 +2368,22 @@ router.post('/api/admin/plan-requests/:requestId/approve', authRequired, adminRe
     if (req.body.notes) request.adminNotes = req.body.notes;
     await request.save();
 
+    // Send email notification to user if email exists
+    if (user.email) {
+      sendNotificationEmail(user.email, {
+        type: 'plan_approved',
+        title: `Plan Activated: ${request.planName}`,
+        details: {
+          userName: user.name || user.username,
+          planName: request.planName,
+          amount: request.amount || 0,
+          dailyLimit: planDoc?.dailyLimit || 'Active',
+          validity: planDoc?.validity || `${validityDays} Days`,
+          planExpiresAt: expiresDate
+        }
+      }).catch(err => console.warn('[EmailNotification] Plan approved email send warning:', err.message));
+    }
+
     res.json({
       success: true,
       message: `User ${user.name || user.userId} (${user.mobile || user.username}) का प्लान '${request.planName}' एक्टिवेट कर दिया गया है!`
@@ -2299,6 +2404,20 @@ router.post('/api/admin/plan-requests/:requestId/reject', authRequired, adminReq
     request.rejectedAt = new Date();
     if (req.body.notes) request.adminNotes = req.body.notes;
     await request.save();
+
+    // Send email notification to user if email exists
+    const user = await User.findOne({ userId: request.userId });
+    if (user && user.email) {
+      sendNotificationEmail(user.email, {
+        type: 'plan_rejected',
+        title: `Plan Request Update: ${request.planName}`,
+        details: {
+          userName: user.name || user.username,
+          planName: request.planName,
+          notes: req.body.notes || ''
+        }
+      }).catch(err => console.warn('[EmailNotification] Plan rejected email send warning:', err.message));
+    }
 
     res.json({ success: true, message: 'रिक्वेस्ट अस्वीकार (Reject) कर दी गई है।' });
   } catch (error) {
@@ -2708,25 +2827,26 @@ router.post('/api/settings/gdrive', authRequired, adminRequired, async (req, res
   }
 });
 
-// 19. Admin: Get/Save Gmail Settings
-const GMAIL_SETTINGS_FILE = path.join(__dirname, 'gmail_settings.json');
-function getGmailSettingsFile() {
-  try {
-    if (fs.existsSync(GMAIL_SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(GMAIL_SETTINGS_FILE, 'utf-8') || '{}');
-    }
-  } catch (e) {}
-  return {};
-}
-function saveGmailSettingsFile(data) {
-  try { fs.writeFileSync(GMAIL_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) {}
-}
-
+// 19. Admin: Get/Save Gmail Settings & Send Test Email
 router.get('/api/settings/gmail', authRequired, adminRequired, async (req, res) => {
   try {
-    const data = await getSettingWithFallback('gmail', getGmailSettingsFile);
-    if (data.appPassword) data.appPassword = '***';
-    res.json({ success: true, data });
+    const config = await getSmtpConfig();
+    res.json({
+      success: true,
+      data: {
+        gmail: config.gmail || config.user || '',
+        gmailAddress: config.gmail || config.user || '',
+        smtp: config.smtp || config.host || 'smtp.gmail.com',
+        smtpHost: config.smtp || config.host || 'smtp.gmail.com',
+        port: config.port || 465,
+        smtpPort: String(config.port || 465),
+        ssl: config.ssl !== undefined ? config.ssl : true,
+        password: config.password ? '••••••••' : '',
+        appPassword: config.password ? '••••••••' : '',
+        fromName: config.fromName || 'WhatsApp Automation Portal',
+        isEnabled: config.isEnabled !== undefined ? config.isEnabled : true
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2734,18 +2854,95 @@ router.get('/api/settings/gmail', authRequired, adminRequired, async (req, res) 
 
 router.post('/api/settings/gmail', authRequired, adminRequired, async (req, res) => {
   try {
-    const { gmailAddress, smtpHost, smtpPort, appPassword } = req.body || {};
-    const existing = await getSettingWithFallback('gmail', getGmailSettingsFile);
-    const data = {
-      gmailAddress: String(gmailAddress || '').trim(),
-      smtpHost: String(smtpHost || '').trim(),
-      smtpPort: String(smtpPort || '').trim(),
-      appPassword: appPassword && appPassword !== '***' ? String(appPassword).trim() : (existing.appPassword || ''),
-      updatedAt: new Date().toISOString()
-    };
-    await saveSettingToDbAndFile('gmail', data, saveGmailSettingsFile);
-    res.json({ success: true, message: 'Gmail settings saved.', data: { ...data, appPassword: '***' } });
+    const { 
+      gmail, 
+      gmailAddress, 
+      smtp, 
+      smtpHost, 
+      port, 
+      smtpPort, 
+      ssl, 
+      password, 
+      appPassword, 
+      fromName, 
+      senderName, 
+      isEnabled 
+    } = req.body || {};
+
+    const existing = await getSmtpConfig();
+    const rawPass = password !== undefined ? password : appPassword;
+    const finalPass = (rawPass && rawPass !== '••••••••' && rawPass !== '***')
+      ? String(rawPass).trim()
+      : (existing.password || '');
+
+    const saved = await saveSmtpConfig({
+      gmail: String(gmail || gmailAddress || '').trim(),
+      smtp: String(smtp || smtpHost || 'smtp.gmail.com').trim(),
+      port: parseInt(port || smtpPort || 465, 10),
+      ssl: ssl !== undefined ? Boolean(ssl) : (parseInt(port || smtpPort || 465, 10) === 465),
+      password: finalPass,
+      fromName: String(fromName || senderName || 'WhatsApp Automation Portal').trim(),
+      isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true
+    });
+
+    res.json({
+      success: true,
+      message: 'Gmail & SMTP settings saved successfully!',
+      data: {
+        ...saved,
+        password: saved.password ? '••••••••' : '',
+        appPassword: saved.password ? '••••••••' : ''
+      }
+    });
   } catch (error) {
+    console.error('Save Gmail settings error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/api/settings/gmail/test', authRequired, adminRequired, async (req, res) => {
+  try {
+    const { testEmail, config } = req.body || {};
+    const existing = await getSmtpConfig();
+    const target = String(testEmail || req.user?.email || existing?.gmail || '').trim();
+
+    if (!target || !target.includes('@')) {
+      return res.status(400).json({ success: false, message: 'कृपया एक वैध टेस्ट ईमेल आईडी (Test Email Address) दर्ज करें।' });
+    }
+
+    let customConfig = null;
+    if (config) {
+      const rawPass = config.password || config.appPassword;
+      const finalPass = (rawPass && rawPass !== '••••••••' && rawPass !== '***')
+        ? String(rawPass).trim()
+        : existing.password;
+
+      const p = parseInt(config.port || config.smtpPort || 465, 10);
+      customConfig = {
+        gmail: String(config.gmail || config.gmailAddress || existing.gmail).trim(),
+        smtp: String(config.smtp || config.smtpHost || existing.smtp).trim(),
+        port: p,
+        ssl: config.ssl !== undefined ? Boolean(config.ssl) : (p === 465),
+        password: finalPass,
+        fromName: String(config.fromName || existing.fromName || 'WhatsApp Automation Portal').trim(),
+        isEnabled: true
+      };
+    }
+
+    const result = await sendTestEmail(target, customConfig);
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        message: `✅ Test email successfully sent to ${target}! (Message ID: ${result.messageId || 'OK'})` 
+      });
+    } else {
+      res.status(400).json({ 
+        success: false, 
+        message: result.message || result.error || 'Failed to send test email. Please check SMTP host, port and App Password.' 
+      });
+    }
+  } catch (error) {
+    console.error('Test email error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

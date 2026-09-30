@@ -6,6 +6,7 @@ import '../../styles/settings.css';
 // All tabs defined for Admin and Regular Users
 const ALL_TABS = [
   { key: 'company',        icon: '▦',  label: 'Company',        adminOnly: true },
+  { key: 'profile',        icon: '👤',  label: 'My Profile',     adminOnly: false },
   { key: 'api',            icon: '⚙',  label: 'API Setting',    adminOnly: false },
   { key: 'whatsapp',       icon: '◉',  label: 'WhatsApp',       adminOnly: false },
   { key: 'gdrive',         icon: '◈',  label: 'G Drive',        adminOnly: true },
@@ -944,21 +945,176 @@ function GDriveTab({ notify }) {
   );
 }
 
+// ─── Tab: User Profile (All Users & Admin) ──────────────────────────────────
+function ProfileTab({ notify }) {
+  const { currentUser, setCurrentUser } = useAuth();
+  const [profile, setProfile] = useState({
+    name: '',
+    email: '',
+    username: '',
+    mobile: '',
+    plan: '',
+    planExpiresAt: ''
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiGet('/api/user/profile')
+      .then(r => {
+        if (r?.profile) {
+          setProfile({
+            name: r.profile.name || '',
+            email: r.profile.email || '',
+            username: r.profile.username || '',
+            mobile: r.profile.mobile || '',
+            plan: r.profile.plan || 'Standard',
+            planExpiresAt: r.profile.planExpiresAt || ''
+          });
+        }
+      })
+      .catch(() => {
+        if (currentUser) {
+          setProfile({
+            name: currentUser.name || '',
+            email: currentUser.email || '',
+            username: currentUser.username || '',
+            mobile: currentUser.mobile || '',
+            plan: currentUser.plan || 'Standard',
+            planExpiresAt: currentUser.planExpiresAt || ''
+          });
+        }
+      });
+  }, [currentUser]);
+
+  const save = async (e) => {
+    e?.preventDefault();
+    if (profile.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email.trim())) {
+      return notify('कृपया एक मान्य ईमेल पता (Valid Email Address) दर्ज करें।', 'error');
+    }
+    setSaving(true);
+    try {
+      const res = await apiPost('/api/user/profile', {
+        name: profile.name.trim(),
+        email: profile.email.trim().toLowerCase()
+      });
+      if (res.success) {
+        notify('Profile और Email सफलतापूर्वक सेव हो गया!', 'success');
+        if (res.profile) {
+          setCurrentUser(prev => {
+            const upd = { ...prev, name: res.profile.name, email: res.profile.email };
+            try { localStorage.setItem('wa_user', JSON.stringify(upd)); } catch {}
+            return upd;
+          });
+        }
+      } else {
+        notify(res.message || 'Save failed', 'error');
+      }
+    } catch (err) {
+      notify(err.message || 'Network error', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <article className="card settings-form" style={{ maxWidth: 720 }}>
+      <div className="scard-head">
+        <div>
+          <h3>My Profile &amp; Email Notification Settings</h3>
+          <p>Manage your account name and email address to receive real-time updates and notifications.</p>
+        </div>
+        <button className="btn primary" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : '💾 Save Profile'}
+        </button>
+      </div>
+      <div className="card-body">
+        <form onSubmit={save}>
+          <div className="fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+            <div className="field">
+              <label>FULL NAME</label>
+              <SInput
+                value={profile.name}
+                onChange={v => setProfile(p => ({ ...p, name: v }))}
+                placeholder="e.g. Prince Goyal"
+              />
+            </div>
+            <div className="field">
+              <label>EMAIL ADDRESS (FOR ALERTS &amp; NOTIFICATIONS)</label>
+              <SInput
+                type="email"
+                value={profile.email}
+                onChange={v => setProfile(p => ({ ...p, email: v }))}
+                placeholder="e.g. yourname@gmail.com"
+              />
+              <small style={{ color: '#10b981', marginTop: 4, display: 'block', fontSize: 11, fontWeight: 600 }}>
+                💡 Plan approval, expiry alerts, and system notices will be sent to this email.
+              </small>
+            </div>
+            <div className="field">
+              <label>LOGIN USERNAME / ID</label>
+              <SInput value={profile.username} disabled style={{ background: '#f8fafc', opacity: 0.8 }} />
+            </div>
+            <div className="field">
+              <label>REGISTERED MOBILE</label>
+              <SInput value={profile.mobile ? `+${profile.mobile}` : ''} disabled style={{ background: '#f8fafc', opacity: 0.8 }} />
+            </div>
+            <div className="field">
+              <label>CURRENT PLAN</label>
+              <SInput value={profile.plan} disabled style={{ background: '#f8fafc', opacity: 0.8 }} />
+            </div>
+            <div className="field">
+              <label>PLAN EXPIRY</label>
+              <SInput
+                value={profile.planExpiresAt ? new Date(profile.planExpiresAt).toLocaleDateString() : 'Active'}
+                disabled
+                style={{ background: '#f8fafc', opacity: 0.8 }}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <button type="submit" className="btn primary" disabled={saving} style={{ height: 42, padding: '0 24px' }}>
+              {saving ? 'Saving Changes…' : '💾 Save Profile & Email'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </article>
+  );
+}
+
 // ─── Tab 5: Gmail Setting (Admin Only) ────────────────────────────────────────
 function GmailTab({ notify }) {
-  const [form, setForm] = useState({ gmailAddress: '', smtpHost: 'smtp.gmail.com', smtpPort: '587', appPassword: '' });
+  const [form, setForm] = useState({
+    gmail: '',
+    smtp: 'smtp.gmail.com',
+    port: 465,
+    ssl: true,
+    password: '',
+    fromName: 'Easy Recharge Solution',
+    isEnabled: true
+  });
+  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   useEffect(() => {
     apiGet('/api/settings/gmail')
       .then(r => {
         if (r?.data) {
           setForm({
-            gmailAddress: r.data.gmailAddress || '',
-            smtpHost: r.data.smtpHost || 'smtp.gmail.com',
-            smtpPort: r.data.smtpPort || '587',
-            appPassword: r.data.appPassword || ''
+            gmail: r.data.gmail || r.data.gmailAddress || '',
+            smtp: r.data.smtp || r.data.smtpHost || 'smtp.gmail.com',
+            port: Number(r.data.port || r.data.smtpPort || 465),
+            ssl: r.data.ssl !== undefined ? Boolean(r.data.ssl) : true,
+            password: r.data.password || r.data.appPassword || '',
+            fromName: r.data.fromName || 'Easy Recharge Solution',
+            isEnabled: r.data.isEnabled !== undefined ? Boolean(r.data.isEnabled) : true
           });
+          if (r.data.gmail || r.data.gmailAddress) {
+            setTestEmail(r.data.gmail || r.data.gmailAddress);
+          }
         }
       })
       .catch(() => {});
@@ -966,44 +1122,243 @@ function GmailTab({ notify }) {
 
   const save = async (e) => {
     e?.preventDefault();
+    if (!form.gmail) {
+      return notify('कृपया Gmail / Sender Email पता दर्ज करें।', 'error');
+    }
     setSaving(true);
     try {
       const r = await apiPost('/api/settings/gmail', form);
-      notify(r.success ? 'Gmail & SMTP settings saved!' : (r.message || 'Save failed'), r.success ? 'success' : 'error');
-    } catch (e) { notify(e.message || 'Network error', 'error'); }
-    setSaving(false);
+      if (r.success) {
+        notify('Gmail & SMTP settings saved successfully!', 'success');
+        if (r.data) {
+          setForm(prev => ({
+            ...prev,
+            ...r.data,
+            password: r.data.password || prev.password
+          }));
+        }
+      } else {
+        notify(r.message || 'Save failed', 'error');
+      }
+    } catch (e) {
+      notify(e.message || 'Network error', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestEmail = async (e) => {
+    e?.preventDefault();
+    if (!testEmail || !testEmail.includes('@')) {
+      return notify('कृपया टेस्ट ईमेल भेजने के लिए एक वैध ईमेल पता दर्ज करें।', 'error');
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await apiPost('/api/settings/gmail/test', {
+        testEmail: testEmail.trim(),
+        config: form
+      });
+      if (res.success) {
+        setTestResult({ success: true, message: res.message || 'Test email sent successfully!' });
+        notify('Test Email successfully sent!', 'success');
+      } else {
+        setTestResult({ success: false, message: res.message || 'Failed to send test email.' });
+        notify(res.message || 'Test email failed', 'error');
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: err.message || 'Error communicating with server.' });
+      notify(err.message || 'Test email error', 'error');
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
-    <article className="card settings-form">
-      <div className="scard-head">
-        <div>
-          <h3>Gmail & SMTP Setting</h3>
-          <p>Configure outgoing email delivery settings for user OTPs, alerts, and notifications.</p>
-        </div>
-        <button className="btn primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
-      </div>
-      <div className="card-body">
-        <div className="fields">
-          <div className="field">
-            <label>GMAIL / SENDER ADDRESS</label>
-            <SInput type="email" value={form.gmailAddress} onChange={v => setForm(f => ({ ...f, gmailAddress: v }))} placeholder="support@yourdomain.com" />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <article className="card settings-form">
+        <div className="scard-head">
+          <div>
+            <h3>Gmail &amp; SMTP Configuration</h3>
+            <p>Configure manual SMTP credentials. All user notifications (Welcome, Plan Approval/Rejection, Expiry) will be delivered via this email.</p>
           </div>
-          <div className="field">
-            <label>SMTP HOST</label>
-            <SInput value={form.smtpHost} onChange={v => setForm(f => ({ ...f, smtpHost: v }))} placeholder="smtp.gmail.com" />
-          </div>
-          <div className="field">
-            <label>SMTP PORT</label>
-            <SInput value={form.smtpPort} onChange={v => setForm(f => ({ ...f, smtpPort: v }))} placeholder="587" />
-          </div>
-          <div className="field">
-            <label>APP PASSWORD / API KEY</label>
-            <SInput type="password" value={form.appPassword} onChange={v => setForm(f => ({ ...f, appPassword: v }))} placeholder="16-character App Password" />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button
+              type="button"
+              className={`compact-toggle ${form.isEnabled ? 'on' : 'off'}`}
+              onClick={() => setForm(f => ({ ...f, isEnabled: !f.isEnabled }))}
+            >
+              <span />
+              {form.isEnabled ? 'Service Active' : 'Service Disabled'}
+            </button>
+            <button className="btn primary" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : '💾 Save Settings'}
+            </button>
           </div>
         </div>
-      </div>
-    </article>
+
+        <div className="card-body">
+          <form onSubmit={save}>
+            <div className="fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+              {/* Field 1: Gmail */}
+              <div className="field">
+                <label>GMAIL / SENDER ADDRESS</label>
+                <SInput
+                  type="email"
+                  value={form.gmail}
+                  onChange={v => setForm(f => ({ ...f, gmail: v }))}
+                  placeholder="yourname@gmail.com"
+                  required
+                />
+              </div>
+
+              {/* Field 2: SMTP Host */}
+              <div className="field">
+                <label>SMTP HOST</label>
+                <SInput
+                  value={form.smtp}
+                  onChange={v => setForm(f => ({ ...f, smtp: v }))}
+                  placeholder="smtp.gmail.com"
+                  required
+                />
+              </div>
+
+              {/* Field 3: Port */}
+              <div className="field">
+                <label>PORT</label>
+                <SInput
+                  type="number"
+                  value={form.port}
+                  onChange={v => {
+                    const p = parseInt(v, 10) || 465;
+                    setForm(f => ({ ...f, port: p, ssl: p === 465 }));
+                  }}
+                  placeholder="465"
+                  required
+                />
+              </div>
+
+              {/* Field 4: SSL Toggle */}
+              <div className="field">
+                <label>SSL / SECURE CONNECTION</label>
+                <div style={{ display: 'flex', alignItems: 'center', height: 44, gap: 10 }}>
+                  <button
+                    type="button"
+                    className={`btn ${form.ssl ? 'primary' : 'secondary'}`}
+                    onClick={() => setForm(f => ({ ...f, ssl: !f.ssl }))}
+                    style={{ padding: '8px 20px', fontSize: 13, fontWeight: 700 }}
+                  >
+                    SSL: {form.ssl ? 'ON (Port 465)' : 'OFF / STARTTLS (Port 587)'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Field 5: Password with Show/Hide */}
+              <div className="field" style={{ gridColumn: 'span 2' }}>
+                <label>PASSWORD / GOOGLE APP PASSWORD (16-DIGITS)</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <SInput
+                      type={showPassword ? 'text' : 'password'}
+                      value={form.password}
+                      onChange={v => setForm(f => ({ ...f, password: v }))}
+                      placeholder="XXXXXXXXXX (Enter 16-character App Password)"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => setShowPassword(p => !p)}
+                    style={{ height: 44, padding: '0 14px', whiteSpace: 'nowrap' }}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? '🙈 Hide' : '👁 Show'}
+                  </button>
+                </div>
+                <small style={{ color: '#64748b', marginTop: 4, display: 'block', fontSize: 11 }}>
+                  🔒 For Gmail, use an <strong>App Password</strong> generated from Google Account Security.
+                </small>
+              </div>
+
+              {/* Field 6: Sender Name */}
+              <div className="field" style={{ gridColumn: 'span 2' }}>
+                <label>FROM NAME / SENDER BRAND TITLE</label>
+                <SInput
+                  value={form.fromName}
+                  onChange={v => setForm(f => ({ ...f, fromName: v }))}
+                  placeholder="e.g. Easy Recharge Solution"
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, display: 'flex', gap: 12 }}>
+              <button type="submit" className="btn primary" disabled={saving} style={{ padding: '10px 24px' }}>
+                {saving ? 'Saving…' : '💾 Save Gmail & SMTP Settings'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </article>
+
+      {/* Card 2: Send Test Email */}
+      <article className="card">
+        <div className="scard-head">
+          <div>
+            <h3>✉ Test SMTP Connection</h3>
+            <p>Send an immediate test email to verify your credentials and deliverability.</p>
+          </div>
+        </div>
+        <div className="card-body">
+          <form onSubmit={handleTestEmail} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 600 }}>
+            <div className="field">
+              <label>SEND TEST EMAIL TO</label>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <SInput
+                  type="email"
+                  value={testEmail}
+                  onChange={setTestEmail}
+                  placeholder="your-personal-email@gmail.com"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="btn primary"
+                  disabled={testing || saving}
+                  style={{ height: 44, whiteSpace: 'nowrap', padding: '0 20px' }}
+                >
+                  {testing ? 'Sending…' : '✉ Send Test Email'}
+                </button>
+              </div>
+            </div>
+
+            {testResult && (
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  backgroundColor: testResult.success ? '#f0fdf4' : '#fef2f2',
+                  border: `1px solid ${testResult.success ? '#bbf7d0' : '#fecaca'}`,
+                  color: testResult.success ? '#15803d' : '#b91c1c'
+                }}
+              >
+                {testResult.message}
+              </div>
+            )}
+          </form>
+
+          {/* Quick Guide */}
+          <div style={{ marginTop: 20, background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
+            <strong style={{ display: 'block', color: '#0f172a', marginBottom: 4 }}>💡 How to setup Gmail App Password:</strong>
+            1. Open your Google Account &gt; <strong>Security</strong>.<br />
+            2. Ensure <strong>2-Step Verification</strong> is turned ON.<br />
+            3. Search for <strong>App Passwords</strong> and create a password for "Mail".<br />
+            4. Copy the generated 16-letter code and paste into the <strong>Password</strong> field above.
+          </div>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -1438,6 +1793,7 @@ export default function SettingsPage({ defaultTab = 'company' }) {
       </div>
 
       {activeTab === 'company'        && <CompanyTab        notify={notify} />}
+      {activeTab === 'profile'        && <ProfileTab        notify={notify} />}
       {activeTab === 'api'            && <ApiTab            notify={notify} />}
       {activeTab === 'whatsapp'       && <WhatsAppTab       notify={notify} />}
       {activeTab === 'gdrive'         && <GDriveTab         notify={notify} />}
