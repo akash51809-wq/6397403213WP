@@ -758,9 +758,28 @@ function SystemTab({ notify }) {
   const [systemInfo, setSystemInfo] = useState(null);
   const [pinging, setPinging] = useState(false);
 
+  // Demo Plan Settings State
+  const [demoForm, setDemoForm] = useState({
+    demoDays: 7,
+    planName: 'Demo Plan',
+    dailyLimit: '100/Day',
+    enabled: true
+  });
+  const [savingDemo, setSavingDemo] = useState(false);
+
   const loadData = useCallback(() => {
     apiGet('/api/system/autoping').then(r => setPingData(r?.stats)).catch(() => {});
     apiGet('/api/admin/system-info').then(r => setSystemInfo(r?.info)).catch(() => {});
+    apiGet('/api/settings/demo').then(r => {
+      if (r?.settings) {
+        setDemoForm({
+          demoDays: r.settings.demoDays || 7,
+          planName: r.settings.planName || 'Demo Plan',
+          dailyLimit: r.settings.dailyLimit || '100/Day',
+          enabled: r.settings.enabled !== false
+        });
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -782,8 +801,93 @@ function SystemTab({ notify }) {
     }
   };
 
+  const handleSaveDemoSettings = async (e) => {
+    e?.preventDefault();
+    setSavingDemo(true);
+    try {
+      const res = await apiPost('/api/settings/demo', {
+        demoDays: Number(demoForm.demoDays) || 7,
+        planName: demoForm.planName || 'Demo Plan',
+        dailyLimit: demoForm.dailyLimit || '100/Day',
+        enabled: Boolean(demoForm.enabled)
+      });
+      if (res.success) {
+        notify('Demo Plan Settings (डेमो सेटिंग) सफलतापूर्वक सेव हो गईं!', 'success');
+      } else {
+        notify(res.message || 'Save failed', 'error');
+      }
+    } catch (err) {
+      notify(err.message || 'Network error', 'error');
+    } finally {
+      setSavingDemo(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Demo Plan & Trial Validity Setting Card */}
+      <article className="card settings-form">
+        <div className="scard-head">
+          <div>
+            <h3>🎁 Demo Plan &amp; Trial Validity Setting (डेमो सेटिंग)</h3>
+            <p>नए साइनअप करने वाले यूज़र्स को बाय-डिफ़ॉल्ट कितने दिन (Validity Days) का डेमो प्लान मिलेगा यह यहाँ सेट करें।</p>
+          </div>
+          <button 
+            className="btn primary" 
+            onClick={handleSaveDemoSettings} 
+            disabled={savingDemo}
+            style={{ height: 38, padding: '0 16px' }}
+          >
+            {savingDemo ? 'Saving…' : 'Save Demo Setting'}
+          </button>
+        </div>
+        <div className="card-body">
+          <div className="fields">
+            <div className="field">
+              <label>DEMO VALIDITY (DAYS / कितने दिन का डेमो मिलेगा)</label>
+              <SInput 
+                type="number" 
+                min="1" 
+                max="365" 
+                value={demoForm.demoDays} 
+                onChange={v => setDemoForm(f => ({ ...f, demoDays: v }))} 
+                placeholder="7" 
+              />
+              <small style={{ color: '#64748b', fontSize: 12, marginTop: 4, display: 'block' }}>
+                जैसे: 7 दिन, 3 दिन, या 15 दिन। इस अवधि के बाद यूज़र का डेमो प्लान Expire हो जाएगा।
+              </small>
+            </div>
+            <div className="field">
+              <label>DEMO PLAN NAME (प्लान का नाम)</label>
+              <SInput 
+                value={demoForm.planName} 
+                onChange={v => setDemoForm(f => ({ ...f, planName: v }))} 
+                placeholder="Demo Plan" 
+              />
+            </div>
+            <div className="field">
+              <label>DAILY MESSAGE LIMIT (दैनिक मैसेज सीमा)</label>
+              <SInput 
+                value={demoForm.dailyLimit} 
+                onChange={v => setDemoForm(f => ({ ...f, dailyLimit: v }))} 
+                placeholder="100/Day" 
+              />
+            </div>
+            <div className="field">
+              <label>DEMO STATUS</label>
+              <select 
+                className="select sinput" 
+                value={demoForm.enabled ? 'active' : 'inactive'} 
+                onChange={e => setDemoForm(f => ({ ...f, enabled: e.target.value === 'active' }))}
+              >
+                <option value="active">Active (सभी नए Signup यूज़र्स को स्वतः डेमो प्लान दें)</option>
+                <option value="inactive">Disabled</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </article>
+
       {/* Auto-Ping Card */}
       <article className="card">
         <div className="scard-head">

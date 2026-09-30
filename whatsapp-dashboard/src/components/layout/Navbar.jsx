@@ -21,7 +21,10 @@ const pageMeta = {
   '/api-docs': { title: 'API Docs', eyebrow: 'DEVELOPER' },
   '/settings': { title: 'Settings', eyebrow: 'SETTINGS' },
   '/admin/settings': { title: 'Settings', eyebrow: 'SUPER ADMIN' },
-  '/admin': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
+  '/admin': { title: 'Dashboard', eyebrow: 'SUPER ADMIN' },
+  '/admin/users': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
+  '/admin/user-management': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
+  '/users': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
   '/admin/plans': { title: 'Plan Management', eyebrow: 'SUPER ADMIN' },
   '/payment/daybook': { title: 'Purchase Requests', eyebrow: 'SUPER ADMIN' }
 }
@@ -30,6 +33,7 @@ export function Navbar() {
   const {
     currentUser,
     isAdmin,
+    status,
     loadStatus,
     loadQr,
     notify,
@@ -89,7 +93,16 @@ export function Navbar() {
         </button>
 
         <div className="user" title={`Logged in as ${username}`}>
-          <span className="avatar">{initials}</span>
+          {status?.profilePicUrl ? (
+            <img 
+              src={status.profilePicUrl} 
+              alt="Avatar" 
+              className="avatar" 
+              style={{ objectFit: 'cover', borderRadius: '50%', width: 34, height: 34, border: '2px solid #10b981' }} 
+            />
+          ) : (
+            <span className="avatar">{initials}</span>
+          )}
           <div>
             <strong>{username}</strong>
             <small>{roleLabel}</small>

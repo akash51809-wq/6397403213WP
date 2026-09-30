@@ -3,7 +3,7 @@ const {
     DisconnectReason,
     downloadMediaMessage
 } = require('@whiskeysockets/baileys');
-const { usePgAuthState, useMongoAuthState } = require('./pgAuthState');
+const { usePgAuthState } = require('./pgAuthState');
 
 const { Boom } = require('@hapi/boom');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -18,7 +18,6 @@ const {
     CONFIG_ADMIN_DEFAULT_USER_ID 
 } = require('./auth');
 const { connection: dbConnection } = require('./db');
-const mongoose = { connection: dbConnection };
 
 const MessageReportModel = require('./models/MessageReport');
 const IncomingMessageModel = require('./models/IncomingMessage');
@@ -50,11 +49,14 @@ const corsOptions = {
         if (process.env.RENDER_EXTERNAL_URL && origin === process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')) {
             return callback(null, true);
         }
+        if (process.env.APP_URL && origin === process.env.APP_URL.replace(/\/$/, '')) {
+            return callback(null, true);
+        }
         return callback(new Error('Blocked by CORS policy: Origin not allowed'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Api-Token']
 };
 app.use(cors(corsOptions));
 
@@ -64,6 +66,12 @@ app.use((req, res, next) => {
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' ws: wss: https:; frame-ancestors 'self';"
+    );
     res.removeHeader('X-Powered-By');
     next();
 });
@@ -78,59 +86,53 @@ const attachmentBodyParser = express.json({ limit: '15mb' });
 const fs = require('fs');
 const path = require('path');
 
-// Protected Media Storage
-const MEDIA_DIR = path.join(__dirname, 'media_storage');
-if (!fs.existsSync(MEDIA_DIR)) {
-    try {
-        fs.mkdirSync(MEDIA_DIR, { recursive: true });
-    } catch (e) {
-        console.error('Error creating media_storage dir:', e);
-    }
-}
+// Protected Persistent Media Storage Architecture
+const { mediaStorage, MEDIA_DIR, inferMimeType, sanitizeFilename } = require('./mediaStorage');
 
-// Media Storage Route: allows auto_img and company assets preview, protects against path traversal
-app.get('/media/:filename', (req, res, next) => {
+// Media Storage Route: allows auto_img and company assets preview, protects against path traversal & restores from persistent DB
+app.get('/media/:filename', async (req, res, next) => {
     try {
         const rawFilename = String(req.params.filename || '').trim();
         if (!rawFilename || rawFilename.includes('\0') || rawFilename.includes('..') || rawFilename.includes('/') || rawFilename.includes('\\')) {
             return res.status(400).json({ success: false, message: 'Invalid media filename parameter.' });
         }
-        const safeFilename = path.basename(rawFilename);
-        if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
-            return res.status(400).json({ success: false, message: 'Invalid media filename.' });
+        const safeFilename = sanitizeFilename(rawFilename);
+        if (!safeFilename || safeFilename.includes('..')) {
+            return res.status(400).json({ success: false, message: 'Invalid media filename parameter.' });
         }
-        const resolvedBase = path.resolve(MEDIA_DIR);
-        const filePath = path.resolve(resolvedBase, safeFilename);
 
-        if (!filePath.startsWith(resolvedBase + path.sep)) {
-            return res.status(403).json({ success: false, message: 'Access forbidden: invalid path.' });
+        // Get media file from local cache or restore from PostgreSQL persistent store
+        const media = await mediaStorage.getMedia(safeFilename);
+        if (!media.found || !media.filePath) {
+            return res.status(404).json({ success: false, message: 'Media file not found.' });
         }
 
         // Existing required public assets: company branding (logo, favicon, banner) for unauthenticated UI
         if (safeFilename.startsWith('company_')) {
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ success: false, message: 'Media file not found.' });
-            }
-            return res.sendFile(filePath);
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            if (media.mimetype) res.setHeader('Content-Type', media.mimetype);
+            return res.sendFile(media.filePath);
         }
 
         // All user-generated sensitive media requires authentication + ownership validation
         return authRequired(req, res, async () => {
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ success: false, message: 'Media file not found.' });
-            }
-
             // Admins have access to all media files
             if (req.user && req.user.role === 'admin') {
-                return res.sendFile(filePath);
+                if (media.mimetype) res.setHeader('Content-Type', media.mimetype);
+                return res.sendFile(media.filePath);
             }
 
             // Check if user owns this media file
             const userId = req.user?.userId;
             let isOwner = false;
 
+            // If media DB record has ownerUserId
+            if (media.ownerUserId && String(media.ownerUserId) === String(userId)) {
+                isOwner = true;
+            }
+
             // 1. Check in user's autoSendImage configuration
-            if (req.user?.autoSendImage?.imageUrl && String(req.user.autoSendImage.imageUrl).includes(safeFilename)) {
+            if (!isOwner && req.user?.autoSendImage?.imageUrl && String(req.user.autoSendImage.imageUrl).includes(safeFilename)) {
                 isOwner = true;
             }
 
@@ -183,7 +185,8 @@ app.get('/media/:filename', (req, res, next) => {
                 });
             }
 
-            return res.sendFile(filePath);
+            if (media.mimetype) res.setHeader('Content-Type', media.mimetype);
+            return res.sendFile(media.filePath);
         });
     } catch (err) {
         console.error('Media fetch error:', err.message);
@@ -428,29 +431,8 @@ function getMessageReports(user = null) {
             list = JSON.parse(data || '[]');
         }
 
-        // Also merge sent messages (fromMe: true) from incomingMessagesCache or file
-        const incList = incomingMessagesCache && incomingMessagesCache.length > 0 
-            ? incomingMessagesCache 
-            : (fs.existsSync(INCOMING_FILE) ? JSON.parse(fs.readFileSync(INCOMING_FILE, 'utf-8') || '[]') : []);
-        const existingIds = new Set(list.map(r => String(r.id)));
-
-        for (const m of incList) {
-            if (m.fromMe && !existingIds.has(String(m.id))) {
-                existingIds.add(String(m.id));
-                list.push({
-                    id: m.id,
-                    date: m.date || new Date().toISOString(),
-                    from: m.from || connectedNumber || 'me',
-                    to: m.chatJid ? m.chatJid.split('@')[0] : (m.to || ''),
-                    message: m.message || (m.mediaType ? `[${m.mediaType.toUpperCase()}]` : ''),
-                    status: 'sent',
-                    type: m.mediaType || (m.message && m.message.startsWith('[IMAGE') ? 'image' : 'text'),
-                    source: m.isGroup ? 'group' : (m.id && String(m.id).startsWith('api_') ? 'api' : 'web'),
-                    ownerUserId: m.ownerUserId,
-                    session: m.from
-                });
-            }
-        }
+        // Exclude direct messages sent from mobile phone (only show Panel/API/Campaign/Group/Scheduler messages)
+        list = list.filter(r => r && r.source !== 'direct');
 
         list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -1732,9 +1714,11 @@ app.post('/api/incoming/reply', authRequired, attachmentBodyParser, async (req, 
             mimetype = validation.mimeType;
             fileName = validation.originalName || validation.safeFilename;
             fileSize = validation.fileSize;
-            const savedName = validation.safeFilename;
-
-            fs.writeFileSync(path.join(MEDIA_DIR, savedName), buffer);
+            await mediaStorage.saveMedia(savedName, buffer, { 
+                mimetype, 
+                ownerUserId: req.user?.userId, 
+                metadata: { originalName: fileName } 
+            });
             mediaUrl = `/media/${savedName}`;
 
             if (mimetype.startsWith('image/')) {
@@ -1809,7 +1793,7 @@ app.post('/api/incoming/reply', authRequired, attachmentBodyParser, async (req, 
             status: 'sent',
             session: myNumber,
             type: mediaType || 'text',
-            source: 'direct'
+            source: 'web'
         });
 
         broadcastIncomingEvent('new_message', outRecord, req.user.userId, myNumber);
@@ -1945,7 +1929,8 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
             status, search,
             from, fromNumber,
             to, toNumber,
-            type, source
+            type, source,
+            scope // 'admin' | 'users' | 'all'
         } = req.query;
 
         let rawUserReports = [];
@@ -1980,6 +1965,18 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
                         orConditions.push({ session: new RegExp(userConnectedNum10) });
                     }
                     dbQuery.$or = orConditions;
+                } else if (scope === 'admin') {
+                    dbQuery.$or = [
+                        { ownerUserId: 'admin' },
+                        { ownerUserId: req.user.userId },
+                        { ownerUserId: null },
+                        { ownerUserId: '' }
+                    ];
+                } else if (scope === 'users' || scope === 'user') {
+                    dbQuery.$and = [
+                        { ownerUserId: { $ne: 'admin' } },
+                        { ownerUserId: { $ne: req.user.userId } }
+                    ];
                 }
                 rawUserReports = await MessageReportModel.find(dbQuery).sort({ date: -1 }).limit(5000).lean();
             } catch (dbErr) {
@@ -1989,7 +1986,17 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
 
         if (!rawUserReports || rawUserReports.length === 0) {
             rawUserReports = getMessageReports(req.user);
+            if (req.user.role === 'admin') {
+                if (scope === 'admin') {
+                    rawUserReports = rawUserReports.filter(r => !r.ownerUserId || r.ownerUserId === 'admin' || r.ownerUserId === req.user.userId);
+                } else if (scope === 'users' || scope === 'user') {
+                    rawUserReports = rawUserReports.filter(r => r.ownerUserId && r.ownerUserId !== 'admin' && r.ownerUserId !== req.user.userId);
+                }
+            }
         }
+
+        // Exclude direct messages sent from mobile phone (only show Panel/API/Campaign/Group/Scheduler messages)
+        rawUserReports = (rawUserReports || []).filter(r => r && r.source !== 'direct');
 
         const allUserReports = rawUserReports.map(r => {
             // Infer or normalize type
@@ -3147,6 +3154,10 @@ async function handleSendText(req, res) {
                 const savedName = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.ogg`;
                 const filePath = path.join(MEDIA_DIR, savedName);
                 const { buffer, mimetype } = await generateWhatsAppVoiceNote(messageText, voiceLang || 'hi', filePath);
+                await mediaStorage.saveMedia(savedName, buffer, { 
+                    mimetype: mimetype || 'audio/ogg; codecs=opus', 
+                    ownerUserId: user?.userId 
+                });
                 messagePayload = { audio: buffer, mimetype: mimetype || 'audio/ogg; codecs=opus', ptt: true };
                 messageType = 'audio';
             } catch (ttsErr) {
@@ -3158,16 +3169,18 @@ async function handleSendText(req, res) {
                 const rawImg = String(autoSendConfig.imageUrl).trim();
                 if (rawImg.startsWith('/media/')) {
                     const safeName = path.basename(rawImg.split('?')[0]);
-                    const localPath = path.resolve(MEDIA_DIR, safeName);
-                    if (fs.existsSync(localPath)) {
+                    const media = await mediaStorage.getMedia(safeName);
+                    if (media.found) {
                         try {
-                            const imgBuffer = fs.readFileSync(localPath);
-                            messagePayload = {
-                                image: imgBuffer,
-                                caption: messageText || undefined
-                            };
-                            messageType = 'image';
-                            autoImageAttached = true;
+                            const imgBuffer = media.buffer || (media.filePath ? fs.readFileSync(media.filePath) : null);
+                            if (imgBuffer) {
+                                messagePayload = {
+                                    image: imgBuffer,
+                                    caption: messageText || undefined
+                                };
+                                messageType = 'image';
+                                autoImageAttached = true;
+                            }
                         } catch (readErr) {
                             console.warn('[API /send-text] Error reading autoSendImage buffer:', readErr.message);
                         }
@@ -3501,16 +3514,32 @@ async function startBot(forceNew = false) {
                 // Refresh global socket reference for auth.js OTP sending
                 global.__waAdminSocket = newSock;
 
+                // Fetch real WhatsApp Profile Picture (DP)
+                let adminProfilePicUrl = null;
+                try {
+                    const adminJid = connectedNumber ? `${connectedNumber}@s.whatsapp.net` : (newSock.user?.id || null);
+                    if (adminJid && typeof newSock.profilePictureUrl === 'function') {
+                        adminProfilePicUrl = await newSock.profilePictureUrl(adminJid, 'image').catch(() => null);
+                    }
+                } catch (e) {}
+                newSock.profilePicUrl = adminProfilePicUrl;
+
                 console.log('=================================');
                 console.log('✅ WhatsApp connected successfully!');
                 console.log('WhatsApp:', connectedNumber);
+                if (adminProfilePicUrl) console.log('WhatsApp DP:', adminProfilePicUrl);
                 console.log('=================================');
 
                 const { recordAdminWhatsAppSession } = require('./auth');
-                recordAdminWhatsAppSession({ status: 'connected', phone: connectedNumber }).catch(() => {});
+                recordAdminWhatsAppSession({ status: 'connected', phone: connectedNumber, profilePicUrl: adminProfilePicUrl }).catch(() => {});
 
                 lastConnectedTime = new Date().toISOString();
-                broadcastIncomingEvent('connection_status', { status: 'connected', number: connectedNumber });
+                broadcastIncomingEvent('connection_status', { 
+                    status: 'connected', 
+                    number: connectedNumber, 
+                    profilePicUrl: adminProfilePicUrl,
+                    role: 'admin' 
+                });
                 processQueue();
             }
 
@@ -3742,7 +3771,11 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
                         fileSize = buffer.length;
                         const ext = path.extname(fileName) || (mediaType === 'image' ? '.jpg' : mediaType === 'video' ? '.mp4' : mediaType === 'audio' ? '.ogg' : '.bin');
                         const savedFileName = `${rawMsg.key?.id || Date.now()}${ext}`;
-                        fs.writeFileSync(path.join(MEDIA_DIR, savedFileName), buffer);
+                        await mediaStorage.saveMedia(savedFileName, buffer, { 
+                            mimetype, 
+                            ownerUserId: targetOwnerId || null, 
+                            metadata: { jid: rawRemoteJid, from: fromNum } 
+                        });
                         mediaUrl = `/media/${savedFileName}`;
                     }
                 } catch (mErr) {
@@ -3809,20 +3842,6 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
             const appended = appendIncomingMessage(record);
             if (appended) {
                 broadcastIncomingEvent('new_message', record, ownerUserId, sessionConnectedNumber);
-                if (isFromMe) {
-                    appendMessageReport({
-                        id: record.id,
-                        date: record.date,
-                        from: fromNumber,
-                        to: resolvedRemote.number || (chatJid ? chatJid.split('@')[0] : ''),
-                        message: text || (mediaType ? `[${mediaType.toUpperCase()}]` : 'Media'),
-                        status: 'sent',
-                        type: mediaType || 'text',
-                        source: isGroup ? 'group' : 'web',
-                        ownerUserId: ownerUserId,
-                        session: fromNumber
-                    });
-                }
             }
 
             if (!isFromMe) {

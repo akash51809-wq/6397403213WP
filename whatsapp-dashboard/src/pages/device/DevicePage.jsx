@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { api } from '../../services/api'
 import '../../styles/device.css'
 
 export function DevicePage() {
@@ -9,7 +10,6 @@ export function DevicePage() {
     stats,
     currentUser,
     isAdmin,
-    connecting,
     loadStatus,
     loadQr,
     connectUserWhatsApp,
@@ -18,38 +18,133 @@ export function DevicePage() {
     planInfo
   } = useAuth()
 
-  const [disconnecting, setDisconnecting] = useState(false)
-  const isConnected = status?.status === 'connected'
-
-  useEffect(() => {
-    if (loadStatus) loadStatus()
-    if (loadQr) loadQr()
-    const timer = setInterval(() => {
-      if (loadStatus) loadStatus()
-      if (loadQr) loadQr()
-    }, 3000)
-    return () => clearInterval(timer)
-  }, [loadStatus, loadQr])
+  const [devices, setDevices] = useState([])
+  const [allowedDevicesCount, setAllowedDevicesCount] = useState(isAdmin ? 4 : (planInfo?.allowedDevices || 1))
+  const [connectingSlots, setConnectingSlots] = useState({})
+  const [disconnectingSlots, setDisconnectingSlots] = useState({})
 
   const onConnect = () => {
     connectUserWhatsApp()
   }
 
-  const onDisconnect = async () => {
-    if (window.confirm('Are you sure you want to disconnect this WhatsApp session?')) {
-      setDisconnecting(true)
-      try {
-        await disconnectUserWhatsApp()
-      } catch (err) {
-        notify('Failed to disconnect: ' + (err.message || 'Error'))
-      } finally {
-        setDisconnecting(false)
+  const fetchDevices = useCallback(async () => {
+    try {
+      const res = await api('/api/devices')
+      if (res && res.success) {
+        setDevices(res.devices || [])
+        if (res.allowedDevices) {
+          setAllowedDevicesCount(res.allowedDevices)
+        }
       }
+    } catch (err) {
+      // Fallback: construct slot 1 from global status if /api/devices is offline
+      const isConnected = status?.status === 'connected'
+      const fallbackAllowed = isAdmin ? 4 : (planInfo?.allowedDevices || 1)
+      setAllowedDevicesCount(fallbackAllowed)
+      const fallbackList = []
+      for (let sIdx = 1; sIdx <= fallbackAllowed; sIdx++) {
+        if (sIdx === 1) {
+          fallbackList.push({
+            slot: 1,
+            status: status?.status || 'disconnected',
+            number: status?.number || null,
+            profileName: status?.profileName || (currentUser?.username || 'WhatsApp Account'),
+            profilePicUrl: status?.profilePicUrl || null,
+            qr: null,
+            ready: isConnected,
+            role: isAdmin ? 'admin' : 'user'
+          })
+        } else {
+          fallbackList.push({
+            slot: sIdx,
+            status: 'disconnected',
+            number: null,
+            profileName: isAdmin ? `Admin Device 0${sIdx}` : `Device 0${sIdx}`,
+            profilePicUrl: null,
+            qr: null,
+            ready: false,
+            role: isAdmin ? 'admin' : 'user'
+          })
+        }
+      }
+      setDevices(fallbackList)
+    }
+  }, [isAdmin, planInfo, status, currentUser])
+
+  useEffect(() => {
+    fetchDevices()
+    const timer = setInterval(() => {
+      fetchDevices()
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [fetchDevices])
+
+  const handleConnect = async (slotId) => {
+    setConnectingSlots(prev => ({ ...prev, [slotId]: true }))
+    try {
+      notify(`Device Slot 0${slotId}: QR कोड लोड हो रहा है...`)
+      const res = await api('/api/devices/connect', {
+        method: 'POST',
+        body: JSON.stringify({ slot: slotId })
+      })
+      if (res && res.success) {
+        await fetchDevices()
+        if (loadStatus) loadStatus()
+        if (loadQr) loadQr()
+      }
+    } catch (err) {
+      notify(`Slot 0${slotId} connect error: ` + (err.message || 'Error'))
+    } finally {
+      setTimeout(() => {
+        setConnectingSlots(prev => ({ ...prev, [slotId]: false }))
+        fetchDevices()
+      }, 1000)
     }
   }
 
-  // Allowed devices: default 4 as per UI design, or from user plan
-  const allowedDevices = planInfo?.allowedDevices || 4
+  const handleDisconnect = async (slotId) => {
+    if (!window.confirm(`क्या आप Device Slot 0${slotId} का WhatsApp सेशन डिस्कनेक्ट करना चाहते हैं?`)) {
+      return
+    }
+    setDisconnectingSlots(prev => ({ ...prev, [slotId]: true }))
+    try {
+      const res = await api('/api/devices/disconnect', {
+        method: 'POST',
+        body: JSON.stringify({ slot: slotId })
+      })
+      if (res && res.success) {
+        notify(`Device Slot 0${slotId} disconnected.`)
+        await fetchDevices()
+        if (loadStatus) loadStatus()
+        if (loadQr) loadQr()
+      }
+    } catch (err) {
+      notify(`Slot 0${slotId} disconnect error: ` + (err.message || 'Error'))
+    } finally {
+      setDisconnectingSlots(prev => ({ ...prev, [slotId]: false }))
+    }
+  }
+
+  // Ensure we display exact allowed number of device cards
+  const displaySlots = []
+  const maxSlots = allowedDevicesCount || (isAdmin ? 4 : 1)
+  for (let sIdx = 1; sIdx <= maxSlots; sIdx++) {
+    const existing = devices.find(d => d.slot === sIdx)
+    if (existing) {
+      displaySlots.push(existing)
+    } else {
+      displaySlots.push({
+        slot: sIdx,
+        status: 'disconnected',
+        number: null,
+        profileName: isAdmin ? `Admin Device 0${sIdx}` : `Device 0${sIdx}`,
+        profilePicUrl: null,
+        qr: null,
+        ready: false,
+        role: isAdmin ? 'admin' : 'user'
+      })
+    }
+  }
 
   return (
     <div className="content device-page">
@@ -60,163 +155,132 @@ export function DevicePage() {
         </div>
         <div className="limit-pill">
           <small>ALLOWED DEVICES</small>
-          <strong>{allowedDevices}</strong>
+          <strong>{maxSlots}</strong>
         </div>
       </section>
 
       <div className="device-grid device-slots">
-        {/* Device Slot 01: Active session or Connect QR */}
-        {isConnected ? (
-          <article className="card device-card connected-card">
-            <div className="device-top">
-              <div className="dp-wrap">
-                <div
-                  className="device-dp"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'linear-gradient(145deg, #35cb89, #129e65)',
-                    color: '#fff',
-                    fontWeight: 800,
-                    fontSize: 18,
-                    borderRadius: 14,
-                    width: 44,
-                    height: 44
-                  }}
-                >
-                  {(status.profileName || currentUser?.username || 'W')[0].toUpperCase()}
-                </div>
-                <span className="online-dot" title="Online"></span>
-              </div>
-              <span className="badge success">Connected</span>
-            </div>
+        {displaySlots.map((dev) => {
+          const sId = dev.slot
+          const isSlotConnected = dev.status === 'connected' || dev.ready
+          const isSlotConnecting = Boolean(connectingSlots[sId]) || dev.status === 'connecting'
+          const isSlotDisconnecting = Boolean(disconnectingSlots[sId])
+          const displayName = dev.profileName || (isAdmin ? `Admin Device 0${sId}` : `Device 0${sId}`)
+          const initial = (displayName.replace(/[^a-zA-Z0-9]/g, '') || 'W')[0].toUpperCase()
 
-            <div className="device-info">
-              <h3>{status.profileName || currentUser?.username || 'WhatsApp Account'}</h3>
-              <p>{status.number ? `+${status.number}` : 'Primary WhatsApp'}</p>
-              <span className="device-label">Main WhatsApp</span>
-            </div>
+          return (
+            <React.Fragment key={sId}>
+              {isSlotConnected ? (
+                <article className="card device-card connected-card">
+                  <div className="device-top">
+                    <div className="dp-wrap">
+                      {dev.profilePicUrl ? (
+                        <img
+                          src={dev.profilePicUrl}
+                          alt="WhatsApp DP"
+                          className="device-dp"
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 14,
+                            objectFit: 'cover',
+                            border: '2px solid #10b981'
+                          }}
+                        />
+                      ) : (
+                        <div
+                          className="device-dp"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'linear-gradient(145deg, #35cb89, #129e65)',
+                            color: '#fff',
+                            fontWeight: 800,
+                            fontSize: 18,
+                            borderRadius: 14,
+                            width: 44,
+                            height: 44
+                          }}
+                        >
+                          {initial}
+                        </div>
+                      )}
+                      <span className="online-dot" title="Online"></span>
+                    </div>
+                    <span className="badge success">Connected</span>
+                  </div>
 
-            <div className="device-meta">
-              <span>
-                <small>MESSAGES</small>
-                <b>{stats?.sent || 0}</b>
-              </span>
-              <span>
-                <small>STATUS</small>
-                <b style={{ color: '#148957' }}>Online</b>
-              </span>
-            </div>
+                  <div className="device-info">
+                    <h3>{displayName}</h3>
+                    <p>{dev.number ? `+${dev.number}` : `Device Slot 0${sId}`}</p>
+                    <span className="device-label">
+                      {sId === 1 ? 'Primary WhatsApp' : `Slot 0${sId} WhatsApp`}
+                    </span>
+                  </div>
 
-            <button 
-              type="button" 
-              className="btn" 
-              onClick={onDisconnect}
-              disabled={disconnecting}
-              style={{ 
-                opacity: disconnecting ? 0.6 : 1, 
-                cursor: disconnecting ? 'not-allowed' : 'pointer',
-                backgroundColor: disconnecting ? '#9ca3af' : undefined 
-              }}
-            >
-              {disconnecting ? 'Disconnecting...' : 'Disconnect Session'}
-            </button>
-          </article>
-        ) : (
-          <article className="card device-card qr-card">
-            {qr ? (
-              <div className="qr-active-box">
-                <img
-                  src={qr}
-                  alt="Scan WhatsApp QR"
-                />
-                <strong>Scan with WhatsApp</strong>
-                <small>Linked Devices &gt; Link a Device</small>
-              </div>
-            ) : (
-              <div className="qr-placeholder">
-                <div className="qr-icon">▦</div>
-                <strong>{connecting ? 'Generating QR...' : 'Show QR'}</strong>
-                <small>{connecting ? 'Connecting to server...' : 'Scan QR to connect WhatsApp'}</small>
-              </div>
-            )}
+                  <div className="device-meta">
+                    <span>
+                      <small>MESSAGES</small>
+                      <b>{sId === 1 ? (stats?.sent || 0) : 'Active'}</b>
+                    </span>
+                    <span>
+                      <small>STATUS</small>
+                      <b style={{ color: '#148957' }}>Online</b>
+                    </span>
+                  </div>
 
-            <div className="qr-slot">
-              <span>DEVICE SLOT 01</span>
-              <b>{connecting ? 'Connecting...' : (qr ? 'Scan Ready' : 'Available')}</b>
-            </div>
+                  <button 
+                    type="button" 
+                    className="btn" 
+                    onClick={() => handleDisconnect(sId)}
+                    disabled={isSlotDisconnecting}
+                    style={{ 
+                      opacity: isSlotDisconnecting ? 0.6 : 1, 
+                      cursor: isSlotDisconnecting ? 'not-allowed' : 'pointer',
+                      backgroundColor: isSlotDisconnecting ? '#9ca3af' : undefined 
+                    }}
+                  >
+                    {isSlotDisconnecting ? 'Disconnecting...' : 'Disconnect Session'}
+                  </button>
+                </article>
+              ) : (
+                <article className="card device-card qr-card">
+                  {dev.qr ? (
+                    <div className="qr-active-box">
+                      <img
+                        src={dev.qr}
+                        alt={`Scan WhatsApp QR Slot 0${sId}`}
+                      />
+                      <strong>Scan with WhatsApp</strong>
+                      <small>Linked Devices &gt; Link a Device</small>
+                    </div>
+                  ) : (
+                    <div className="qr-placeholder">
+                      <div className="qr-icon">▦</div>
+                      <strong>{isSlotConnecting ? 'Generating QR...' : 'Show QR'}</strong>
+                      <small>{isSlotConnecting ? 'Connecting to server...' : 'Scan QR to connect WhatsApp'}</small>
+                    </div>
+                  )}
 
-            <button
-              type="button"
-              className="btn primary"
-              onClick={onConnect}
-              disabled={connecting}
-            >
-              {connecting ? 'Connecting...' : (qr ? '↻ Refresh QR' : 'Show QR')}
-            </button>
-          </article>
-        )}
+                  <div className="qr-slot">
+                    <span>DEVICE SLOT 0{sId}</span>
+                    <b>{isSlotConnecting ? 'Connecting...' : (dev.qr ? 'Scan Ready' : 'Available')}</b>
+                  </div>
 
-        {/* Device Slot 02: Empty/Available slot */}
-        <article className="card device-card qr-card">
-          <div className="qr-placeholder">
-            <div className="qr-icon" style={{ opacity: 0.5 }}>▦</div>
-            <strong>Show QR</strong>
-            <small>Scan QR to connect WhatsApp</small>
-          </div>
-          <div className="qr-slot">
-            <span>DEVICE SLOT 02</span>
-            <b>Available</b>
-          </div>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => notify('Slot 02 will be enabled for multi-session support in your plan')}
-          >
-            Show QR
-          </button>
-        </article>
-
-        {/* Device Slot 03: Empty/Available slot */}
-        <article className="card device-card qr-card">
-          <div className="qr-placeholder">
-            <div className="qr-icon" style={{ opacity: 0.5 }}>▦</div>
-            <strong>Show QR</strong>
-            <small>Scan QR to connect WhatsApp</small>
-          </div>
-          <div className="qr-slot">
-            <span>DEVICE SLOT 03</span>
-            <b>Available</b>
-          </div>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => notify('Slot 03 will be enabled for multi-session support in your plan')}
-          >
-            Show QR
-          </button>
-        </article>
-
-        {/* Device Slot 04: Empty/Available slot */}
-        <article className="card device-card qr-card">
-          <div className="qr-placeholder">
-            <div className="qr-icon" style={{ opacity: 0.5 }}>▦</div>
-            <strong>Show QR</strong>
-            <small>Scan QR to connect WhatsApp</small>
-          </div>
-          <div className="qr-slot">
-            <span>DEVICE SLOT 04</span>
-            <b>Available</b>
-          </div>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => notify('Slot 04 will be enabled for multi-session support in your plan')}
-          >
-            Show QR
-          </button>
-        </article>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => handleConnect(sId)}
+                    disabled={isSlotConnecting}
+                  >
+                    {isSlotConnecting ? 'Connecting...' : (dev.qr ? '↻ Refresh QR' : 'Show QR')}
+                  </button>
+                </article>
+              )}
+            </React.Fragment>
+          )
+        })}
       </div>
     </div>
   )

@@ -135,6 +135,9 @@ const corsOptions = {
     if (process.env.RENDER_EXTERNAL_URL && origin === process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')) {
       return callback(null, true);
     }
+    if (process.env.APP_URL && origin === process.env.APP_URL.replace(/\/$/, '')) {
+      return callback(null, true);
+    }
     return callback(null, false);
   },
   credentials: true,
@@ -148,6 +151,12 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' ws: wss: https:; frame-ancestors 'self';"
+  );
   res.removeHeader('X-Powered-By');
   next();
 });
@@ -320,6 +329,36 @@ app.use((req, res, next) => {
   next();
 });
 
+// 5. Centralized Express Error Handling Middleware
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  console.error(`[Express Error] [${req.method} ${req.originalUrl || req.path}] [Status ${status}]:`, err.message || err);
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  const isClientError = status >= 400 && status < 500;
+  const safeMessage = isClientError 
+    ? (err.message || 'अमान्य अनुरोध (Bad Request)')
+    : 'आंतरिक सर्वर त्रुटि (Internal Server Error)। कृपया कुछ देर बाद प्रयास करें।';
+
+  res.status(status).json({
+    success: false,
+    message: safeMessage
+  });
+});
+
+// Global Process Unhandled Promise Rejection & Uncaught Exception Handlers
+process.on('unhandledRejection', (reason) => {
+  const errMsg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+  console.error('[Process] Unhandled Promise Rejection:', errMsg);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception:', err?.stack || err?.message || err);
+});
+
 const PORT = process.env.PORT || 10000;
 const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.MONGO_URI || '').trim();
 
@@ -352,8 +391,11 @@ async function startServer() {
       if (typeof syncFn === 'function') {
         await syncFn();
       }
-    } catch (syncErr) {
-      console.warn('[Server] Initial data sync warning:', syncErr.message);
+    try {
+      const { mediaStorage } = require('./mediaStorage');
+      await mediaStorage.syncLocalDiskToDatabase();
+    } catch (mediaSyncErr) {
+      console.warn('[Server] Media sync warning:', mediaSyncErr.message);
     }
 
     app.listen(PORT, '0.0.0.0', () => {

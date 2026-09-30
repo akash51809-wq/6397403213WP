@@ -39,16 +39,15 @@ function AdminRoute({ children }) {
 }
 
 function PublicOnlyRoute({ children }) {
-  const { login, isAdmin } = useAuth()
+  const { login } = useAuth()
   if (login) {
-    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />
+    return <Navigate to="/dashboard" replace />
   }
   return children
 }
 
 function RootRedirect() {
-  const { isAdmin } = useAuth()
-  return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />
+  return <Navigate to="/dashboard" replace />
 }
 
 export default function AppRoutes() {
@@ -100,22 +99,29 @@ export default function AppRoutes() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="contacts" element={<ContactsPage />} />
 
-        {/* User Pricing & Plans */}
+        {/* User Pricing & Subscription */}
         <Route path="subscription" element={<UserPlansPage />} />
-        <Route path="plans" element={<UserPlansPage />} />
 
-        {/* Admin Routes - Main admin panel is /admin */}
+        {/* Admin Routes - /admin is Dashboard, /admin/users is User Management */}
         <Route 
           path="admin" 
+          element={
+            <AdminRoute>
+              <DashboardPage />
+            </AdminRoute>
+          } 
+        />
+        <Route 
+          path="admin/users" 
           element={
             <AdminRoute>
               <UsersPage />
             </AdminRoute>
           } 
         />
-        <Route path="admin/users" element={<Navigate to="/admin" replace />} />
-        <Route path="user" element={<Navigate to="/admin" replace />} />
-        <Route path="users" element={<Navigate to="/admin" replace />} />
+        <Route path="admin/user-management" element={<Navigate to="/admin/users" replace />} />
+        <Route path="user" element={<Navigate to="/admin/users" replace />} />
+        <Route path="users" element={<Navigate to="/admin/users" replace />} />
         
         <Route 
           path="admin/plans" 
@@ -139,7 +145,6 @@ export default function AppRoutes() {
 
         {/* API & System & Settings */}
         <Route path="api" element={<ApiPage />} />
-        <Route path="api-docs" element={<Navigate to="/api" replace />} />
         <Route path="system" element={<SettingsPage defaultTab="security" />} />
         <Route path="settings" element={<SettingsPage defaultTab="api" />} />
         <Route 

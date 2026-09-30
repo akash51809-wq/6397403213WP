@@ -109,7 +109,12 @@ async function query(text, params) {
   if (!connection.pool) {
     throw new Error('[PostgreSQL] Database not connected. Call connectPostgres() first.');
   }
-  return connection.pool.query(text, params);
+  try {
+    return await connection.pool.query(text, params);
+  } catch (err) {
+    console.error(`[PostgreSQL Query Error]: ${err.message}`);
+    throw err;
+  }
 }
 
 // Automatically create tables and indexes if they do not exist
@@ -311,7 +316,30 @@ async function initTables(pool) {
       "key" VARCHAR(100) PRIMARY KEY,
       "data" JSONB NOT NULL DEFAULT '{}'::jsonb,
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
-    );`
+    );`,
+
+    // 13. media_files (persistent binary storage for all WhatsApp media, voice notes, screenshots, assets)
+    `CREATE TABLE IF NOT EXISTS media_files (
+      "filename" VARCHAR(255) PRIMARY KEY,
+      "mimetype" VARCHAR(100),
+      "size" INT,
+      "data" BYTEA,
+      "ownerUserId" VARCHAR(100),
+      "metadata" JSONB DEFAULT '{}'::jsonb,
+      "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_media_files_ownerUserId ON media_files("ownerUserId");`,
+    `CREATE INDEX IF NOT EXISTS idx_media_files_createdAt ON media_files("createdAt");`,
+
+    // 14. rate_limits (distributed multi-instance sliding window rate limiting)
+    `CREATE TABLE IF NOT EXISTS rate_limits (
+      "key" VARCHAR(255) PRIMARY KEY,
+      "count" INT NOT NULL DEFAULT 1,
+      "windowStart" BIGINT NOT NULL,
+      "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_rate_limits_windowStart ON rate_limits("windowStart");`
   ];
 
   for (const stmt of statements) {
@@ -1050,6 +1078,16 @@ const AppSettings = createModel('app_settings', 'key', {
   'key', 'data', 'updatedAt'
 ]);
 
+const MediaFile = createModel('media_files', 'filename', {
+  mimetype: '',
+  size: 0,
+  data: null,
+  ownerUserId: null,
+  metadata: {}
+}, ['metadata'], [
+  'filename', 'mimetype', 'size', 'data', 'ownerUserId', 'metadata', 'createdAt', 'updatedAt'
+]);
+
 module.exports = {
   connection,
   connectPostgres,
@@ -1066,6 +1104,7 @@ module.exports = {
   Contact,
   IncomingMessage,
   MessageReport,
-  AppSettings
+  AppSettings,
+  MediaFile
 };
 

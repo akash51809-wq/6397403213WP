@@ -96,7 +96,17 @@ test('Frontend routing and static serving verification', async (t) => {
     assert.ok(plansHtml.includes('href="/login"'), 'Plans page must link to /login');
     assert.ok(!plansHtml.includes('Get Started'), 'Plans page must not contain Get Started');
 
-    // 5. In-app dashboard routes (e.g. /dashboard, /subscription, /admin) should return React SPA
+    // 5. /api-docs should redirect 301 to /api-docs/ and return marketing API docs
+    const resApiDocsRedirect = await fetch(`${baseUrl}/api-docs`, { redirect: 'manual' });
+    assert.equal(resApiDocsRedirect.status, 301);
+    assert.equal(resApiDocsRedirect.headers.get('location'), '/api-docs/');
+
+    const resApiDocs = await fetch(`${baseUrl}/api-docs/`);
+    assert.equal(resApiDocs.status, 200);
+    const apiDocsHtml = await resApiDocs.text();
+    assert.ok(apiDocsHtml.includes('Easy Recharge Solution — API Docs'), 'API docs page title must match');
+
+    // 6. In-app dashboard routes (e.g. /dashboard, /subscription, /api, /admin, /admin/plans) should return React SPA
     const resDash = await fetch(`${baseUrl}/dashboard`);
     assert.equal(resDash.status, 200);
     const dashHtml = await resDash.text();
@@ -107,7 +117,17 @@ test('Frontend routing and static serving verification', async (t) => {
     const subHtml = await resSub.text();
     assert.ok(subHtml.includes('id="root"'), '/subscription must serve React SPA');
 
-    // 6. Static CSS should be served
+    const resApi = await fetch(`${baseUrl}/api`);
+    assert.equal(resApi.status, 200);
+    const apiHtml = await resApi.text();
+    assert.ok(apiHtml.includes('id="root"'), '/api in dashboard must serve React SPA');
+
+    const resAdminPlans = await fetch(`${baseUrl}/admin/plans`);
+    assert.equal(resAdminPlans.status, 200);
+    const adminPlansHtml = await resAdminPlans.text();
+    assert.ok(adminPlansHtml.includes('id="root"'), '/admin/plans must serve React SPA');
+
+    // 7. Static CSS should be served
     const resCss = await fetch(`${baseUrl}/landing.css`);
     assert.equal(resCss.status, 200);
     assert.ok(resCss.headers.get('content-type').includes('text/css'));

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { useAuth } from '../../context/AuthContext'
 import '../../styles/reports.css'
@@ -7,8 +8,16 @@ export function ReportsPage() {
   const {
     reports = [],
     loadReports: refresh,
-    notify
+    notify,
+    isAdmin,
+    currentUser
   } = useAuth()
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlType = searchParams.get('type') // 'admin' | 'users'
+
+  // Admin Scope: 'admin' (Admin Msg Report) vs 'users' (User Msg Report)
+  const adminScope = urlType === 'users' ? 'users' : 'admin'
 
   // Polling every 6 seconds for live reports
   useEffect(() => {
@@ -27,6 +36,7 @@ export function ReportsPage() {
   const [msgSource, setMsgSource] = useState('all')
   const [fromNumber, setFromNumber] = useState('')
   const [toNumber, setToNumber] = useState('')
+  const [userFilter, setUserFilter] = useState('') // Filter by User ID / Account
   const [searchMsg, setSearchMsg] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -46,6 +56,7 @@ export function ReportsPage() {
     setMsgSource('all')
     setFromNumber('')
     setToNumber('')
+    setUserFilter('')
     setSearchMsg('')
     setStatusFilter('all')
     setCurrentPage(1)
@@ -55,6 +66,23 @@ export function ReportsPage() {
   // Filter computation
   const filteredReports = useMemo(() => {
     return reports.filter(r => {
+      // 0. Admin Scope Separation (Admin Msg Report vs User Msg Report)
+      if (isAdmin) {
+        const isFromAdmin = !r.ownerUserId || r.ownerUserId === 'admin' || r.ownerUserId === 'ADMIN' || (currentUser?.userId && r.ownerUserId === currentUser.userId)
+        if (adminScope === 'admin') {
+          if (!isFromAdmin) return false
+        } else if (adminScope === 'users') {
+          if (isFromAdmin) return false
+          // User account filter
+          if (userFilter.trim()) {
+            const uq = userFilter.toLowerCase().trim()
+            const uId = String(r.ownerUserId || '').toLowerCase()
+            const uFrom = String(r.from || r.session || '').toLowerCase()
+            if (!uId.includes(uq) && !uFrom.includes(uq)) return false
+          }
+        }
+      }
+
       // 1. From Date
       if (fromDate) {
         const rTime = new Date(r.date || r.createdAt || r.timestamp).getTime()
@@ -79,7 +107,11 @@ export function ReportsPage() {
       // 4. Source of Msg
       if (msgSource !== 'all') {
         const s = (r.source || 'manual').toLowerCase()
-        if (!s.includes(msgSource.toLowerCase())) return false
+        if (msgSource === 'manual') {
+          if (s !== 'manual' && s !== 'web') return false
+        } else if (!s.includes(msgSource.toLowerCase())) {
+          return false
+        }
       }
 
       // 5. From Number
@@ -117,7 +149,7 @@ export function ReportsPage() {
 
       return true
     })
-  }, [reports, fromDate, toDate, msgType, msgSource, fromNumber, toNumber, searchMsg, statusFilter])
+  }, [reports, isAdmin, adminScope, userFilter, currentUser, fromDate, toDate, msgType, msgSource, fromNumber, toNumber, searchMsg, statusFilter])
 
   // Pagination calculation
   const effPageSize = pageSize === 'All' ? (filteredReports.length || 1) : Number(pageSize)
@@ -144,33 +176,29 @@ export function ReportsPage() {
           ? `${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
           : 'N/A'
 
-        return {
-          'SL NO': i + 1,
-          'Sender': r.from || r.session || 'WhatsApp',
-          'Recipient': r.to || r.recipient || r.number || 'N/A',
-          'Date & Time': dateStr,
-          'Message': r.message || r.text || '',
-          'Type': (r.type || r.mediaType || 'Text').toUpperCase(),
-          'Source': (r.source || 'Manual').toUpperCase(),
-          'Status': (r.status || 'Delivered').toUpperCase()
+        const row = {
+          'SL NO': i + 1
         }
+        if (isAdmin && adminScope === 'users') {
+          row['User Account'] = r.ownerUserId || 'User'
+        }
+        row['Sender'] = r.from || r.session || 'WhatsApp'
+        row['Recipient'] = r.to || r.recipient || r.number || 'N/A'
+        row['Date & Time'] = dateStr
+        row['Message'] = r.message || r.text || ''
+        row['Type'] = (r.type || r.mediaType || 'Text').toUpperCase()
+        row['Source'] = (r.source || 'Manual').toUpperCase()
+        row['Status'] = (r.status || 'Delivered').toUpperCase()
+
+        return row
       })
 
       const ws = XLSX.utils.json_to_sheet(exportData)
-      ws['!cols'] = [
-        { wch: 8 },
-        { wch: 22 },
-        { wch: 22 },
-        { wch: 20 },
-        { wch: 45 },
-        { wch: 12 },
-        { wch: 14 },
-        { wch: 14 }
-      ]
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Message_Report')
       const today = new Date().toISOString().slice(0, 10)
-      XLSX.writeFile(wb, `message_report_${today}.xlsx`)
+      const filenamePrefix = isAdmin ? (adminScope === 'users' ? 'user_msg_report' : 'admin_msg_report') : 'message_report'
+      XLSX.writeFile(wb, `${filenamePrefix}_${today}.xlsx`)
       if (notify) notify('Report exported as Excel (.xlsx) successfully!')
     } catch (err) {
       if (notify) notify('Export error: ' + err.message)
@@ -217,12 +245,62 @@ export function ReportsPage() {
 
   return (
     <div className="content">
+      {/* ── Admin Mode Tab Switcher ── */}
+      {isAdmin && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={`btn ${adminScope === 'admin' ? 'primary' : 'secondary'}`}
+            style={{
+              padding: '10px 22px',
+              fontWeight: 700,
+              fontSize: 14,
+              borderRadius: 8,
+              cursor: 'pointer',
+              boxShadow: adminScope === 'admin' ? '0 4px 12px rgba(37,99,235,0.25)' : 'none'
+            }}
+            onClick={() => {
+              setSearchParams({ type: 'admin' })
+              setCurrentPage(1)
+            }}
+          >
+            👑 Admin Msg Report (Admin Panel)
+          </button>
+          <button
+            type="button"
+            className={`btn ${adminScope === 'users' ? 'primary' : 'secondary'}`}
+            style={{
+              padding: '10px 22px',
+              fontWeight: 700,
+              fontSize: 14,
+              borderRadius: 8,
+              cursor: 'pointer',
+              boxShadow: adminScope === 'users' ? '0 4px 12px rgba(37,99,235,0.25)' : 'none'
+            }}
+            onClick={() => {
+              setSearchParams({ type: 'users' })
+              setCurrentPage(1)
+            }}
+          >
+            👥 User Msg Report (All Database Users)
+          </button>
+        </div>
+      )}
+
       {/* ── Filter Card ── */}
       <article className="report-filter card">
         <div className="filter-head">
           <div>
-            <h3>Message Filters</h3>
-            <p>Quickly filter message records</p>
+            <h3>
+              {isAdmin 
+                ? (adminScope === 'users' ? '👥 User Message Filters' : '👑 Admin Message Filters')
+                : 'Message Filters'}
+            </h3>
+            <p>
+              {isAdmin
+                ? (adminScope === 'users' ? 'Filter messages sent across all registered users' : 'Filter messages sent directly from Admin Panel')
+                : 'Quickly filter message records'}
+            </p>
           </div>
           <div className="filter-inline">
             <div className="filter-field inline-reset">
@@ -259,6 +337,23 @@ export function ReportsPage() {
               <option value="All">All</option>
             </select>
           </div>
+
+          {/* User ID / Account Filter (Admin User Msg Report only) */}
+          {isAdmin && adminScope === 'users' && (
+            <div className="filter-field">
+              <label>USER ID / ACCOUNT</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="User ID or Phone"
+                value={userFilter}
+                onChange={e => {
+                  setUserFilter(e.target.value)
+                  setCurrentPage(1)
+                }}
+              />
+            </div>
+          )}
 
           {/* From Date */}
           <div className="filter-field date-field">
@@ -431,15 +526,27 @@ export function ReportsPage() {
       <article className="card table-card">
         <div className="card-head compact-card-head">
           <div>
-            <h3>Latest Activity</h3>
-            <p>Live messaging records ({filteredReports.length} found)</p>
+            <h3>
+              {isAdmin 
+                ? (adminScope === 'users' ? '👥 User Message Report (All Registered Users)' : '👑 Admin Message Report (Admin Panel)')
+                : 'Latest Activity'
+              }
+            </h3>
+            <p>
+              {isAdmin
+                ? (adminScope === 'users' 
+                    ? `Database ke sabhi users dwara bheje gaye messages (${filteredReports.length} records)` 
+                    : `Admin panel dwara bheje gaye messages (${filteredReports.length} records)`)
+                : `Live messaging records (${filteredReports.length} found)`
+              }
+            </p>
           </div>
           <button
             type="button"
             className="btn export-btn"
             onClick={exportReport}
           >
-            Export Report
+            Export Report (.xlsx)
           </button>
         </div>
 
@@ -448,6 +555,7 @@ export function ReportsPage() {
             <thead>
               <tr>
                 <th>SL NO</th>
+                {isAdmin && adminScope === 'users' && <th>User / Account</th>}
                 <th>Sender</th>
                 <th>Recipient</th>
                 <th>Date &amp; Time</th>
@@ -460,7 +568,7 @@ export function ReportsPage() {
             <tbody>
               {paginatedReports.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '36px 16px', color: '#718078' }}>
+                  <td colSpan={isAdmin && adminScope === 'users' ? 9 : 8} style={{ textAlign: 'center', padding: '36px 16px', color: '#718078' }}>
                     {reports.length === 0
                       ? 'No message reports recorded yet.'
                       : 'No records match the selected filter criteria.'}
@@ -472,10 +580,18 @@ export function ReportsPage() {
                   const senderName = r.from || r.session || 'WhatsApp'
                   const recipient = r.to || r.recipient || r.number || '—'
                   const msgText = r.message || r.text || (r.type ? `[${r.type.toUpperCase()}]` : '—')
+                  const userAccount = r.ownerUserId || r.username || 'User'
 
                   return (
                     <tr key={r.id || r._id || `${r.date}-${idx}`}>
                       <td>{sl}</td>
+                      {isAdmin && adminScope === 'users' && (
+                        <td>
+                          <span style={{ fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '2px 8px', borderRadius: 6, fontSize: 12 }}>
+                            {userAccount}
+                          </span>
+                        </td>
+                      )}
                       <td><b>{senderName}</b></td>
                       <td>{recipient}</td>
                       <td>{formatDateTime(r.date || r.createdAt)}</td>

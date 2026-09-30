@@ -12,7 +12,6 @@ export function AuthProvider({ children }) {
       const lastAct = Number(localStorage.getItem('wa_last_activity') || 0)
       if (lastAct && (Date.now() - lastAct >= INACTIVITY_TIMEOUT_MS)) {
         clearToken()
-        sessionStorage.setItem('wa_logout_reason', 'inactivity')
         return ''
       }
     }
@@ -199,6 +198,7 @@ export function AuthProvider({ children }) {
           status: d.status || 'waiting',
           number: d.number,
           profileName: d.profileName || 'My WhatsApp',
+          profilePicUrl: d.profilePicUrl || null,
           ready: d.ready
         }
         setStatus(s)
@@ -369,13 +369,11 @@ export function AuthProvider({ children }) {
     const checkInactivity = () => {
       const storedLast = Number(localStorage.getItem('wa_last_activity') || 0)
       if (storedLast && (Date.now() - storedLast >= INACTIVITY_TIMEOUT_MS)) {
-        // Auto logout web panel
-        sessionStorage.setItem('wa_logout_reason', 'inactivity')
+        // Auto logout web panel silently
         clearToken()
         localStorage.removeItem('wa_last_activity')
         setLogin('')
         setCurrentUser({})
-        notify('30 मिनट की निष्क्रियता (non-use) के कारण आप वेब से लॉगआउट हो गए हैं।')
       }
     }
 

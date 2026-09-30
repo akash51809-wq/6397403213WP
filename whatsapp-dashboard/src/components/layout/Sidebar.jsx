@@ -36,7 +36,7 @@ export function Sidebar() {
 
       {/* Brand Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        <NavLink className="brand" to={isAdmin ? "/admin" : "/dashboard"} onClick={closeMobile} data-title={companySettings?.companyName || "WhatsApp Automation"}>
+        <NavLink className="brand" to="/dashboard" onClick={closeMobile} data-title={companySettings?.companyName || "WhatsApp Automation"}>
           {companySettings?.logoUrl ? (
             <img
               src={companySettings.logoUrl}
@@ -149,14 +149,35 @@ export function Sidebar() {
             <span>▥</span><b>Reports</b><i className="nav-caret">⌄</i>
           </div>
           <div className="nav-submenu">
-            <NavLink 
-              to="/report" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Msg Report"
-            >
-              <span>↳</span><b>Msg Report</b>
-            </NavLink>
+            {isAdmin ? (
+              <>
+                <NavLink 
+                  to="/report?type=admin" 
+                  className={() => (location.pathname === '/report' && (!location.search || location.search.includes('type=admin')) ? 'active' : '')} 
+                  onClick={closeMobile}
+                  data-title="Admin Msg Report"
+                >
+                  <span>↳</span><b>Admin Msg Report</b>
+                </NavLink>
+                <NavLink 
+                  to="/report?type=users" 
+                  className={() => (location.pathname === '/report' && location.search.includes('type=users') ? 'active' : '')} 
+                  onClick={closeMobile}
+                  data-title="User Msg Report"
+                >
+                  <span>↳</span><b>User Msg Report</b>
+                </NavLink>
+              </>
+            ) : (
+              <NavLink 
+                to="/report" 
+                className={({ isActive }) => (isActive ? 'active' : '')} 
+                onClick={closeMobile}
+                data-title="Msg Report"
+              >
+                <span>↳</span><b>Msg Report</b>
+              </NavLink>
+            )}
           </div>
         </div>
 
@@ -196,14 +217,16 @@ export function Sidebar() {
           <span>⚙</span><b>Settings</b>
         </NavLink>
 
-        <NavLink 
-          to="/subscription" 
-          className={({ isActive }) => (isActive ? 'active' : '')} 
-          onClick={closeMobile}
-          data-title="Plans"
-        >
-          <span>◆</span><b>Plans</b>
-        </NavLink>
+        {!isAdmin && (
+          <NavLink 
+            to="/subscription" 
+            className={({ isActive }) => (isActive ? 'active' : '')} 
+            onClick={closeMobile}
+            data-title="Plans"
+          >
+            <span>◆</span><b>Plans</b>
+          </NavLink>
+        )}
 
         <NavLink 
           to="/api" 
@@ -221,8 +244,7 @@ export function Sidebar() {
               <hr className="nav-section-divider" />
             </div>
             <NavLink 
-              to="/admin" 
-              end 
+              to="/admin/users" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
               data-title="User Management"

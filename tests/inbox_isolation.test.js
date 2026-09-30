@@ -109,3 +109,23 @@ test('5. Frontend: AuthContext resets inbox state on disconnect', async (t) => {
         'Frontend AuthContext must clear local chats and messages when WhatsApp is disconnected'
     );
 });
+
+test('6. Message Report: Only Panel and API sent messages appear in reports (mobile direct messages excluded)', async (t) => {
+    const indexContent = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf-8');
+
+    // 1. getMessageReports must exclude direct mobile messages and not merge raw incoming messages
+    assert.ok(
+        !indexContent.includes('for (const m of incList)'),
+        'getMessageReports must NOT merge raw mobile incoming/outgoing messages into message reports'
+    );
+    assert.ok(
+        indexContent.includes("list = list.filter(r => r && r.source !== 'direct')"),
+        'getMessageReports must filter out source === direct'
+    );
+
+    // 2. handleIncomingMessageFromSocket must not call appendMessageReport for socket sync
+    assert.ok(
+        !indexContent.includes("if (isFromMe) {\n                    appendMessageReport({"),
+        'handleIncomingMessageFromSocket must not append socket-synced messages into message reports'
+    );
+});

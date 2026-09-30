@@ -20,7 +20,6 @@ export function LoginPage({ initialMode }) {
   const [rememberMe, setRememberMe] = useState(true)
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
-  const [inactivityNotice, setInactivityNotice] = useState(false)
 
   // Sign Up Form States (WhatsApp OTP Flow)
   const [signupMobile, setSignupMobile] = useState('')
@@ -32,11 +31,6 @@ export function LoginPage({ initialMode }) {
   useEffect(() => {
     if (loadCompanySettings) {
       loadCompanySettings()
-    }
-    const reason = sessionStorage.getItem('wa_logout_reason')
-    if (reason === 'inactivity') {
-      setInactivityNotice(true)
-      sessionStorage.removeItem('wa_logout_reason')
     }
   }, [loadCompanySettings])
 
@@ -64,11 +58,7 @@ export function LoginPage({ initialMode }) {
       })
       if (data.success) {
         handleLogin(data.user.token, data.user)
-        if (data.user && data.user.role === 'admin') {
-          navigate('/admin')
-        } else {
-          navigate('/dashboard')
-        }
+        navigate('/dashboard')
       } else {
         setLoginError(data.message || 'Login failed. Please check credentials.')
       }
@@ -178,12 +168,6 @@ export function LoginPage({ initialMode }) {
                   </span>
                 </p>
               </div>
-
-              {inactivityNotice && (
-                <div className="auth-alert auth-alert-warning">
-                  <strong>⏱️ Session Timed Out:</strong> Your session expired due to inactivity. Please sign in again.
-                </div>
-              )}
 
               {loginError && (
                 <div className="auth-alert auth-alert-error">

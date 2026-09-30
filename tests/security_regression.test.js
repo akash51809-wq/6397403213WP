@@ -232,3 +232,93 @@ test('10. Media File Access Control: Path traversal & Authentication check', asy
   // 10.3 Verify authRequired wraps sensitive media
   assert.ok(indexContent.includes("authRequired(req, res, async () => {"), 'Sensitive media must require authentication and ownership check');
 });
+
+test('11. Security Headers, Modern CSP, Permissions-Policy and CORS', async (t) => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf-8');
+  const indexContent = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf-8');
+
+  // Verify CSP
+  assert.ok(serverContent.includes('Content-Security-Policy') && indexContent.includes('Content-Security-Policy'), 'Content-Security-Policy must be set');
+  assert.ok(serverContent.includes("default-src 'self'"), 'CSP must restrict default sources to self');
+  assert.ok(serverContent.includes("frame-ancestors 'self'"), 'CSP must prevent frame embedding');
+
+  // Verify Permissions-Policy & COOP
+  assert.ok(serverContent.includes('Permissions-Policy') && indexContent.includes('Permissions-Policy'), 'Permissions-Policy must be set');
+  assert.ok(serverContent.includes('Cross-Origin-Opener-Policy') && indexContent.includes('Cross-Origin-Opener-Policy'), 'Cross-Origin-Opener-Policy must be set');
+
+  // Verify CORS allowed headers
+  assert.ok(serverContent.includes('X-Api-Token') && indexContent.includes('X-Api-Token'), 'CORS must support X-Api-Token header');
+});
+
+test('12. Hybrid & Multi-Instance Rate Limiter Architecture', async (t) => {
+  const { createRateLimiter } = require('../rateLimiter');
+  assert.equal(typeof createRateLimiter, 'function', 'createRateLimiter must be exported');
+
+  const limiter = createRateLimiter({
+    windowMs: 1000,
+    max: 2,
+    message: 'Too many requests'
+  });
+
+  const req = { ip: '10.0.0.99', headers: {} };
+  let statusSet = null;
+  let jsonResponse = null;
+  const res = {
+    setHeader: () => {},
+    status: (code) => {
+      statusSet = code;
+      return {
+        json: (data) => { jsonResponse = data; }
+      };
+    }
+  };
+
+  let nextCalled = 0;
+  const next = () => { nextCalled++; };
+
+  // Request 1: Allowed
+  await limiter(req, res, next);
+  assert.equal(nextCalled, 1, 'First request must pass');
+
+  // Request 2: Allowed
+  await limiter(req, res, next);
+  assert.equal(nextCalled, 2, 'Second request must pass');
+
+  // Request 3: Blocked by rate limiter
+  await limiter(req, res, next);
+  assert.equal(nextCalled, 2, 'Third request must be blocked');
+  assert.equal(statusSet, 429, 'Rate limiter must return HTTP 429');
+  assert.equal(jsonResponse.success, false);
+});
+
+test('13. Demo Setting & Trial Validity Configuration for New Signup Users', async (t) => {
+  const { getDemoSettings, getUserPlanFeatures } = require('../auth');
+  const demoSet = await getDemoSettings();
+  assert.ok(demoSet.demoDays >= 1, 'Demo days must be at least 1 day');
+  assert.ok(typeof demoSet.planName === 'string', 'Demo plan name must be a string');
+
+  // Test active demo user features
+  const activeDemoUser = {
+    userId: 'test_demo_user',
+    role: 'user',
+    plan: 'Demo Plan',
+    planExpiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+  };
+  const activeFeatures = await getUserPlanFeatures(activeDemoUser);
+  assert.equal(activeFeatures.active, true, 'Active demo user must have active status');
+  assert.equal(activeFeatures.isExpired, false, 'Active demo user is not expired');
+
+  // Test expired demo user features
+  const expiredDemoUser = {
+    userId: 'test_expired_demo_user',
+    role: 'user',
+    plan: 'Demo Plan',
+    planExpiresAt: new Date(Date.now() - 1000)
+  };
+  const expiredFeatures = await getUserPlanFeatures(expiredDemoUser);
+  assert.equal(expiredFeatures.active, false, 'Expired demo user must not be active');
+  assert.equal(expiredFeatures.isExpired, true, 'Expired demo user is marked expired');
+  assert.equal(expiredFeatures.apiAccess, false, 'Expired demo user must have apiAccess false');
+});
+
+

@@ -41,8 +41,14 @@ export function DashboardPage() {
 
   const username = currentUser?.username || 'Prince'
   const isConnected = status?.status === 'connected'
-  const currentPlan = isAdmin ? 'Super Admin' : (planInfo?.planName || currentUser?.plan || 'Professional')
-  const validityDate = isAdmin ? 'Lifetime' : formatExpiry(planInfo?.expiresAt)
+  const currentPlan = isAdmin ? 'Super Admin' : (planInfo?.planName || currentUser?.plan || 'Demo Plan')
+  const daysLeft = planInfo?.daysLeft !== undefined ? planInfo.daysLeft : null
+  const isPlanExpired = !isAdmin && Boolean(planInfo?.isExpired || (daysLeft !== null && daysLeft <= 0))
+  const validityDate = isAdmin 
+    ? 'Lifetime' 
+    : (isPlanExpired 
+        ? 'Plan Expired' 
+        : (daysLeft !== null ? `${formatExpiry(planInfo?.expiresAt || currentUser?.planExpiresAt)} (${daysLeft} Days Left)` : formatExpiry(planInfo?.expiresAt || currentUser?.planExpiresAt)))
 
   // Recent messages for table
   const recentList = (reports && reports.length > 0)
@@ -120,21 +126,68 @@ export function DashboardPage() {
           </div>
         ) : (
           <div className="hero-plan">
-            <div className="plan-summary">
-              <span className="plan-orb">◆</span>
+            <div 
+              className="plan-summary" 
+              onClick={() => navigate('/subscription')} 
+              style={{ cursor: 'pointer' }}
+              title="Click to view subscription plans and pricing"
+            >
+              <span className="plan-orb" style={{ background: isPlanExpired ? '#ef4444' : (currentPlan.toLowerCase().includes('demo') ? '#f59e0b' : '#3b82f6') }}>◆</span>
               <div className="plan-main">
                 <span>CURRENT PLAN</span>
                 <strong>{currentPlan}</strong>
               </div>
               <div className="plan-divider"></div>
               <div className="plan-main validity">
-                <span>VALID UNTIL</span>
-                <strong>{validityDate}</strong>
+                <span>{isPlanExpired ? 'PLAN STATUS' : 'DUE VALIDITY'}</span>
+                <strong style={{ color: isPlanExpired ? '#ef4444' : '#10b981' }}>
+                  {isPlanExpired ? 'Expired (Buy Plan)' : (daysLeft !== null ? `${daysLeft} Days Left` : validityDate)}
+                </strong>
               </div>
             </div>
           </div>
         )}
       </section>
+
+      {/* Expired Demo / Plan Banner */}
+      {!isAdmin && isPlanExpired && (
+        <div style={{
+          background: '#fee2e2',
+          border: '1px solid #f87171',
+          borderRadius: 12,
+          padding: '14px 20px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>⚠️</span>
+            <div>
+              <strong style={{ color: '#991b1b', fontSize: 15, display: 'block' }}>आपका Demo Plan समाप्त (Expired) हो चुका है!</strong>
+              <span style={{ color: '#b91c1c', fontSize: 13 }}>WhatsApp Automation एवं API जारी रखने के लिए कृपया प्लान लिस्ट से नया प्लान खरीदें।</span>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={() => navigate('/subscription')}
+            style={{
+              background: '#dc2626',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '8px 18px',
+              fontWeight: 600,
+              fontSize: 13,
+              cursor: 'pointer'
+            }}
+          >
+            💎 Plan List देखें और खरीदें
+          </button>
+        </div>
+      )}
 
       {/* 2. Actions Filter Row */}
       <div className="actions" style={{ marginBottom: 16 }}>

@@ -12,8 +12,10 @@ const {
   PlanPurchaseRequest, 
   CompanySettings,
   ApiSettings,
-  AppSettings
+  AppSettings,
+  MediaFile
 } = require('./db');
+const { mediaStorage, MEDIA_DIR, inferMimeType, sanitizeFilename } = require('./mediaStorage');
 
 
 const router = express.Router();
@@ -76,6 +78,27 @@ const randomDigits = (length) => {
   return String(crypto.randomInt(0, max)).padStart(length, '0');
 };
 const hashText = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+
+function safeErrorMessage(error, defaultMsg = 'सर्वर पर अनुरोध संसाधित करने में त्रुटि आई।') {
+  if (!error) return defaultMsg;
+  const msg = String(error.message || error);
+  if (
+    msg.includes('SELECT') ||
+    msg.includes('UPDATE') ||
+    msg.includes('INSERT') ||
+    msg.includes('DELETE') ||
+    msg.includes('relation') ||
+    msg.includes('column') ||
+    msg.includes('postgres') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('password') ||
+    msg.includes('syntax error') ||
+    msg.includes('at ')
+  ) {
+    return defaultMsg;
+  }
+  return msg;
+}
 
 const hashPassword = async (password, salt = crypto.randomBytes(16).toString('hex')) => {
   const derived = await new Promise((resolve, reject) => {
@@ -359,7 +382,7 @@ async function getUserPlanFeatures(user) {
   }
 
   const isExpired = user.planExpiresAt && new Date(user.planExpiresAt).getTime() < Date.now();
-  const planName = String(user.plan || 'Standard').trim();
+  const planName = String(user.plan || 'Demo Plan').trim();
   let planDoc = null;
   try {
     planDoc = await Plan.findOne({
@@ -372,15 +395,17 @@ async function getUserPlanFeatures(user) {
     console.warn('[PlanFeatures] Lookup error:', err.message);
   }
 
+  const isDemo = planName.toLowerCase().includes('demo');
+
   return {
     active: !isExpired,
     isExpired: Boolean(isExpired),
     apiAccess: !isExpired, // Every active user has API access enabled so all users can generate and use their own API key
-    webAccess: planDoc?.webAccess !== false,
-    bulkMsg: Boolean(planDoc?.bulkMsg),
-    groupOption: Boolean(planDoc?.groupOption),
-    scheduleMsg: Boolean(planDoc?.scheduleMsg),
-    dailyLimit: planDoc?.dailyLimit || '500/Day'
+    webAccess: planDoc ? planDoc.webAccess !== false : true,
+    bulkMsg: planDoc ? Boolean(planDoc.bulkMsg) : true,
+    groupOption: planDoc ? Boolean(planDoc.groupOption) : true,
+    scheduleMsg: planDoc ? Boolean(planDoc.scheduleMsg) : true,
+    dailyLimit: planDoc?.dailyLimit || (isDemo ? '100/Day' : '500/Day')
   };
 }
 
@@ -411,8 +436,11 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
       await user.save();
     }
     if (!user.planExpiresAt && user.role !== 'admin') {
+      const demoSet = await getDemoSettings();
+      const demoDays = Math.max(1, parseInt(demoSet.demoDays, 10) || 7);
       const baseDate = user.createdAt ? new Date(user.createdAt) : new Date();
-      user.planExpiresAt = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+      user.planExpiresAt = new Date(baseDate.getTime() + demoDays * 24 * 60 * 60 * 1000);
+      if (!user.plan) user.plan = demoSet.planName || 'Demo Plan';
       await user.save().catch(() => {});
     }
     const token = await createLoginToken(user);
@@ -425,7 +453,7 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
         name: user.name || '',
         mobile: user.mobile || null, 
         role: user.role,
-        plan: user.plan || 'Standard',
+        plan: user.plan || 'Demo Plan',
         planExpiresAt: user.planExpiresAt || null
       } 
     });
@@ -549,8 +577,12 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
     const username = mobile; // User ID = Registered mobile number
     const password = makePassword(); // Random password
 
+    const demoSet = await getDemoSettings();
+    const demoDays = Math.max(1, parseInt(demoSet.demoDays, 10) || 7);
+    const defaultPlan = demoSet.planName || 'Demo Plan';
+
     const initialExpiresAt = new Date();
-    initialExpiresAt.setDate(initialExpiresAt.getDate() + 30);
+    initialExpiresAt.setDate(initialExpiresAt.getDate() + demoDays);
 
     const tokenData = generateApiTokenData();
     const user = await User.create({
@@ -562,7 +594,7 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
       apiTokenPrefix: tokenData.prefix,
       apiTokenLast4: tokenData.last4,
       role: 'user',
-      plan: 'Standard',
+      plan: defaultPlan,
       planExpiresAt: initialExpiresAt,
       status: 'active'
     });
@@ -589,7 +621,7 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
       try {
         await sender(
           mobile,
-          `*WA Control Center Account Created!* 🎉\n\nLogin ID: *${username}*\nPassword: *${password}*\n\nकृपया लॉगिन करने के बाद Dashboard से अपना WhatsApp scan करें। सुरक्षा के लिए आप Settings से पासवर्ड बदल सकते हैं।`
+          `*WA Control Center Account Created!* 🎉\n\nLogin ID: *${username}*\nPassword: *${password}*\nPlan: *${defaultPlan} (${demoDays} Days Trial)*\n\nकृपया लॉगिन करने के बाद Dashboard से अपना WhatsApp scan करें। सुरक्षा के लिए आप Settings से पासवर्ड बदल सकते हैं।`
         );
         sentOnWhatsApp = true;
       } catch (sendErr) {
@@ -667,7 +699,7 @@ router.post('/api/admin/change-password', passwordLimiter, authRequired, changeP
 ========================================================= */
 
 function adminRequired(req, res, next) {
-  if (req.user && req.user.role === 'admin') {
+  if (req.user && req.user.role === 'admin' && req.user.status === 'active') {
     return next();
   }
   return res.status(403).json({ success: false, message: 'केवल एडमिन को यह अनुमति है।' });
@@ -855,11 +887,24 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
       const adminPhone = activeSock?.user?.id
         ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
         : CONFIG_ADMIN_PHONE;
+
+      let profilePicUrl = activeSock?.profilePicUrl || null;
+      if (isConn && !profilePicUrl && activeSock) {
+        try {
+          const adminJid = adminPhone ? `${adminPhone}@s.whatsapp.net` : activeSock.user?.id;
+          if (adminJid && typeof activeSock.profilePictureUrl === 'function') {
+            profilePicUrl = await activeSock.profilePictureUrl(adminJid, 'image').catch(() => null);
+            activeSock.profilePicUrl = profilePicUrl;
+          }
+        } catch (e) {}
+      }
+
       return res.json({
         success: true,
         status: isConn ? 'connected' : 'waiting',
         number: isConn && adminPhone ? adminPhone.slice(-10) : (adminPhone ? adminPhone.slice(-10) : null),
         profileName: activeSock?.user?.name || (adminPhone ? `+${adminPhone}` : 'Admin WhatsApp'),
+        profilePicUrl: profilePicUrl,
         ready: isConn,
         lastConnected: null,
       });
@@ -878,6 +923,19 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
       session = getUserSession(req.user.userId);
     }
 
+    let profilePicUrl = session?.profilePicUrl || dbSession?.profilePicUrl || null;
+    if (session?.socket && session?.status === 'connected' && !profilePicUrl) {
+      try {
+        const rawId = session.socket.user?.id || '';
+        const cleanNum = (session.connectedNumber || rawId.split(':')[0].split('@')[0]).replace(/\D/g, '');
+        const jid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawId;
+        if (jid && typeof session.socket.profilePictureUrl === 'function') {
+          profilePicUrl = await session.socket.profilePictureUrl(jid, 'image').catch(() => null);
+          session.profilePicUrl = profilePicUrl;
+        }
+      } catch (e) {}
+    }
+
     const currentStatus = session?.status || (dbSession?.status === 'connected' ? 'connecting' : (dbSession?.status || 'waiting'));
 
     res.json({
@@ -885,6 +943,7 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
       status: currentStatus,
       number: session?.connectedNumber || dbSession?.phone || null,
       profileName: session?.profileName || (session?.connectedNumber ? `+${session.connectedNumber}` : (dbSession?.phone ? `+${dbSession.phone}` : 'WhatsApp Account')),
+      profilePicUrl: profilePicUrl,
       ready: session?.status === 'connected',
       lastConnected: dbSession?.lastConnectedAt || null,
     });
@@ -1038,6 +1097,358 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
   }
 });
 
+// =========================================================
+// MULTI-DEVICE MANAGEMENT APIS (/api/devices)
+// =========================================================
+
+router.get('/api/devices', authRequired, async (req, res) => {
+  try {
+    const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const { getUserSession, getUserQR } = require('./userSessions');
+    const indexMod = require('./index');
+    const QRCode = require('qrcode');
+
+    if (isRoleAdmin) {
+      const slots = [];
+      
+      // Slot 1: Primary Admin Bot
+      let activeSock = global.__waAdminSocket;
+      let isConn1 = Boolean(activeSock && typeof activeSock.sendMessage === 'function');
+      let adminPhone1 = activeSock?.user?.id
+        ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
+        : CONFIG_ADMIN_PHONE;
+      let profilePicUrl1 = activeSock?.profilePicUrl || null;
+      if (isConn1 && !profilePicUrl1 && activeSock) {
+        try {
+          const adminJid = adminPhone1 ? `${adminPhone1}@s.whatsapp.net` : activeSock.user?.id;
+          if (adminJid && typeof activeSock.profilePictureUrl === 'function') {
+            profilePicUrl1 = await activeSock.profilePictureUrl(adminJid, 'image').catch(() => null);
+            activeSock.profilePicUrl = profilePicUrl1;
+          }
+        } catch (e) {}
+      }
+      let qr1 = null;
+      if (!isConn1) {
+        try {
+          const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
+          if (latestQR) {
+            qr1 = await QRCode.toDataURL(latestQR).catch(() => null);
+          }
+        } catch (e) {}
+      }
+      slots.push({
+        slot: 1,
+        status: isConn1 ? 'connected' : (qr1 ? 'waiting' : 'disconnected'),
+        number: adminPhone1 ? adminPhone1.slice(-10) : null,
+        profileName: activeSock?.user?.name || (adminPhone1 ? `+${adminPhone1}` : 'Admin Device 01'),
+        profilePicUrl: profilePicUrl1,
+        qr: qr1,
+        ready: isConn1,
+        role: 'admin'
+      });
+
+      // Slots 2, 3, 4: Admin Slots admin_2, admin_3, admin_4
+      for (let sIdx = 2; sIdx <= 4; sIdx++) {
+        const slotKey = `admin_${sIdx}`;
+        const session = getUserSession(slotKey);
+        const dbS = await WhatsAppSession.findOne({ 
+          $or: [{ ownerUserId: slotKey }, { sessionId: slotKey }] 
+        }).lean().catch(() => null);
+
+        const isConnSlot = session?.status === 'connected' && Boolean(session.socket);
+        const numSlot = session?.connectedNumber || dbS?.phone || null;
+        let dpSlot = session?.profilePicUrl || dbS?.profilePicUrl || null;
+
+        if (isConnSlot && !dpSlot && session.socket) {
+          try {
+            const rawId = session.socket.user?.id || '';
+            const cleanNum = (numSlot || rawId.split(':')[0].split('@')[0]).replace(/\D/g, '');
+            const jid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawId;
+            if (jid && typeof session.socket.profilePictureUrl === 'function') {
+              dpSlot = await session.socket.profilePictureUrl(jid, 'image').catch(() => null);
+              session.profilePicUrl = dpSlot;
+            }
+          } catch (e) {}
+        }
+
+        let qrSlot = null;
+        if (!isConnSlot) {
+          const qrRes = await getUserQR(slotKey).catch(() => null);
+          qrSlot = qrRes?.qr || null;
+        }
+
+        slots.push({
+          slot: sIdx,
+          status: isConnSlot ? 'connected' : (qrSlot ? 'waiting' : (session?.status || dbS?.status || 'disconnected')),
+          number: numSlot ? String(numSlot).replace(/\D/g, '').slice(-10) : null,
+          profileName: session?.profileName || (numSlot ? `+${numSlot}` : `Admin Device 0${sIdx}`),
+          profilePicUrl: dpSlot,
+          qr: qrSlot,
+          ready: isConnSlot,
+          role: 'admin'
+        });
+      }
+
+      return res.json({
+        success: true,
+        allowedDevices: 4,
+        devices: slots
+      });
+    }
+
+    // Regular User
+    const user = req.user;
+    const planName = String(user.plan || 'Demo Plan').trim();
+    const planDoc = await Plan.findOne({ 
+      $or: [
+        { name: new RegExp(`^${planName}$`, 'i') },
+        { planId: planName.toLowerCase() }
+      ] 
+    }).lean().catch(() => null);
+
+    const isDemo = planName.toLowerCase().includes('demo');
+    let allowedDevices = 1;
+    if (!isDemo && planDoc) {
+      if (typeof planDoc.allowedDevices === 'number') {
+        allowedDevices = planDoc.allowedDevices;
+      } else if (planDoc.deviceLimit) {
+        const str = String(planDoc.deviceLimit);
+        if (str.includes('4')) allowedDevices = 4;
+        else if (str.includes('2')) allowedDevices = 2;
+        else if (str.includes('3')) allowedDevices = 3;
+        else if (str.includes('1')) allowedDevices = 1;
+        else {
+          const m = str.match(/(\d+)/);
+          if (m && m[1]) allowedDevices = parseInt(m[1], 10);
+        }
+      }
+    }
+
+    const slots = [];
+    for (let sIdx = 1; sIdx <= allowedDevices; sIdx++) {
+      const uKey = sIdx === 1 ? req.user.userId : `${req.user.userId}_${sIdx}`;
+      const session = getUserSession(uKey);
+      const dbS = await WhatsAppSession.findOne({ 
+        $or: [{ ownerUserId: uKey }, { sessionId: `user-${uKey}` }] 
+      }).lean().catch(() => null);
+
+      const isConn = session?.status === 'connected' && Boolean(session.socket);
+      const num = session?.connectedNumber || dbS?.phone || null;
+      let dp = session?.profilePicUrl || dbS?.profilePicUrl || null;
+
+      if (isConn && !dp && session.socket) {
+        try {
+          const rawId = session.socket.user?.id || '';
+          const cleanNum = (num || rawId.split(':')[0].split('@')[0]).replace(/\D/g, '');
+          const jid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawId;
+          if (jid && typeof session.socket.profilePictureUrl === 'function') {
+            dp = await session.socket.profilePictureUrl(jid, 'image').catch(() => null);
+            session.profilePicUrl = dp;
+          }
+        } catch (e) {}
+      }
+
+      let qr = null;
+      if (!isConn) {
+        const qrRes = await getUserQR(uKey).catch(() => null);
+        qr = qrRes?.qr || null;
+      }
+
+      slots.push({
+        slot: sIdx,
+        status: isConn ? 'connected' : (qr ? 'waiting' : (session?.status || dbS?.status || 'disconnected')),
+        number: num ? String(num).replace(/\D/g, '').slice(-10) : null,
+        profileName: session?.profileName || (num ? `+${num}` : (sIdx === 1 ? (user.username || 'WhatsApp Account') : `Device 0${sIdx}`)),
+        profilePicUrl: dp,
+        qr: qr,
+        ready: isConn,
+        role: 'user'
+      });
+    }
+
+    res.json({
+      success: true,
+      allowedDevices,
+      devices: slots
+    });
+  } catch (err) {
+    console.error('Fetch devices error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Fetch devices failed' });
+  }
+});
+
+router.post('/api/devices/connect', authRequired, async (req, res) => {
+  try {
+    const slot = parseInt(req.body?.slot || 1, 10);
+    const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const { startUserSession, getUserQR } = require('./userSessions');
+    const QRCode = require('qrcode');
+
+    if (isRoleAdmin) {
+      if (slot === 1) {
+        const indexMod = require('./index');
+        if (typeof indexMod.startBot === 'function') {
+          indexMod.startBot(true).catch(() => {});
+        }
+        let qrDataUrl = null;
+        let waited = 0;
+        while (waited < 2500) {
+          const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
+          if (latestQR) {
+            qrDataUrl = await QRCode.toDataURL(latestQR).catch(() => null);
+            break;
+          }
+          await new Promise(r => setTimeout(r, 250));
+          waited += 250;
+        }
+        return res.json({
+          success: true,
+          slot: 1,
+          status: qrDataUrl ? 'qr' : 'connecting',
+          qr: qrDataUrl,
+          message: 'Admin Device 01 session initiated.'
+        });
+      } else {
+        const slotKey = `admin_${slot}`;
+        await startUserSession(slotKey).catch(e => console.warn(`Admin slot ${slot} connect error:`, e.message));
+        let qrRes = null;
+        let waited = 0;
+        while (waited < 2500) {
+          qrRes = await getUserQR(slotKey).catch(() => null);
+          if (qrRes?.qr) break;
+          await new Promise(r => setTimeout(r, 250));
+          waited += 250;
+        }
+        return res.json({
+          success: true,
+          slot,
+          status: qrRes?.qr ? 'qr' : (qrRes?.status || 'connecting'),
+          qr: qrRes?.qr || null,
+          message: `Admin Device 0${slot} session initiated.`
+        });
+      }
+    }
+
+    // User session connect
+    const uKey = slot === 1 ? req.user.userId : `${req.user.userId}_${slot}`;
+    await startUserSession(uKey);
+    let qrRes = null;
+    let waited = 0;
+    while (waited < 2500) {
+      qrRes = await getUserQR(uKey).catch(() => null);
+      if (qrRes?.qr) break;
+      await new Promise(r => setTimeout(r, 250));
+      waited += 250;
+    }
+
+    res.json({
+      success: true,
+      slot,
+      status: qrRes?.qr ? 'qr' : (qrRes?.status || 'connecting'),
+      qr: qrRes?.qr || null,
+      message: `Device 0${slot} session initiated.`
+    });
+  } catch (err) {
+    console.error('Device connect error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Device connect failed' });
+  }
+});
+
+router.post('/api/devices/disconnect', authRequired, async (req, res) => {
+  try {
+    const slot = parseInt(req.body?.slot || 1, 10);
+    const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const { stopUserSession } = require('./userSessions');
+
+    if (isRoleAdmin) {
+      if (slot === 1) {
+        const indexMod = require('./index');
+        if (global.__waAdminSocket) {
+          try {
+            if (typeof global.__waAdminSocket.logout === 'function') {
+              await global.__waAdminSocket.logout().catch(() => {});
+            }
+            global.__waAdminSocket.ev?.removeAllListeners?.();
+            global.__waAdminSocket.end?.();
+          } catch (e) {}
+          global.__waAdminSocket = null;
+        }
+        try {
+          if (typeof indexMod.clearAdminWhatsAppCredentials === 'function') {
+            await indexMod.clearAdminWhatsAppCredentials();
+          }
+        } catch (e) {}
+        if (typeof indexMod.clearUserIncomingMessages === 'function') {
+          indexMod.clearUserIncomingMessages('admin');
+        }
+        if (typeof indexMod.recordAdminWhatsAppSession === 'function') {
+          indexMod.recordAdminWhatsAppSession({ status: 'disconnected', phone: null }).catch(() => {});
+        }
+        if (typeof indexMod.broadcastIncomingEvent === 'function') {
+          indexMod.broadcastIncomingEvent('connection_status', { status: 'disconnected', number: null, role: 'admin' });
+        }
+        return res.json({ success: true, slot: 1, message: 'Admin Device 01 disconnected.' });
+      } else {
+        const slotKey = `admin_${slot}`;
+        await stopUserSession(slotKey);
+        const indexMod = require('./index');
+        if (typeof indexMod.clearUserIncomingMessages === 'function') {
+          indexMod.clearUserIncomingMessages(slotKey);
+        }
+        return res.json({ success: true, slot, message: `Admin Device 0${slot} disconnected.` });
+      }
+    }
+
+    const uKey = slot === 1 ? req.user.userId : `${req.user.userId}_${slot}`;
+    await stopUserSession(uKey);
+    const indexMod = require('./index');
+    if (typeof indexMod.clearUserIncomingMessages === 'function') {
+      indexMod.clearUserIncomingMessages(uKey);
+    }
+    res.json({ success: true, slot, message: `Device 0${slot} disconnected.` });
+  } catch (err) {
+    console.error('Device disconnect error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Device disconnect failed' });
+  }
+});
+
+router.get('/api/devices/qr', authRequired, async (req, res) => {
+  try {
+    const slot = parseInt(req.query?.slot || 1, 10);
+    const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const { getUserQR } = require('./userSessions');
+    const indexMod = require('./index');
+    const QRCode = require('qrcode');
+
+    if (isRoleAdmin) {
+      if (slot === 1) {
+        const isConn = Boolean(global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function');
+        if (isConn) {
+          const num = (global.__waAdminSocket?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
+          return res.json({ success: true, slot: 1, status: 'connected', qr: null, connectedNumber: num });
+        }
+        const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
+        if (latestQR) {
+          const qrDataUrl = await QRCode.toDataURL(latestQR).catch(() => null);
+          return res.json({ success: true, slot: 1, status: 'qr', qr: qrDataUrl, connectedNumber: null });
+        }
+        return res.json({ success: true, slot: 1, status: 'waiting', qr: null, connectedNumber: null });
+      } else {
+        const slotKey = `admin_${slot}`;
+        const qrRes = await getUserQR(slotKey);
+        return res.json({ success: true, slot, ...qrRes });
+      }
+    }
+
+    const uKey = slot === 1 ? req.user.userId : `${req.user.userId}_${slot}`;
+    const qrRes = await getUserQR(uKey);
+    res.json({ success: true, slot, ...qrRes });
+  } catch (err) {
+    console.error('Device QR error:', err);
+    res.status(500).json({ success: false, message: err.message || 'QR fetch failed' });
+  }
+});
+
 // Get list of active / scanned WhatsApp sessions available to the user
 router.get('/api/user/whatsapp/sessions', authRequired, async (req, res) => {
   try {
@@ -1067,17 +1478,35 @@ router.get('/api/user/whatsapp/sessions', authRequired, async (req, res) => {
       list.push({
         id: 'admin',
         sessionId: 'admin',
-        name: 'Admin WhatsApp' + (adminPhone ? ` (+${adminPhone})` : ''),
+        name: 'Admin WhatsApp (Device 01)' + (adminPhone ? ` (+${adminPhone})` : ''),
         number: adminPhone ? adminPhone.slice(-10) : null,
-        display: `Admin WhatsApp ${adminPhone ? `(+${adminPhone})` : ''} - ${isAdminConnected ? 'Connected ✓' : 'Offline'}`,
+        display: `Admin Device 01 ${adminPhone ? `(+${adminPhone})` : ''} - ${isAdminConnected ? 'Connected ✓' : 'Offline'}`,
         status: isAdminConnected ? 'connected' : 'disconnected',
         isDefault: true,
         role: 'admin'
       });
 
+      // Include other admin slots (admin_2, admin_3, admin_4)
+      for (let sIdx = 2; sIdx <= 4; sIdx++) {
+        const slotKey = `admin_${sIdx}`;
+        const slotS = sessions?.get(slotKey);
+        const dbSlotS = await WhatsAppSession.findOne({ sessionId: slotKey }).lean().catch(() => null);
+        const sPhone = slotS?.connectedNumber || dbSlotS?.phone || null;
+        const isConn = slotS?.status === 'connected';
+        list.push({
+          id: slotKey,
+          sessionId: slotKey,
+          name: `Admin WhatsApp (Device 0${sIdx})` + (sPhone ? ` (+${sPhone})` : ''),
+          number: sPhone ? String(sPhone).replace(/\D/g, '').slice(-10) : null,
+          display: `Admin Device 0${sIdx} ${sPhone ? `(+${sPhone})` : ''} - ${isConn ? 'Connected ✓' : 'Offline'}`,
+          status: isConn ? 'connected' : 'disconnected',
+          role: 'admin'
+        });
+      }
+
       const dbSessions = await WhatsAppSession.find({});
       for (const s of dbSessions) {
-        if (s.sessionId === 'admin' || s.role === 'admin' || String(s.ownerUserId || '').toUpperCase() === 'ADMIN') continue;
+        if (s.sessionId === 'admin' || s.sessionId?.startsWith('admin_') || s.role === 'admin' || String(s.ownerUserId || '').toUpperCase() === 'ADMIN') continue;
         const active = sessions?.get(s.ownerUserId);
         const num = active?.connectedNumber || s.phone || null;
         const clean10 = num ? String(num).replace(/\D/g, '').slice(-10) : null;
@@ -1271,10 +1700,12 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
       const mimeType = validation.mimeType;
       fileName = validation.originalName || validation.safeFilename;
 
-      const MEDIA_DIR = path.join(__dirname, 'media_storage');
-      if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
       const savedName = validation.safeFilename;
-      fs.writeFileSync(path.join(MEDIA_DIR, savedName), buffer);
+      await mediaStorage.saveMedia(savedName, buffer, {
+        mimetype: mimeType,
+        ownerUserId: req.user?.userId,
+        metadata: { originalName: fileName }
+      });
       mediaUrl = `/media/${savedName}`;
 
       if (mimeType.startsWith('image/')) {
@@ -1319,7 +1750,9 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
         to: normalized,
         message: reportText,
         status: 'sent',
-        session: sessionName || 'default'
+        session: sessionName || 'default',
+        type: mediaType || 'text',
+        source: 'web'
       });
 
       appendIncomingMessage({
@@ -1463,8 +1896,11 @@ router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => 
 router.get('/api/auth/me', authRequired, async (req, res) => {
   const user = req.user;
   if (!user.planExpiresAt && user.role !== 'admin') {
+    const demoSet = await getDemoSettings();
+    const demoDays = Math.max(1, parseInt(demoSet.demoDays, 10) || 7);
     const baseDate = user.createdAt ? new Date(user.createdAt) : new Date();
-    user.planExpiresAt = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+    user.planExpiresAt = new Date(baseDate.getTime() + demoDays * 24 * 60 * 60 * 1000);
+    if (!user.plan) user.plan = demoSet.planName || 'Demo Plan';
     await user.save().catch(() => {});
   }
   res.json({ 
@@ -1475,7 +1911,7 @@ router.get('/api/auth/me', authRequired, async (req, res) => {
       name: user.name || '',
       mobile: user.mobile || null, 
       role: user.role,
-      plan: user.plan || 'Standard',
+      plan: user.plan || 'Demo Plan',
       planExpiresAt: user.planExpiresAt || null
     } 
   });
@@ -1484,7 +1920,7 @@ router.get('/api/auth/me', authRequired, async (req, res) => {
 router.get('/api/user/plan-status', authRequired, async (req, res) => {
   try {
     const user = req.user;
-    const planName = String(user.plan || 'Standard').trim();
+    const planName = String(user.plan || 'Demo Plan').trim();
 
     const planDoc = await Plan.findOne({ 
       $or: [
@@ -1493,9 +1929,13 @@ router.get('/api/user/plan-status', authRequired, async (req, res) => {
       ] 
     });
 
-    const validityDays = planDoc?.validityDays || 30;
+    const demoSet = await getDemoSettings();
+    const isDemo = planName.toLowerCase().includes('demo');
+    const defaultValidityDays = isDemo ? (demoSet.demoDays || 7) : 30;
+
+    const validityDays = planDoc?.validityDays || defaultValidityDays;
     const validityText = planDoc?.validity || `${validityDays} Days`;
-    const dailyLimit = planDoc?.dailyLimit || '500/Day';
+    const dailyLimit = planDoc?.dailyLimit || (isDemo ? (demoSet.dailyLimit || '100/Day') : '500/Day');
 
     let expiresAt = user.planExpiresAt;
     if (!expiresAt) {
@@ -1511,24 +1951,47 @@ router.get('/api/user/plan-status', authRequired, async (req, res) => {
     const daysLeft = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
     const isExpired = msLeft <= 0;
 
+    let allowedDevices = 1;
+    if (user.role === 'admin') {
+      allowedDevices = 4;
+    } else if (isDemo) {
+      allowedDevices = 1;
+    } else if (planDoc) {
+      if (typeof planDoc.allowedDevices === 'number') {
+        allowedDevices = planDoc.allowedDevices;
+      } else if (planDoc.deviceLimit) {
+        const str = String(planDoc.deviceLimit);
+        if (str.includes('4')) allowedDevices = 4;
+        else if (str.includes('2')) allowedDevices = 2;
+        else if (str.includes('3')) allowedDevices = 3;
+        else if (str.includes('1')) allowedDevices = 1;
+        else {
+          const m = str.match(/(\d+)/);
+          if (m && m[1]) allowedDevices = parseInt(m[1], 10);
+        }
+      }
+    }
+
     res.json({
       success: true,
       plan: {
         planName,
+        isDemo,
         price: planDoc?.price || 0,
         currency: planDoc?.currency || 'INR',
         validity: validityText,
         validityDays,
         dailyLimit,
         expiresAt: expiresAt.toISOString(),
-        daysLeft,
+        daysLeft: isExpired ? 0 : daysLeft,
         isExpired,
-        description: planDoc?.description || '',
+        description: planDoc?.description || (isDemo ? 'Demo trial validity plan' : ''),
         deviceLimit: planDoc?.deviceLimit || '1 Free + 1 Add-on',
-        apiAccess: planDoc?.apiAccess || false,
-        webAccess: planDoc?.webAccess !== false,
-        bulkMsg: planDoc?.bulkMsg || false,
-        groupOption: planDoc?.groupOption || false
+        allowedDevices: allowedDevices || 1,
+        apiAccess: planDoc ? planDoc.apiAccess : true,
+        webAccess: planDoc ? planDoc.webAccess !== false : true,
+        bulkMsg: planDoc ? planDoc.bulkMsg : true,
+        groupOption: planDoc ? planDoc.groupOption : false
       }
     });
   } catch (error) {
@@ -1710,9 +2173,11 @@ router.post('/api/plans/purchase', authRequired, async (req, res) => {
       if (!validation.valid || !validation.mimeType?.startsWith('image/')) {
         return res.status(400).json({ success: false, message: validation.error || 'अमान्य स्क्रीनशॉट फ़ाइल।' });
       }
-      const MEDIA_DIR = path.join(__dirname, 'media_storage');
-      if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
-      fs.writeFileSync(path.join(MEDIA_DIR, validation.safeFilename), validation.buffer);
+      await mediaStorage.saveMedia(validation.safeFilename, validation.buffer, {
+        mimetype: validation.mimeType,
+        ownerUserId: req.user?.userId,
+        metadata: { type: 'plan_screenshot', planId: plan.planId }
+      });
       finalScreenshot = `/media/${validation.safeFilename}`;
     }
 
@@ -1953,9 +2418,11 @@ router.post('/api/user/settings/auto-image', express.json({ limit: '15mb' }), au
         });
       }
 
-      const MEDIA_DIR = path.join(__dirname, 'media_storage');
-      if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
-      fs.writeFileSync(path.join(MEDIA_DIR, validation.safeFilename), validation.buffer);
+      await mediaStorage.saveMedia(validation.safeFilename, validation.buffer, {
+        mimetype: validation.mimeType,
+        ownerUserId: user?.userId,
+        metadata: { type: 'auto_image', originalName: fileName }
+      });
       finalImageUrl = `/media/${validation.safeFilename}`;
       if (!finalFileName) finalFileName = validation.originalName || validation.safeFilename;
     }
@@ -2029,11 +2496,15 @@ router.post('/api/user/tts-convert', authRequired, async (req, res) => {
     const cleanText = String(text).trim();
     const targetLang = String(lang || 'hi').trim().toLowerCase();
 
-    const MEDIA_DIR = path.join(__dirname, 'media_storage');
     const fileName = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.mp3`;
     const filePath = path.join(MEDIA_DIR, fileName);
 
     const { buffer } = await generateTTS(cleanText, targetLang, filePath);
+    await mediaStorage.saveMedia(fileName, buffer, {
+      mimetype: 'audio/mpeg',
+      ownerUserId: req.user?.userId,
+      metadata: { type: 'tts' }
+    });
     const base64Data = `data:audio/mp3;base64,${buffer.toString('base64')}`;
 
     res.json({
@@ -2329,6 +2800,54 @@ router.post('/api/settings/wa-queue', authRequired, adminRequired, async (req, r
   }
 });
 
+// 22. Admin: Get/Save Demo Plan & Trial Validity Settings (डेमो सेटिंग)
+const DEMO_SETTINGS_FILE = path.join(__dirname, 'demo_settings.json');
+function getDemoSettingsFile() {
+  try {
+    if (fs.existsSync(DEMO_SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(DEMO_SETTINGS_FILE, 'utf-8') || '{}');
+    }
+  } catch (e) {}
+  return { enabled: true, demoDays: 7, planName: 'Demo Plan', dailyLimit: '100/Day' };
+}
+function saveDemoSettingsFile(data) {
+  try { fs.writeFileSync(DEMO_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) {}
+}
+
+async function getDemoSettings() {
+  const data = await getSettingWithFallback('demo_setting', getDemoSettingsFile);
+  const demoDays = Math.max(1, parseInt(data?.demoDays, 10) || 7);
+  const enabled = data?.enabled !== false;
+  const planName = String(data?.planName || 'Demo Plan').trim();
+  const dailyLimit = String(data?.dailyLimit || '100/Day').trim();
+  return { enabled, demoDays, planName, dailyLimit };
+}
+
+router.get('/api/settings/demo', authRequired, adminRequired, async (req, res) => {
+  try {
+    const data = await getDemoSettings();
+    res.json({ success: true, settings: data, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/api/settings/demo', authRequired, adminRequired, async (req, res) => {
+  try {
+    const demoDays = Math.max(1, parseInt(req.body.demoDays, 10) || 7);
+    const enabled = req.body.enabled !== false;
+    const planName = String(req.body.planName || 'Demo Plan').trim();
+    const dailyLimit = String(req.body.dailyLimit || '100/Day').trim();
+
+    const data = { demoDays, enabled, planName, dailyLimit, updatedAt: new Date().toISOString() };
+    await saveSettingToDbAndFile('demo_setting', data, saveDemoSettingsFile);
+
+    res.json({ success: true, message: 'Demo plan settings saved successfully!', settings: data, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = { 
   router, 
   authRequired, 
@@ -2336,6 +2855,7 @@ module.exports = {
   ensureAdminUser, 
   recordAdminWhatsAppSession, 
   getUserPlanFeatures,
+  getDemoSettings,
   getSessionTokenTtlMs,
   generateApiTokenData,
   CONFIG_ADMIN_PHONE,

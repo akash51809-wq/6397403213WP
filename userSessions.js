@@ -1,5 +1,5 @@
 const { default: makeWASocket, DisconnectReason } = require('@whiskeysockets/baileys');
-const { usePgAuthState, useMongoAuthState } = require('./pgAuthState');
+const { usePgAuthState } = require('./pgAuthState');
 const { WhatsAppSession } = require('./auth');
 
 const QRCode = require('qrcode');
@@ -14,6 +14,7 @@ const startingSessionIds = new Set();
 
 async function startUserSession(userId) {
     const normalizedUserId = String(userId || '').trim();
+    const isAdminSlot = normalizedUserId.startsWith('admin_');
     if (!normalizedUserId || normalizedUserId.toUpperCase() === 'ADMIN') {
         console.warn(`[UserSession] BLOCKED admin userId=${userId} from user session`);
         return {
@@ -79,10 +80,10 @@ async function startUserSession(userId) {
 
     try {
 
-    const sessionId = `user-${userId}`;
+    const sessionId = isAdminSlot ? normalizedUserId : `user-${userId}`;
     const { state, saveCreds } = await usePgAuthState(sessionId);
 
-    console.log(`[UserSession] Starting session for user ${userId}`);
+    console.log(`[UserSession] Starting session for ${isAdminSlot ? 'Admin slot' : 'user'} ${userId}`);
 
     const socket = makeWASocket({
         auth: state,
@@ -101,6 +102,7 @@ async function startUserSession(userId) {
         connectingSince: Date.now(),
         connectedNumber: null,
         profileName: null,
+        profilePicUrl: null,
         qr: null,
         saveCreds
     };
@@ -114,7 +116,7 @@ async function startUserSession(userId) {
         sessionRecord = new WhatsAppSession({
             sessionId: sessionId,
             ownerUserId: userId,
-            role: 'user',
+            role: isAdminSlot ? 'admin' : 'user',
             status: 'connecting',
             createdAt: new Date(),
             updatedAt: new Date()
@@ -132,11 +134,11 @@ async function startUserSession(userId) {
         if (!currentSession) return;
 
         if (qr) {
-            if (String(userId || '').trim().toUpperCase() === 'ADMIN') {
-                console.warn(`[UserSession] BLOCKED QR for admin user ${userId}`);
+            if (String(userId || '').trim().toUpperCase() === 'ADMIN' && !String(userId || '').trim().startsWith('admin_')) {
+                console.warn(`[UserSession] BLOCKED QR for canonical admin user ${userId}`);
                 return;
             }
-            console.log(`[UserSession] Received QR for user ${userId}`);
+            console.log(`[UserSession] Received QR for ${userId}`);
             currentSession.qr = qr;
             currentSession.status = 'waiting';
             
@@ -164,7 +166,7 @@ async function startUserSession(userId) {
             const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));
             const shouldReconnect = !isLoggedOut && !isQRExpired;
             
-            console.log(`[UserSession] Connection closed for user ${userId}, statusCode: ${statusCode}, reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}`);
+            console.log(`[UserSession] Connection closed for ${userId}, statusCode: ${statusCode}, reconnecting: ${shouldReconnect}, isLoggedOut: ${isLoggedOut}, isQRExpired: ${isQRExpired}`);
             
             currentSession.status = isLoggedOut ? 'logged_out' : (isQRExpired ? 'disconnected' : 'connecting');
             currentSession.connectingSince = shouldReconnect ? Date.now() : null;
@@ -198,7 +200,8 @@ async function startUserSession(userId) {
                 if (isLoggedOut) {
                     try {
                         const SessionAuth = require('./models/SessionAuth');
-                        SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } }).catch(() => {});
+                        const prefix = String(userId).startsWith('admin_') ? `^${userId}_` : `^user-${userId}_`;
+                        SessionAuth.deleteMany({ id: { $regex: prefix } }).catch(() => {});
                     } catch (e) {}
                 }
                 if (isQRExpired) {
@@ -206,7 +209,7 @@ async function startUserSession(userId) {
                 }
             }
         } else if (connection === 'open') {
-            console.log(`[UserSession] User ${userId} connected`);
+            console.log(`[UserSession] ${userId} connected`);
             currentSession.status = 'connected';
             currentSession.qr = null;
             const rawId = socket.user?.id || '';
@@ -214,11 +217,22 @@ async function startUserSession(userId) {
             currentSession.connectedNumber = phoneNum;
             currentSession.profileName = socket.user?.name || socket.user?.notify || (phoneNum ? `+${phoneNum}` : null);
             
+            // Fetch real WhatsApp Profile Picture (DP)
+            let profilePicUrl = null;
+            try {
+                const jid = phoneNum ? `${phoneNum}@s.whatsapp.net` : rawId;
+                if (jid && typeof socket.profilePictureUrl === 'function') {
+                    profilePicUrl = await socket.profilePictureUrl(jid, 'image').catch(() => null);
+                }
+            } catch (e) {}
+            currentSession.profilePicUrl = profilePicUrl;
+
             await WhatsAppSession.updateOne(
                 { $or: [{ ownerUserId: userId }, { sessionId: sessionId }] },
                 { 
                     status: 'connected', 
                     phone: phoneNum,
+                    profilePicUrl: profilePicUrl,
                     lastConnectedAt: new Date(),
                     updatedAt: new Date() 
                 }
@@ -231,6 +245,7 @@ async function startUserSession(userId) {
                         status: 'connected', 
                         number: phoneNum,
                         profileName: currentSession.profileName,
+                        profilePicUrl: currentSession.profilePicUrl,
                         userId 
                     }, userId, phoneNum);
                 }
@@ -377,13 +392,14 @@ async function stopUserSession(userId) {
 
     try {
         const SessionAuth = require('./models/SessionAuth');
-        // Delete only this user's session auth keys (never admin keys — admin uses clearAdminWhatsAppCredentials in index.js)
-        await SessionAuth.deleteMany({ id: { $regex: `^user-${userId}_` } });
+        const prefix = String(userId).startsWith('admin_') ? `^${userId}_` : `^user-${userId}_`;
+        await SessionAuth.deleteMany({ id: { $regex: prefix } });
     } catch (e) {}
     
     try {
+        const sId = String(userId).startsWith('admin_') ? userId : `user-${userId}`;
         await WhatsAppSession.updateOne(
-            { $or: [{ ownerUserId: userId }, { sessionId: `user-${userId}` }] },
+            { $or: [{ ownerUserId: userId }, { sessionId: sId }] },
             { status: 'logged_out', updatedAt: new Date() }
         );
     } catch (e) {}
@@ -395,7 +411,7 @@ async function stopUserSession(userId) {
         }
     } catch (e) {}
 
-    console.log(`[UserSession] Session stopped and credentials cleared for user ${userId}`);
+    console.log(`[UserSession] Session stopped and credentials cleared for ${userId}`);
 }
 
 function getUserSession(userId) {
@@ -500,7 +516,15 @@ async function findOrLoadSession(sessionParam, caller = null) {
     }
 
     // 2. If Admin explicitly requests or defaults to Admin session
-    if (isAdmin && (isTargetingAdmin || !sessionParam)) {
+    if (isAdmin && (isTargetingAdmin || !sessionParam || String(sessionParam).startsWith('admin'))) {
+        const slotKey = String(sessionParam || '').replace('-', '_');
+        if (slotKey.startsWith('admin_') && sessions.has(slotKey)) {
+            const s = sessions.get(slotKey);
+            if (s?.socket && s?.status === 'connected') {
+                return { userId: slotKey, isAdmin: true, session: s };
+            }
+        }
+
         if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
             return {
                 userId: 'ADMIN',
@@ -525,6 +549,17 @@ async function findOrLoadSession(sessionParam, caller = null) {
                     connectedNumber: match.session.connectedNumber || adminPhone
                 }
             };
+        }
+        // Check any connected admin slot (admin_2, admin_3, admin_4)
+        for (const aSlot of ['admin_2', 'admin_3', 'admin_4']) {
+            const aS = sessions.get(aSlot);
+            if (aS?.socket && aS?.status === 'connected') {
+                return {
+                    userId: aSlot,
+                    isAdmin: true,
+                    session: aS
+                };
+            }
         }
         if (CONFIG_ADMIN_DEFAULT_USER_ID) {
             const userS = sessions.get(CONFIG_ADMIN_DEFAULT_USER_ID);
@@ -667,7 +702,7 @@ async function restoreAllSessions() {
         const SessionAuth = require('./models/SessionAuth');
         const userIdsToRestore = new Set();
 
-        // 1. Find all users who have saved credentials in SessionAuth
+        // 1. Find all users / admin slots who have saved credentials in SessionAuth
         try {
             const credDocs = await SessionAuth.find({ id: { $regex: /_creds\.json$/ } }, { id: 1 }).lean();
             for (const doc of credDocs) {
@@ -678,20 +713,28 @@ async function restoreAllSessions() {
                         userIdsToRestore.add(uId);
                     }
                 }
+                const adminMatch = doc.id.match(/^(admin_\d+)_creds\.json$/);
+                if (adminMatch && adminMatch[1]) {
+                    userIdsToRestore.add(adminMatch[1]);
+                }
             }
         } catch (e) {
             console.warn('[UserSession] SessionAuth cred lookup warning:', e.message);
         }
 
-        // 2. Find all non-logged-out users in WhatsAppSession
+        // 2. Find all non-logged-out users / admin slots in WhatsAppSession
         try {
             const sessionsToRestore = await WhatsAppSession.find({ 
-                role: 'user', 
-                status: { $ne: 'logged_out' }
+                $or: [
+                    { role: 'user', status: { $ne: 'logged_out' } },
+                    { sessionId: { $regex: /^admin_\d+$/ }, status: { $ne: 'logged_out' } }
+                ]
             }).lean();
 
             for (const sessionRecord of sessionsToRestore) {
-                if (sessionRecord.ownerUserId && String(sessionRecord.ownerUserId).trim().toUpperCase() !== 'ADMIN') {
+                if (sessionRecord.sessionId && sessionRecord.sessionId.startsWith('admin_')) {
+                    userIdsToRestore.add(sessionRecord.sessionId);
+                } else if (sessionRecord.ownerUserId && String(sessionRecord.ownerUserId).trim().toUpperCase() !== 'ADMIN') {
                     userIdsToRestore.add(sessionRecord.ownerUserId);
                 }
             }
@@ -699,12 +742,12 @@ async function restoreAllSessions() {
             console.warn('[UserSession] WhatsAppSession query warning:', e.message);
         }
 
-        console.log(`[UserSession] Found ${userIdsToRestore.size} user sessions to restore & keep always-active`);
+        console.log(`[UserSession] Found ${userIdsToRestore.size} sessions (user + admin slots) to restore & keep always-active`);
         
         for (const userId of userIdsToRestore) {
-            console.log(`[UserSession] Auto-restoring session for user ${userId}`);
+            console.log(`[UserSession] Auto-restoring session for ${userId}`);
             await startUserSession(userId).catch(err => 
-                console.error(`[UserSession] Restore failed for user ${userId}:`, err.message)
+                console.error(`[UserSession] Restore failed for ${userId}:`, err.message)
             );
             // Stagger startups by 500ms to avoid spike
             await new Promise(r => setTimeout(r, 500));
@@ -733,17 +776,17 @@ function startUserSessionWatchdog() {
                     // Check if underlying websocket is alive (ws.OPEN === 1)
                     const wsState = session.socket?.ws?.readyState;
                     if (wsState !== undefined && wsState !== 1) {
-                        console.warn(`[Watchdog] User ${userId} websocket closed (state: ${wsState}), auto-reconnecting...`);
+                        console.warn(`[Watchdog] Session ${userId} websocket closed (state: ${wsState}), auto-reconnecting...`);
                         // Mark as reconnecting so startUserSession's connected-guard doesn't short-circuit
                         session.status = 'reconnecting';
                         session.connectingSince = null;
-                        startUserSession(userId).catch(e => console.error(`[Watchdog] User ${userId} reconnect err:`, e.message));
+                        startUserSession(userId).catch(e => console.error(`[Watchdog] Session ${userId} reconnect err:`, e.message));
                     }
                 } else if (session.status === 'connecting' && session.connectingSince && (Date.now() - session.connectingSince > 45000)) {
-                    console.warn(`[Watchdog] User ${userId} stuck connecting >45s, restarting...`);
+                    console.warn(`[Watchdog] Session ${userId} stuck connecting >45s, restarting...`);
                     // Clear connectingSince so startUserSession's 15s guard doesn't block the retry
                     session.connectingSince = null;
-                    startUserSession(userId).catch(e => console.error(`[Watchdog] User ${userId} restart err:`, e.message));
+                    startUserSession(userId).catch(e => console.error(`[Watchdog] Session ${userId} restart err:`, e.message));
                 }
             }
 
@@ -751,9 +794,12 @@ function startUserSessionWatchdog() {
             try {
                 const credDocs = await SessionAuth.find({ id: { $regex: /_creds\.json$/ } }, { id: 1 }).lean();
                 for (const doc of credDocs) {
+                    let uId = null;
                     const match = doc.id.match(/^user-(.+?)_creds\.json$/);
-                    if (match && match[1]) {
-                        const uId = match[1];
+                    if (match && match[1]) uId = match[1];
+                    const adminMatch = doc.id.match(/^(admin_\d+)_creds\.json$/);
+                    if (adminMatch && adminMatch[1]) uId = adminMatch[1];
+                    if (uId) {
                         if (String(uId).trim().toUpperCase() === 'ADMIN') continue;
                         const active = sessions.get(uId);
                         // Skip if session is active/connecting, or explicitly logged out — only revive disconnected/dropped sessions
@@ -765,10 +811,10 @@ function startUserSessionWatchdog() {
                             continue; // connected, connecting, waiting, or logged_out — skip
                         }
                         const dbRec = await WhatsAppSession.findOne({ 
-                            $or: [{ ownerUserId: uId }, { sessionId: `user-${uId}` }] 
+                            $or: [{ ownerUserId: uId }, { sessionId: uId.startsWith('admin_') ? uId : `user-${uId}` }] 
                         }).lean();
                         if (!dbRec || dbRec.status !== 'logged_out') {
-                            console.log(`[Watchdog] Reviving offline user session ${uId} to maintain 24/7 active status`);
+                            console.log(`[Watchdog] Reviving offline session ${uId} to maintain 24/7 active status`);
                             startUserSession(uId).catch(e => console.error(`[Watchdog] Revive err for ${uId}:`, e.message));
                         }
                     }
