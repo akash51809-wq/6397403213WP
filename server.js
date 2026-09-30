@@ -391,6 +391,9 @@ async function startServer() {
       if (typeof syncFn === 'function') {
         await syncFn();
       }
+    } catch (syncErr) {
+      console.warn('[Server] Data sync warning:', syncErr.message);
+    }
     try {
       const { mediaStorage } = require('./mediaStorage');
       await mediaStorage.syncLocalDiskToDatabase();
