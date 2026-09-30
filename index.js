@@ -1094,27 +1094,39 @@ let isSending = false;
 ========================================================= */
 
 function getActiveAdminSocket() {
-    if (connectionStatus === 'disconnected') {
+    if (connectionStatus !== 'connected') {
         return null;
     }
-    if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
-        return global.__waAdminSocket;
+    if (sock && typeof sock.sendMessage === 'function' && Boolean(sock.user?.id)) {
+        const wsState = sock.ws?.readyState;
+        if (wsState === undefined || wsState === 1) {
+            return sock;
+        }
     }
-    if (sock && connectionStatus === 'connected' && typeof sock.sendMessage === 'function' && Boolean(sock.user?.id)) {
-        return sock;
+    if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
+        const wsState = global.__waAdminSocket.ws?.readyState;
+        if (wsState === undefined || wsState === 1) {
+            return global.__waAdminSocket;
+        }
     }
     try {
         const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
         const adminPhone = CONFIG_ADMIN_PHONE;
         const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
         if (match?.session?.socket && match?.session?.status === 'connected' && Boolean(match.session.socket.user?.id)) {
-            global.__waAdminSocket = match.session.socket;
-            return match.session.socket;
+            const wsState = match.session.socket.ws?.readyState;
+            if (wsState === undefined || wsState === 1) {
+                global.__waAdminSocket = match.session.socket;
+                return match.session.socket;
+            }
         }
         const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
         if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
-            global.__waAdminSocket = userS.socket;
-            return userS.socket;
+            const wsState = userS.socket.ws?.readyState;
+            if (wsState === undefined || wsState === 1) {
+                global.__waAdminSocket = userS.socket;
+                return userS.socket;
+            }
         }
     } catch (e) {}
     return null;
@@ -1124,7 +1136,7 @@ app.get('/api/status', authRequired, adminRequired, async (req, res) => {
     let profilePicUrl = null;
     let profileName = null;
     const activeSock = getActiveAdminSocket();
-    const isConn = Boolean(activeSock && typeof activeSock.sendMessage === 'function');
+    const isConn = Boolean(activeSock && connectionStatus === 'connected');
 
     if (isConn && activeSock?.user) {
         profileName = activeSock.user.name || activeSock.user.notify || null;
@@ -1134,16 +1146,16 @@ app.get('/api/status', authRequired, adminRequired, async (req, res) => {
             }
         } catch {}
     }
-    const cleanNumber = (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : CONFIG_ADMIN_PHONE)).replace(/\D/g, '');
+    const cleanNumber = isConn ? (connectedNumber || (activeSock?.user?.id ? activeSock.user.id.split(':')[0].split('@')[0] : '')).replace(/\D/g, '') : null;
     const jid = cleanNumber ? `${cleanNumber}@s.whatsapp.net` : null;
 
     res.json({
-        status: isConn ? 'connected' : connectionStatus,
+        status: isConn ? 'connected' : (connectionStatus || 'disconnected'),
         number: cleanNumber,
         profileName: profileName || (cleanNumber ? `+${cleanNumber}` : 'Admin WhatsApp'),
         profilePicUrl: profilePicUrl,
         jid: jid,
-        lastConnected: lastConnectedTime || new Date().toISOString(),
+        lastConnected: isConn ? (lastConnectedTime || new Date().toISOString()) : null,
         device: 'Chrome (Windows) / WhatsApp Web',
         ready: isConn
     });
@@ -3914,5 +3926,7 @@ module.exports = {
     invalidateApiTokenCache,
     clearUserIncomingMessages,
     clearAdminWhatsAppCredentials,
-    getLatestQR: () => latestQR
+    getLatestQR: () => latestQR,
+    getConnectionStatus: () => connectionStatus,
+    getActiveAdminSocket
 };

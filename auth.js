@@ -950,33 +950,16 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
   try {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
-      console.log('[AdminSession] Status check for admin user');
-      let activeSock = global.__waAdminSocket;
-      let isConn = Boolean(activeSock && typeof activeSock.sendMessage === 'function');
-      if (!isConn) {
-        try {
-          const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = CONFIG_ADMIN_PHONE;
-          const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-          if (match?.session?.socket && match?.session?.status === 'connected') {
-            activeSock = match.session.socket;
-            global.__waAdminSocket = activeSock;
-            isConn = true;
-          } else {
-            const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
-            if (userS?.socket && userS?.status === 'connected') {
-              activeSock = userS.socket;
-              global.__waAdminSocket = activeSock;
-              isConn = true;
-            }
-          }
-        } catch (e) {}
-      }
-      const adminPhone = activeSock?.user?.id
-        ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
-        : CONFIG_ADMIN_PHONE;
+      const indexMod = require('./index');
+      const activeSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+      const connStatus = typeof indexMod.getConnectionStatus === 'function' ? indexMod.getConnectionStatus() : indexMod.connectionStatus;
+      const isConn = Boolean(activeSock && connStatus === 'connected' && Boolean(activeSock.user?.id) && (activeSock.ws?.readyState === 1 || activeSock.ws?.isOpen));
 
-      let profilePicUrl = activeSock?.profilePicUrl || null;
+      const adminPhone = isConn && activeSock?.user?.id
+        ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
+        : null;
+
+      let profilePicUrl = isConn ? (activeSock?.profilePicUrl || null) : null;
       if (isConn && !profilePicUrl && activeSock) {
         try {
           const adminJid = adminPhone ? `${adminPhone}@s.whatsapp.net` : activeSock.user?.id;
@@ -989,9 +972,9 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
 
       return res.json({
         success: true,
-        status: isConn ? 'connected' : 'waiting',
-        number: isConn && adminPhone ? adminPhone.slice(-10) : (adminPhone ? adminPhone.slice(-10) : null),
-        profileName: activeSock?.user?.name || (adminPhone ? `+${adminPhone}` : 'Admin WhatsApp'),
+        status: isConn ? 'connected' : (connStatus === 'qr' ? 'waiting' : (connStatus || 'disconnected')),
+        number: isConn && adminPhone ? adminPhone.slice(-10) : null,
+        profileName: isConn ? (activeSock?.user?.name || `+${adminPhone}`) : 'Admin WhatsApp',
         profilePicUrl: profilePicUrl,
         ready: isConn,
         lastConnected: null,
@@ -1046,9 +1029,13 @@ router.get('/api/user/whatsapp/qr', authRequired, async (req, res) => {
   try {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
-      const isConn = Boolean(global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function');
+      const indexMod = require('./index');
+      const activeSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+      const connStatus = typeof indexMod.getConnectionStatus === 'function' ? indexMod.getConnectionStatus() : indexMod.connectionStatus;
+      const isConn = Boolean(activeSock && connStatus === 'connected' && Boolean(activeSock.user?.id) && (activeSock.ws?.readyState === 1 || activeSock.ws?.isOpen));
+
       if (isConn) {
-        const num = (global.__waAdminSocket?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
+        const num = (activeSock?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
         return res.json({
           success: true,
           status: 'connected',
@@ -1057,7 +1044,6 @@ router.get('/api/user/whatsapp/qr', authRequired, async (req, res) => {
         });
       }
       try {
-        const indexMod = require('./index');
         const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
         if (latestQR) {
           const QRCode = require('qrcode');
@@ -1200,12 +1186,15 @@ router.get('/api/devices', authRequired, async (req, res) => {
       const slots = [];
       
       // Slot 1: Primary Admin Bot
-      let activeSock = global.__waAdminSocket;
-      let isConn1 = Boolean(activeSock && typeof activeSock.sendMessage === 'function');
-      let adminPhone1 = activeSock?.user?.id
+      const activeSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+      const connStatus = typeof indexMod.getConnectionStatus === 'function' ? indexMod.getConnectionStatus() : indexMod.connectionStatus;
+      const isConn1 = Boolean(activeSock && connStatus === 'connected' && Boolean(activeSock.user?.id) && (activeSock.ws?.readyState === 1 || activeSock.ws?.isOpen));
+
+      const adminPhone1 = isConn1 && activeSock?.user?.id
         ? String(activeSock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '')
-        : CONFIG_ADMIN_PHONE;
-      let profilePicUrl1 = activeSock?.profilePicUrl || null;
+        : null;
+
+      let profilePicUrl1 = isConn1 ? (activeSock?.profilePicUrl || null) : null;
       if (isConn1 && !profilePicUrl1 && activeSock) {
         try {
           const adminJid = adminPhone1 ? `${adminPhone1}@s.whatsapp.net` : activeSock.user?.id;
@@ -1226,9 +1215,9 @@ router.get('/api/devices', authRequired, async (req, res) => {
       }
       slots.push({
         slot: 1,
-        status: isConn1 ? 'connected' : (qr1 ? 'waiting' : 'disconnected'),
-        number: adminPhone1 ? adminPhone1.slice(-10) : null,
-        profileName: activeSock?.user?.name || (adminPhone1 ? `+${adminPhone1}` : 'Admin Device 01'),
+        status: isConn1 ? 'connected' : (qr1 ? 'waiting' : (connStatus === 'connecting' ? 'connecting' : 'disconnected')),
+        number: isConn1 && adminPhone1 ? adminPhone1.slice(-10) : null,
+        profileName: isConn1 ? (activeSock?.user?.name || `+${adminPhone1}`) : 'Admin Device 01',
         profilePicUrl: profilePicUrl1,
         qr: qr1,
         ready: isConn1,
@@ -1243,9 +1232,9 @@ router.get('/api/devices', authRequired, async (req, res) => {
           $or: [{ ownerUserId: slotKey }, { sessionId: slotKey }] 
         }).lean().catch(() => null);
 
-        const isConnSlot = session?.status === 'connected' && Boolean(session.socket);
-        const numSlot = session?.connectedNumber || dbS?.phone || null;
-        let dpSlot = session?.profilePicUrl || dbS?.profilePicUrl || null;
+        const isConnSlot = Boolean(session?.status === 'connected' && session?.socket && Boolean(session.socket.user?.id) && (session.socket.ws?.readyState === 1 || session.socket.ws?.isOpen));
+        const numSlot = isConnSlot ? (session?.connectedNumber || dbS?.phone || null) : null;
+        let dpSlot = isConnSlot ? (session?.profilePicUrl || dbS?.profilePicUrl || null) : null;
 
         if (isConnSlot && !dpSlot && session.socket) {
           try {
@@ -1267,9 +1256,9 @@ router.get('/api/devices', authRequired, async (req, res) => {
 
         slots.push({
           slot: sIdx,
-          status: isConnSlot ? 'connected' : (qrSlot ? 'waiting' : (session?.status || dbS?.status || 'disconnected')),
-          number: numSlot ? String(numSlot).replace(/\D/g, '').slice(-10) : null,
-          profileName: session?.profileName || (numSlot ? `+${numSlot}` : `Admin Device 0${sIdx}`),
+          status: isConnSlot ? 'connected' : (qrSlot ? 'waiting' : (session?.status === 'connecting' ? 'connecting' : 'disconnected')),
+          number: isConnSlot && numSlot ? String(numSlot).replace(/\D/g, '').slice(-10) : null,
+          profileName: isConnSlot ? (session?.profileName || (numSlot ? `+${numSlot}` : `Admin Device 0${sIdx}`)) : `Admin Device 0${sIdx}`,
           profilePicUrl: dpSlot,
           qr: qrSlot,
           ready: isConnSlot,
@@ -1320,9 +1309,9 @@ router.get('/api/devices', authRequired, async (req, res) => {
         $or: [{ ownerUserId: uKey }, { sessionId: `user-${uKey}` }] 
       }).lean().catch(() => null);
 
-      const isConn = session?.status === 'connected' && Boolean(session.socket);
-      const num = session?.connectedNumber || dbS?.phone || null;
-      let dp = session?.profilePicUrl || dbS?.profilePicUrl || null;
+      const isConn = Boolean(session?.status === 'connected' && session?.socket && Boolean(session.socket.user?.id) && (session.socket.ws?.readyState === 1 || session.socket.ws?.isOpen));
+      const num = isConn ? (session?.connectedNumber || dbS?.phone || null) : null;
+      let dp = isConn ? (session?.profilePicUrl || dbS?.profilePicUrl || null) : null;
 
       if (isConn && !dp && session.socket) {
         try {
@@ -1344,9 +1333,9 @@ router.get('/api/devices', authRequired, async (req, res) => {
 
       slots.push({
         slot: sIdx,
-        status: isConn ? 'connected' : (qr ? 'waiting' : (session?.status || dbS?.status || 'disconnected')),
-        number: num ? String(num).replace(/\D/g, '').slice(-10) : null,
-        profileName: session?.profileName || (num ? `+${num}` : (sIdx === 1 ? (user.username || 'WhatsApp Account') : `Device 0${sIdx}`)),
+        status: isConn ? 'connected' : (qr ? 'waiting' : (session?.status === 'connecting' ? 'connecting' : 'disconnected')),
+        number: isConn && num ? String(num).replace(/\D/g, '').slice(-10) : null,
+        profileName: isConn ? (session?.profileName || (num ? `+${num}` : (sIdx === 1 ? (user.username || 'WhatsApp Account') : `Device 0${sIdx}`))) : (sIdx === 1 ? (user.username || 'WhatsApp Account') : `Device 0${sIdx}`),
         profilePicUrl: dp,
         qr: qr,
         ready: isConn,
@@ -1510,9 +1499,12 @@ router.get('/api/devices/qr', authRequired, async (req, res) => {
 
     if (isRoleAdmin) {
       if (slot === 1) {
-        const isConn = Boolean(global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function');
+        const activeSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+        const connStatus = typeof indexMod.getConnectionStatus === 'function' ? indexMod.getConnectionStatus() : indexMod.connectionStatus;
+        const isConn = Boolean(activeSock && connStatus === 'connected' && Boolean(activeSock.user?.id) && (activeSock.ws?.readyState === 1 || activeSock.ws?.isOpen));
+
         if (isConn) {
-          const num = (global.__waAdminSocket?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
+          const num = (activeSock?.user?.id?.split(':')[0]?.replace(/\D/g, '') || null);
           return res.json({ success: true, slot: 1, status: 'connected', qr: null, connectedNumber: num });
         }
         const latestQR = typeof indexMod.getLatestQR === 'function' ? indexMod.getLatestQR() : indexMod.latestQR;
