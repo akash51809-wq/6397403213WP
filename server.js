@@ -116,26 +116,43 @@ app.disable('x-powered-by');
 app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
 // Strict CORS Configuration
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+const defaultAllowedOrigins = [
+  'https://local-whatsapp-eq4i.onrender.com',
+  'https://wp.easyrechargesolution.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173'
+];
+
+const envAllowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
 
+const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...envAllowedOrigins]));
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  const normalized = origin.trim().replace(/\/$/, '');
+  if (allowedOrigins.some(ao => ao.replace(/\/$/, '') === normalized)) {
+    return true;
+  }
+  if (process.env.RENDER_EXTERNAL_URL && normalized === process.env.RENDER_EXTERNAL_URL.trim().replace(/\/$/, '')) {
+    return true;
+  }
+  if (process.env.APP_URL && normalized === process.env.APP_URL.trim().replace(/\/$/, '')) {
+    return true;
+  }
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized)) {
+    return true;
+  }
+  return false;
+};
+
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (process.env.NODE_ENV !== 'production') {
-      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-        return callback(null, true);
-      }
-    }
-    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    if (process.env.RENDER_EXTERNAL_URL && origin === process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')) {
-      return callback(null, true);
-    }
-    if (process.env.APP_URL && origin === process.env.APP_URL.replace(/\/$/, '')) {
+    if (isAllowedOrigin(origin)) {
       return callback(null, true);
     }
     return callback(null, false);
@@ -274,11 +291,6 @@ app.post('/api/system/autoping/trigger', authRequired, adminRequired, async (req
   });
 });
 
-app.use('/api/settings/company', express.json({ limit: '15mb' }));
-app.use('/api/user/settings/auto-image', express.json({ limit: '15mb' }));
-app.use(authRouter);
-app.use(botApp);
-
 // 1. Serve static files from marketing website and React dashboard
 app.use(express.static(websitePath, { index: false }));
 app.use(express.static(distPath, { index: false }));
@@ -308,7 +320,13 @@ app.get(['/', '/index.html'], (req, res) => {
   return res.sendFile(fallbackDashboard);
 });
 
-// 4. React Dashboard SPA fallback (/login, /signup, /dashboard, /subscription, /admin, etc.)
+// 4. API and backend routers
+app.use('/api/settings/company', express.json({ limit: '15mb' }));
+app.use('/api/user/settings/auto-image', express.json({ limit: '15mb' }));
+app.use(authRouter);
+app.use(botApp);
+
+// 5. React Dashboard SPA fallback (/login, /signup, /dashboard, /subscription, /admin, etc.)
 app.use((req, res, next) => {
   if (
     req.method === 'GET' &&

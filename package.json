@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "build": "npm install && npm --prefix whatsapp-dashboard install --include=dev && npm --prefix whatsapp-dashboard run build",
-    "test": "node --test --test-reporter=spec tests/security_regression.test.js tests/inbox_isolation.test.js tests/qr_session_fix.test.js tests/frontend_routing.test.js tests/user_session_isolation.test.js tests/media_storage.test.js tests/error_handling.test.js",
+    "test": "node --test --test-reporter=spec tests/security_regression.test.js tests/inbox_isolation.test.js tests/qr_session_fix.test.js tests/frontend_routing.test.js tests/user_session_isolation.test.js tests/media_storage.test.js tests/error_handling.test.js tests/cors_assets_verification.test.js",
     "test:watch": "node --test --watch tests/*.test.js"
   },
   "dependencies": {
