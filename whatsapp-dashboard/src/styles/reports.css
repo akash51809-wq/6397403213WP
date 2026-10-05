@@ -245,10 +245,22 @@
   align-items: center;
 }
 
+.badge.read {
+  background: #e8f4fd !important;
+  color: #1d70b8 !important;
+  border: 1px solid #c2e0f9 !important;
+}
+
 .badge.delivered, .badge.success {
   background: #eaf8f0 !important;
   color: #148957 !important;
   border: 1px solid #c9ead8 !important;
+}
+
+.badge.sent {
+  background: #f0f7f4 !important;
+  color: #2b7a5a !important;
+  border: 1px solid #d1e7dd !important;
 }
 
 .badge.pending {

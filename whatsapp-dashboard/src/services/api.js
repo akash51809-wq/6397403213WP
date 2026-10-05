@@ -38,7 +38,11 @@ export const api = async (url, options = {}) => {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {})
   }
-  const res = await fetch(url, { ...options, headers })
+  const res = await fetch(url, {
+    credentials: 'include',
+    ...options,
+    headers
+  })
   const data = await res.json().catch(() => ({}))
   if (res.status === 401 && !url.includes('/api/auth/login')) {
     clearToken()

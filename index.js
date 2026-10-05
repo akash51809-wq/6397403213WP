@@ -14,6 +14,7 @@ const {
     authRequired, 
     adminRequired, 
     getUserPlanFeatures, 
+    checkAndIncrementDailyUsage,
     CONFIG_ADMIN_PHONE, 
     CONFIG_ADMIN_DEFAULT_USER_ID 
 } = require('./auth');
@@ -253,7 +254,15 @@ let connectionStatus = 'waiting';
 let connectedNumber = null;
 let lastConnectedTime = new Date().toISOString();
 
-let sendingQueue = [];
+// Per-user queue architecture for fair processing and DoS / OOM protection
+const userQueues = new Map(); // userId -> Array of jobs
+const userSendingState = new Map(); // userId -> boolean (isSending)
+const activeJobsMap = new Map(); // jobId -> job (for /api/send-status/:jobId)
+const MAX_USER_QUEUE_JOBS = 50; // max queued jobs per user
+const MAX_USER_QUEUED_RECIPIENTS = 500; // max queued recipient phone numbers per user
+const MAX_GLOBAL_QUEUED_JOBS = 500; // global RAM protection limit
+
+let sendingQueue = []; // backward-compatibility reference
 
 /* =========================================================
    REPORTS STORAGE (POSTGRESQL AS PRIMARY WITH JSON BACKUP)
@@ -2134,9 +2143,11 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
 
         const stats = {
             total: allUserReports.length,
+            read: allUserReports.filter(r => r.status === 'read').length,
+            delivered: allUserReports.filter(r => r.status === 'delivered').length,
             sent: allUserReports.filter(r => r.status === 'sent').length,
             failed: allUserReports.filter(r => r.status === 'failed').length,
-            pending: allUserReports.filter(r => r.status === 'pending').length,
+            pending: allUserReports.filter(r => r.status === 'pending' || r.status === 'queued').length,
             filtered: reports.length
         };
 
@@ -2711,6 +2722,15 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
             });
         }
 
+        // Daily plan limit enforcement
+        const quotaCheck = await checkAndIncrementDailyUsage(req.user, validNumbers.length);
+        if (!quotaCheck.allowed) {
+            return res.status(403).json({
+                success: false,
+                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
+            });
+        }
+
         // Anti-spam campaign limit check for standard users
         const maxAllowed = req.user.role === 'admin' ? 1000 : 50;
         if (validNumbers.length > maxAllowed) {
@@ -2719,6 +2739,36 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
                 message: `सुरक्षा सीमा: एक बार में अधिकतम ${maxAllowed} नंबरों पर ही मैसेज भेजा जा सकता है।`
             });
         }
+
+        // Queue RAM / DoS Protection Check
+        const uId = req.user.userId;
+        const currentUQueue = userQueues.get(uId) || [];
+        const queuedRecipientsCount = currentUQueue.reduce((acc, j) => acc + (j.numbers?.length || 0), 0);
+        
+        let globalQueueTotal = 0;
+        for (const q of userQueues.values()) {
+            globalQueueTotal += q.length;
+        }
+
+        if (globalQueueTotal >= MAX_GLOBAL_QUEUED_JOBS) {
+            return res.status(429).json({
+                success: false,
+                message: 'सिस्टम सर्वर वर्तमान में अत्यधिक व्यस्त है। कृपया कुछ क्षण बाद पुनः प्रयास करें।'
+            });
+        }
+
+        if (currentUQueue.length >= MAX_USER_QUEUE_JOBS || (queuedRecipientsCount + validNumbers.length) > MAX_USER_QUEUED_RECIPIENTS) {
+            return res.status(429).json({
+                success: false,
+                message: `आपकी मैसेज कतार (Queue) भर चुकी है (अधिकतम ${MAX_USER_QUEUED_RECIPIENTS} संदेश)। कृपया पिछले संदेश पूरे होने की प्रतीक्षा करें।`
+            });
+        }
+
+        // Extract customizable delay per user/job (fallback: 1500ms, min 500ms, max 10000ms)
+        const requestedDelay = Number(req.body.delay || req.body.delayMs || req.body.timerDelay);
+        const effectiveDelay = (!isNaN(requestedDelay) && requestedDelay >= 500 && requestedDelay <= 10000) 
+            ? requestedDelay 
+            : 1500;
 
         const job = {
             id: Date.now().toString(),
@@ -2730,18 +2780,28 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
             attachment: attachment || null,
             buttons: Array.isArray(buttons) ? buttons : [],
             invalidNumbers,
+            delayMs: effectiveDelay,
             results: [],
             createdAt: new Date().toISOString()
         };
 
+        if (!userQueues.has(uId)) {
+            userQueues.set(uId, []);
+        }
+        userQueues.get(uId).push(job);
+        activeJobsMap.set(job.id, job);
+
+        // Keep sendingQueue updated for backward compatibility inspection
         sendingQueue.push(job);
-        processQueue();
+
+        processUserQueue(uId);
 
         res.json({
             success: true,
             jobId: job.id,
             total: validNumbers.length,
             invalidNumbers,
+            delayMs: effectiveDelay,
             hasAttachment: Boolean(job.attachment),
             message: 'Message sending queue में डाल दिया गया है'
         });
@@ -2755,81 +2815,107 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
 });
 
 /* =========================================================
-   QUEUE PROCESSOR
+   PER-USER QUEUE PROCESSOR (FAIR MULTI-QUEUE ARCHITECTURE)
 ========================================================= */
 
-async function processQueue() {
-    if (isSending || sendingQueue.length === 0) {
+async function processUserQueue(userId) {
+    if (userSendingState.get(userId)) {
+        return;
+    }
+    const queue = userQueues.get(userId);
+    if (!queue || queue.length === 0) {
         return;
     }
 
-    const job = sendingQueue.shift();
-    isSending = true;
+    userSendingState.set(userId, true);
+    const job = queue.shift();
 
-    console.log(`\nStarting job: ${job.id} (Attachment: ${Boolean(job.attachment)}, Buttons: ${job.buttons?.length || 0})`);
+    // Also remove from backward-compatibility sendingQueue array
+    const sqIdx = sendingQueue.findIndex(j => j.id === job.id);
+    if (sqIdx >= 0) sendingQueue.splice(sqIdx, 1);
 
-    for (const number of job.numbers) {
-        const reportContent = job.attachment
-            ? `[${job.attachment.name || 'Attachment'}] ${job.message || ''}`.trim()
-            : job.message;
+    console.log(`\n[UserQueue ${userId}] Starting job: ${job.id} (Delay: ${job.delayMs}ms, Attachment: ${Boolean(job.attachment)}, Buttons: ${job.buttons?.length || 0})`);
 
-        const msgType = job.attachment ? (job.attachment.mimetype?.split('/')[0] || 'media') : 'text';
+    try {
+        for (const number of job.numbers) {
+            const reportContent = job.attachment
+                ? `[${job.attachment.name || 'Attachment'}] ${job.message || ''}`.trim()
+                : job.message;
 
-        try {
-            console.log(`Sending message to ${number}`);
-            await sendWhatsAppMessage(job.socket, number, job.message, job.attachment, job.buttons);
+            const msgType = job.attachment ? (job.attachment.mimetype?.split('/')[0] || 'media') : 'text';
 
-            job.results.push({
-                number,
-                status: 'sent',
-                message: 'Message sent successfully',
-                time: new Date().toISOString()
-            });
+            try {
+                console.log(`[UserQueue ${userId}] Sending message to ${number}`);
+                const sendRes = await sendWhatsAppMessage(job.socket, number, job.message, job.attachment, job.buttons);
+                const messageId = sendRes?.key?.id || (Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6));
 
-            appendMessageReport({
-                id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6),
-                date: new Date().toISOString(),
-                ownerUserId: job.ownerUserId,
-                from: job.fromNumber || connectedNumber || 'Admin',
-                to: number,
-                message: reportContent,
-                status: 'sent',
-                session: job.fromNumber || 'default',
-                type: msgType,
-                source: 'web'
-            });
+                job.results.push({
+                    number,
+                    status: 'sent',
+                    messageId,
+                    message: 'Message sent successfully',
+                    time: new Date().toISOString()
+                });
 
-            console.log(`✅ Sent: ${number}`);
-        } catch (error) {
-            job.results.push({
-                number,
-                status: 'failed',
-                message: error.message,
-                time: new Date().toISOString()
-            });
+                appendMessageReport({
+                    id: messageId,
+                    date: new Date().toISOString(),
+                    ownerUserId: job.ownerUserId,
+                    from: job.fromNumber || connectedNumber || 'Admin',
+                    to: number,
+                    message: reportContent,
+                    status: 'sent',
+                    session: job.fromNumber || 'default',
+                    type: msgType,
+                    source: 'web'
+                });
 
-            appendMessageReport({
-                id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6),
-                date: new Date().toISOString(),
-                ownerUserId: job.ownerUserId,
-                from: job.fromNumber || connectedNumber || 'Admin',
-                to: number,
-                message: reportContent,
-                status: 'failed',
-                session: job.fromNumber || 'default',
-                type: msgType,
-                source: 'web'
-            });
+                console.log(`✅ [UserQueue ${userId}] Sent: ${number} (ID: ${messageId})`);
+            } catch (error) {
+                job.results.push({
+                    number,
+                    status: 'failed',
+                    message: error.message,
+                    time: new Date().toISOString()
+                });
 
-            console.log(`❌ Failed: ${number}`, error.message);
+                appendMessageReport({
+                    id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6),
+                    date: new Date().toISOString(),
+                    ownerUserId: job.ownerUserId,
+                    from: job.fromNumber || connectedNumber || 'Admin',
+                    to: number,
+                    message: reportContent,
+                    status: 'failed',
+                    session: job.fromNumber || 'default',
+                    type: msgType,
+                    source: 'web'
+                });
+
+                console.log(`❌ [UserQueue ${userId}] Failed: ${number}`, error.message);
+            }
+
+            // Per-job custom user delay (defaults to 1500ms)
+            const waitTime = Number(job.delayMs) || 1500;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
         }
+    } finally {
+        console.log(`[UserQueue ${userId}] Job completed: ${job.id}`);
+        userSendingState.set(userId, false);
+        // Clean activeJobsMap after 10 minutes to prevent memory leak
+        setTimeout(() => activeJobsMap.delete(job.id), 10 * 60 * 1000);
 
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (queue.length > 0) {
+            setTimeout(() => processUserQueue(userId), 100);
+        }
     }
+}
 
-    console.log(`Job completed: ${job.id}`);
-    isSending = false;
-    setTimeout(processQueue, 100);
+// Backward-compatibility wrapper
+async function processQueue() {
+    for (const uId of userQueues.keys()) {
+        processUserQueue(uId);
+    }
 }
 
 /* =========================================================
@@ -2838,7 +2924,7 @@ async function processQueue() {
 
 app.get('/api/send-status/:jobId', authRequired, (req, res) => {
     const jobId = req.params.jobId;
-    const activeJob = sendingQueue.find(job => job.id === jobId);
+    const activeJob = activeJobsMap.get(jobId) || sendingQueue.find(job => job.id === jobId);
 
     if (activeJob) {
         if (req.user.role !== 'admin' && activeJob.ownerUserId !== req.user.userId) {
@@ -2846,14 +2932,14 @@ app.get('/api/send-status/:jobId', authRequired, (req, res) => {
         }
         return res.json({
             success: true,
-            status: 'queued',
+            status: activeJob.results?.length >= activeJob.numbers?.length ? 'completed' : 'processing',
             job: activeJob
         });
     }
 
     res.json({
         success: true,
-        status: 'processing_or_completed',
+        status: 'completed',
         jobId
     });
 });
@@ -3001,13 +3087,35 @@ app.post('/api/settings/webhook', authRequired, adminRequired, (req, res) => {
     }
 });
 
+// Dual-index token cache: Map of token -> entry, and Map of userId -> Set of tokens
 const apiTokenCache = new Map();
+const userTokenIndex = new Map(); // userId -> Set of cached tokens
 
-function invalidateApiTokenCache(token) {
-    if (token) {
-        apiTokenCache.delete(token);
-    } else {
+function invalidateApiTokenCache(identifier) {
+    if (!identifier) {
         apiTokenCache.clear();
+        userTokenIndex.clear();
+        return;
+    }
+    const idStr = String(identifier).trim();
+    // If it's a token directly cached
+    if (apiTokenCache.has(idStr)) {
+        const entry = apiTokenCache.get(idStr);
+        if (entry?.user?.userId) {
+            const uTokens = userTokenIndex.get(entry.user.userId);
+            if (uTokens) uTokens.delete(idStr);
+        }
+        apiTokenCache.delete(idStr);
+    }
+    // If it's a userId, delete all associated tokens
+    if (userTokenIndex.has(idStr)) {
+        const tokens = userTokenIndex.get(idStr);
+        if (tokens) {
+            for (const t of tokens) {
+                apiTokenCache.delete(t);
+            }
+        }
+        userTokenIndex.delete(idStr);
     }
 }
 
@@ -3058,7 +3166,7 @@ async function handleSendText(req, res) {
             jid = `${normalizedTo}@s.whatsapp.net`;
         }
 
-        // 1. Authenticate token (Check in-memory cache first for lightning fast response)
+        // 1. Authenticate token (Short 30-second TTL cache with instant revocation support)
         let user = null;
         let isGlobalAdmin = false;
         const now = Date.now();
@@ -3105,7 +3213,12 @@ async function handleSendText(req, res) {
             }
 
             if (user || isGlobalAdmin) {
-                apiTokenCache.set(token, { user, isGlobalAdmin, expiresAt: now + 30 * 60 * 1000 });
+                // Short 30-second TTL to avoid stale authorization
+                apiTokenCache.set(token, { user, isGlobalAdmin, expiresAt: now + 30 * 1000 });
+                if (user?.userId) {
+                    if (!userTokenIndex.has(user.userId)) userTokenIndex.set(user.userId, new Set());
+                    userTokenIndex.get(user.userId).add(token);
+                }
             }
         }
 
@@ -3118,7 +3231,7 @@ async function handleSendText(req, res) {
             return res.status(403).json({ status: false, message: "Forbidden: API access is currently paused or disabled in settings." });
         }
 
-        // Plan Feature Gating for regular user API tokens (403 Forbidden)
+        // Plan Feature Gating and Daily Limits for regular user API tokens (403 Forbidden)
         if (user && !isGlobalAdmin && user.role !== 'admin') {
             const features = await getUserPlanFeatures(user);
             if (features.isExpired) {
@@ -3129,6 +3242,14 @@ async function handleSendText(req, res) {
             }
             if (isGroup && !features.groupOption) {
                 return res.status(403).json({ status: false, message: "Forbidden: Group messaging is not enabled in your current plan." });
+            }
+
+            const dailyUsageCheck = await checkAndIncrementDailyUsage(user, 1);
+            if (!dailyUsageCheck.allowed) {
+                return res.status(403).json({ 
+                    status: false, 
+                    message: dailyUsageCheck.message || "Forbidden: Daily message limit exceeded for your plan today." 
+                });
             }
         }
 
@@ -3354,42 +3475,45 @@ async function handleSendText(req, res) {
             });
         }
 
-        const sendPromise = activeSocket.sendMessage(jid, messagePayload);
-        const timeoutPromise = new Promise((resolve) => {
-            setTimeout(() => resolve({ __fastTimeout: true }), 2200);
+        // Await genuine WhatsApp delivery acknowledgment from socket (15s timeout)
+        const sendTimeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('WhatsApp socket send timed out after 15000ms')), 15000);
         });
 
-        const raceResult = await Promise.race([sendPromise, timeoutPromise]);
+        let sendResult = null;
+        try {
+            sendResult = await Promise.race([
+                activeSocket.sendMessage(jid, messagePayload),
+                sendTimeoutPromise
+            ]);
+        } catch (sendErr) {
+            console.error('[API /send-text Socket Error]:', sendErr.message);
+            // Log failed message in report
+            appendMessageReport({
+                id: fallbackMsgId,
+                date: new Date().toISOString(),
+                from: fromNumber || activeSession10,
+                to: normalizedTo,
+                message: messageText,
+                status: 'failed',
+                session: activeSession10 || providedSession || 'default',
+                ownerUserId: ownerUserId,
+                type: messageType,
+                source: isGroup ? 'group' : 'api'
+            });
 
-        if (raceResult && raceResult.__fastTimeout) {
-            // Reached 2200ms without socket resolving (typical for large groups)
-            // Respond HTTP 200 immediately to prevent client software cURL 5-second timeout!
-            res.status(200).json({
-                status: true,
-                message: isGroup ? "Group message dispatched successfully" : "Message dispatched successfully",
+            return res.status(502).json({
+                status: false,
+                message: `WhatsApp message failed to deliver: ${sendErr.message}`,
                 data: {
                     to: normalizedTo,
                     recipientType: isGroup ? 'group' : 'user',
-                    message: messageText,
-                    session: activeSession10 || providedSession || null,
-                    autoImageAttached: autoImageAttached,
-                    messageId: fallbackMsgId
+                    session: activeSession10 || providedSession || null
                 }
             });
-
-            // Continue handling sendPromise in background
-            sendPromise.then((sendRes) => {
-                const finalMsgId = sendRes?.key?.id || fallbackMsgId;
-                handleBackgroundLogging(finalMsgId);
-                console.log(`[API /send-text Background] ${autoImageAttached ? 'Image+' : ''}Message delivered to ${normalizedTo} (${isGroup ? 'group' : 'user'}) via session ${activeSession10 || 'default'} (ID: ${finalMsgId})`);
-            }).catch((sendErr) => {
-                console.error('[API /send-text Background Error]:', sendErr.message);
-            });
-            return;
         }
 
-        // Socket resolved within 2200ms:
-        const actualMessageId = raceResult?.key?.id || fallbackMsgId;
+        const actualMessageId = sendResult?.key?.id || fallbackMsgId;
         res.status(200).json({
             status: true,
             message: isGroup ? "Group message sent successfully" : "Message sent successfully",
@@ -3713,6 +3837,10 @@ async function startBot(forceNew = false) {
                 sessionPhone: connectedNumber
             });
         });
+
+        sock.ev.on('messages.update', async (updates) => {
+            await handleMessageStatusUpdates(updates, 'admin');
+        });
     } catch (error) {
         console.error('WhatsApp startup error:', error);
         connectionStatus = 'disconnected';
@@ -3878,24 +4006,157 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
             }
 
             if (!isFromMe) {
-                try {
-                    const apiSet = getApiSettings();
-                    if (apiSet.webhookEnabled && apiSet.webhookUrl) {
-                        fetch(apiSet.webhookUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                event: 'incoming_message',
-                                data: record,
-                                timestamp: new Date().toISOString()
-                            })
-                        }).catch(wErr => console.error('[Webhook Dispatch Error]', wErr.message));
-                    }
-                } catch {}
+                dispatchWebhookWithRetry(record);
             }
         }
     } catch (err) {
         console.error('Error handling incoming message from socket:', err.message);
+    }
+}
+/* =========================================================
+   RESILIENT WEBHOOK DISPATCH (TIMEOUT, RETRY & CIRCUIT BREAKER)
+========================================================= */
+
+const webhookCircuitBreaker = {
+    failures: 0,
+    lastFailureTime: 0,
+    isOpen: false,
+    FAILURE_THRESHOLD: 5,
+    COOLDOWN_MS: 60 * 1000 // 60s cooldown
+};
+
+async function dispatchWebhookWithRetry(record) {
+    const apiSet = getApiSettings();
+    if (!apiSet.webhookEnabled || !apiSet.webhookUrl) return;
+
+    // Check circuit breaker status
+    const now = Date.now();
+    if (webhookCircuitBreaker.isOpen) {
+        if (now - webhookCircuitBreaker.lastFailureTime > webhookCircuitBreaker.COOLDOWN_MS) {
+            // Half-open: attempt recovery
+            webhookCircuitBreaker.isOpen = false;
+            webhookCircuitBreaker.failures = 0;
+            console.log('[Webhook CircuitBreaker] Resetting to half-open state for retry.');
+        } else {
+            console.warn('[Webhook CircuitBreaker] Webhook endpoint is failing, skipping dispatch to protect event loop.');
+            return;
+        }
+    }
+
+    const payload = JSON.stringify({
+        event: 'incoming_message',
+        data: record,
+        timestamp: new Date().toISOString()
+    });
+
+    const maxRetries = 3;
+    let attempt = 0;
+    let success = false;
+
+    while (attempt < maxRetries && !success) {
+        attempt++;
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+            const res = await fetch(apiSet.webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                success = true;
+                webhookCircuitBreaker.failures = 0;
+                webhookCircuitBreaker.isOpen = false;
+                break;
+            } else {
+                throw new Error(`HTTP status ${res.status}`);
+            }
+        } catch (err) {
+            console.warn(`[Webhook Dispatch] Attempt ${attempt}/${maxRetries} failed: ${err.message}`);
+            if (attempt < maxRetries) {
+                // Exponential backoff: 500ms, 1500ms, ...
+                await new Promise(r => setTimeout(r, attempt * 500));
+            } else {
+                webhookCircuitBreaker.failures++;
+                webhookCircuitBreaker.lastFailureTime = Date.now();
+                if (webhookCircuitBreaker.failures >= webhookCircuitBreaker.FAILURE_THRESHOLD) {
+                    webhookCircuitBreaker.isOpen = true;
+                    console.error('[Webhook CircuitBreaker] Consecutive failure threshold reached. Webhook circuit breaker OPEN.');
+                }
+            }
+        }
+    }
+}
+
+/* =========================================================
+   REAL-TIME MESSAGE STATUS UPDATES (DELIVERED / READ / FAILED)
+========================================================= */
+
+async function handleMessageStatusUpdates(updates, ownerUserId) {
+    if (!Array.isArray(updates) || updates.length === 0) return;
+
+    for (const update of updates) {
+        if (!update || !update.key || !update.key.id) continue;
+        const msgId = update.key.id;
+        const rawStatus = update.update?.status;
+
+        // Baileys status mapping:
+        // 0: ERROR / FAILED
+        // 1: PENDING
+        // 2: SERVER_ACK (sent)
+        // 3: DELIVERY_ACK (delivered)
+        // 4: READ
+        // 5: PLAYED (read for audio)
+        let newStatus = null;
+        if (rawStatus === 4 || rawStatus === 5 || rawStatus === 'read') {
+            newStatus = 'read';
+        } else if (rawStatus === 3 || rawStatus === 'delivery_ack' || rawStatus === 'delivered') {
+            newStatus = 'delivered';
+        } else if (rawStatus === 2 || rawStatus === 'server_ack' || rawStatus === 'sent') {
+            newStatus = 'sent';
+        } else if (rawStatus === 0 || rawStatus === 'error' || rawStatus === 'failed') {
+            newStatus = 'failed';
+        }
+
+        if (!newStatus) continue;
+
+        // 1. Update in-memory messageReportsCache
+        if (messageReportsCache && messageReportsCache.length > 0) {
+            const rIdx = messageReportsCache.findIndex(r => r.id === msgId);
+            if (rIdx >= 0) {
+                messageReportsCache[rIdx].status = newStatus;
+                messageReportsCache[rIdx].statusUpdatedAt = new Date().toISOString();
+            }
+        }
+
+        // 2. Update persistent MessageReport in PostgreSQL
+        if (dbConnection.readyState === 1) {
+            try {
+                await MessageReportModel.updateOne(
+                    { id: msgId },
+                    { 
+                        $set: { 
+                            status: newStatus,
+                            statusUpdatedAt: new Date()
+                        } 
+                    }
+                ).catch(() => {});
+            } catch (dbErr) {
+                console.warn('[handleMessageStatusUpdates] DB update warn:', dbErr.message);
+            }
+        }
+
+        // 3. Broadcast real-time SSE event to frontend
+        broadcastIncomingEvent('message_status_update', {
+            id: msgId,
+            status: newStatus,
+            updatedAt: new Date().toISOString(),
+            ownerUserId: ownerUserId || null
+        }, ownerUserId);
     }
 }
 
@@ -3935,6 +4196,10 @@ module.exports = {
     getMessageReports,
     normalizeIndianNumber,
     handleIncomingMessageFromSocket,
+    handleMessageStatusUpdates,
+    dispatchWebhookWithRetry,
+    userQueues,
+    processUserQueue,
     unwrapMessage,
     extractMessageText,
     saveContact,

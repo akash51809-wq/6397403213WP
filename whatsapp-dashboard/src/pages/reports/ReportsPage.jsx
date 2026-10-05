@@ -145,8 +145,12 @@ export function ReportsPage() {
       // 8. Status
       if (statusFilter !== 'all') {
         const st = String(r.status || 'delivered').toLowerCase()
-        if (statusFilter === 'delivered') {
-          if (st !== 'delivered' && st !== 'sent' && st !== 'read') return false
+        if (statusFilter === 'read') {
+          if (st !== 'read') return false
+        } else if (statusFilter === 'delivered') {
+          if (st !== 'delivered') return false
+        } else if (statusFilter === 'sent') {
+          if (st !== 'sent') return false
         } else if (statusFilter === 'pending') {
           if (st !== 'pending' && st !== 'queued') return false
         } else if (statusFilter === 'failed') {
@@ -231,8 +235,14 @@ export function ReportsPage() {
   // Status Badge Helper
   const getStatusBadge = (status) => {
     const s = String(status || 'delivered').toLowerCase()
-    if (s === 'delivered' || s === 'sent' || s === 'read') {
-      return <span className="badge success">Delivered</span>
+    if (s === 'read') {
+      return <span className="badge read">Read</span>
+    }
+    if (s === 'delivered') {
+      return <span className="badge delivered">Delivered</span>
+    }
+    if (s === 'sent') {
+      return <span className="badge sent">Sent</span>
     }
     if (s === 'failed' || s === 'error') {
       return <span className="badge failed">Failed</span>
@@ -521,7 +531,9 @@ export function ReportsPage() {
               }}
             >
               <option value="all">All Status</option>
+              <option value="read">Read</option>
               <option value="delivered">Delivered</option>
+              <option value="sent">Sent</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
             </select>

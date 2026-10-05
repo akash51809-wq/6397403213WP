@@ -332,6 +332,17 @@ async function authRequired(req, res, next) {
     const header = req.headers.authorization || '';
     let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 
+    if (!token && req.headers['x-api-token']) {
+      token = String(req.headers['x-api-token']).trim();
+    }
+    if (!token && req.cookies && req.cookies.wa_login) {
+      token = String(req.cookies.wa_login).trim();
+    }
+    if (!token && req.headers.cookie) {
+      const match = req.headers.cookie.match(/(?:^|;\s*)wa_login=([^;]+)/);
+      if (match) token = decodeURIComponent(match[1]).trim();
+    }
+
     // URL ?token= authentication is restricted strictly to SSE stream endpoints
     // where browser EventSource API cannot supply custom Authorization headers.
     const isSseEndpoint = req.path === '/api/incoming/events' || req.headers.accept?.includes('text/event-stream');
@@ -373,8 +384,34 @@ async function authRequired(req, res, next) {
   }
 }
 
+function sanitizeUser(u) {
+  if (!u) return null;
+  return {
+    userId: u.userId,
+    username: u.username,
+    name: u.name || u.username || 'User',
+    mobile: u.mobile || '',
+    email: u.email || '',
+    role: u.role || 'user',
+    plan: u.plan || 'Standard',
+    status: u.status || 'active',
+    planExpiresAt: u.planExpiresAt || null,
+    dailyMessageCount: u.dailyMessageCount || 0,
+    dailyCountDate: u.dailyCountDate || '',
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt
+  };
+}
+
+function getTodayDateIST() {
+  const d = new Date();
+  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const ist = new Date(utc + (330 * 60000));
+  return ist.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 async function getUserPlanFeatures(user) {
-  if (!user) return { active: false, isExpired: true, apiAccess: false, webAccess: false, bulkMsg: false, groupOption: false, scheduleMsg: false };
+  if (!user) return { active: false, isExpired: true, apiAccess: false, webAccess: false, bulkMsg: false, groupOption: false, scheduleMsg: false, dailyLimit: 0 };
   if (user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN') {
     return {
       active: true,
@@ -388,7 +425,36 @@ async function getUserPlanFeatures(user) {
     };
   }
 
-  const isExpired = user.planExpiresAt && new Date(user.planExpiresAt).getTime() < Date.now();
+  // Non-active or blocked users are NOT active (FAIL-CLOSED)
+  if (user.status && user.status !== 'active') {
+    return {
+      active: false,
+      isExpired: true,
+      apiAccess: false,
+      webAccess: false,
+      bulkMsg: false,
+      groupOption: false,
+      scheduleMsg: false,
+      dailyLimit: 0
+    };
+  }
+
+  // Strict check on planExpiresAt: if missing or past Date.now(), mark expired (FAIL-CLOSED)
+  const planExpiresTime = user.planExpiresAt ? new Date(user.planExpiresAt).getTime() : 0;
+  const isExpired = !planExpiresTime || planExpiresTime < Date.now();
+  if (isExpired) {
+    return {
+      active: false,
+      isExpired: true,
+      apiAccess: false,
+      webAccess: false,
+      bulkMsg: false,
+      groupOption: false,
+      scheduleMsg: false,
+      dailyLimit: 0
+    };
+  }
+
   const planName = String(user.plan || 'Demo Plan').trim();
   let planDoc = null;
   try {
@@ -404,15 +470,78 @@ async function getUserPlanFeatures(user) {
 
   const isDemo = planName.toLowerCase().includes('demo');
 
+  // Parse numeric daily limit
+  let dailyLimitNum = isDemo ? 100 : 500;
+  const rawLimit = planDoc?.dailyLimit || (isDemo ? '100/Day' : '500/Day');
+  if (typeof rawLimit === 'number') {
+    dailyLimitNum = rawLimit;
+  } else if (typeof rawLimit === 'string') {
+    const match = rawLimit.match(/\d+/);
+    if (match) dailyLimitNum = parseInt(match[0], 10);
+  }
+
   return {
-    active: !isExpired,
-    isExpired: Boolean(isExpired),
-    apiAccess: !isExpired, // Every active user has API access enabled so all users can generate and use their own API key
+    active: true,
+    isExpired: false,
+    apiAccess: planDoc ? planDoc.apiAccess !== false : true,
     webAccess: planDoc ? planDoc.webAccess !== false : true,
-    bulkMsg: planDoc ? Boolean(planDoc.bulkMsg) : true,
-    groupOption: planDoc ? Boolean(planDoc.groupOption) : true,
-    scheduleMsg: planDoc ? Boolean(planDoc.scheduleMsg) : true,
-    dailyLimit: planDoc?.dailyLimit || (isDemo ? '100/Day' : '500/Day')
+    bulkMsg: planDoc ? Boolean(planDoc.bulkMsg) : (isDemo ? false : true),
+    groupOption: planDoc ? Boolean(planDoc.groupOption) : (isDemo ? false : true),
+    scheduleMsg: planDoc ? Boolean(planDoc.scheduleMsg) : (isDemo ? false : true),
+    dailyLimit: dailyLimitNum,
+    rawDailyLimit: rawLimit
+  };
+}
+
+async function checkAndIncrementDailyUsage(user, count = 1) {
+  if (!user) return { allowed: false, message: 'User not found' };
+  if (user.status === 'blocked' || user.status === 'inactive') {
+    return { allowed: false, message: 'Account is blocked or inactive' };
+  }
+  if (user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN') {
+    return { allowed: true, current: 0, limit: 999999, remaining: 999999 };
+  }
+
+  const features = await getUserPlanFeatures(user);
+  if (features.isExpired) {
+    return {
+      allowed: false,
+      code: 'PLAN_EXPIRED',
+      message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+    };
+  }
+
+  const dailyLimit = typeof features.dailyLimit === 'number' ? features.dailyLimit : 500;
+  const today = getTodayDateIST();
+
+  if (user.dailyCountDate !== today) {
+    user.dailyMessageCount = 0;
+    user.dailyCountDate = today;
+  }
+
+  const currentCount = Number(user.dailyMessageCount || 0);
+  if (currentCount + count > dailyLimit) {
+    return {
+      allowed: false,
+      code: 'DAILY_LIMIT_EXCEEDED',
+      current: currentCount,
+      limit: dailyLimit,
+      message: `दैनिक सीमा समाप्त: आपके प्लान की दैनिक सीमा ${dailyLimit} संदेश प्रति दिन है। (उपयोग: ${currentCount}/${dailyLimit})`
+    };
+  }
+
+  user.dailyMessageCount = currentCount + count;
+  user.dailyCountDate = today;
+  user.updatedAt = new Date();
+  if (typeof user.save === 'function') {
+    await user.save().catch((e) => console.warn('[DailyUsage] Counter save warning:', e.message));
+  }
+
+  return {
+    allowed: true,
+    current: user.dailyMessageCount,
+    limit: dailyLimit,
+    remaining: Math.max(0, dailyLimit - user.dailyMessageCount)
   };
 }
 
@@ -451,6 +580,14 @@ router.post('/api/auth/login', loginLimiter, async (req, res) => {
       await user.save().catch(() => {});
     }
     const token = await createLoginToken(user);
+    const ttlMs = getSessionTokenTtlMs();
+    res.cookie('wa_login', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: ttlMs,
+      path: '/'
+    });
     res.json({ 
       success: true, 
       user: { 
@@ -861,11 +998,29 @@ router.put('/api/admin/users/:userId', authRequired, adminRequired, async (req, 
       user.planExpiresAt = expiresDate;
     }
     if (role && ['admin', 'user'].includes(role)) user.role = role;
-    if (status && ['active', 'inactive', 'blocked'].includes(status)) user.status = status;
+    if (status && ['active', 'inactive', 'blocked'].includes(status)) {
+      user.status = status;
+      if (status === 'blocked' || status === 'inactive') {
+        user.sessions = [];
+        try {
+          const { stopUserSession } = require('./userSessions');
+          if (typeof stopUserSession === 'function') {
+            stopUserSession(user.userId).catch(() => {});
+          }
+        } catch (e) {}
+        try {
+          const { invalidateApiTokenCache } = require('./index');
+          if (typeof invalidateApiTokenCache === 'function') {
+            invalidateApiTokenCache(user.userId);
+            if (user.apiToken) invalidateApiTokenCache(user.apiToken);
+          }
+        } catch (e) {}
+      }
+    }
     user.updatedAt = new Date();
     await user.save();
 
-    res.json({ success: true, message: 'यूजर प्रोफाइल सफलतापूर्वक अपडेट हो गया।', user });
+    res.json({ success: true, message: 'यूजर प्रोफाइल सफलतापूर्वक अपडेट हो गया।', user: sanitizeUser(user) });
   } catch (err) {
     console.error('Admin update user error:', err);
     res.status(500).json({ success: false, message: err.message || 'User update failed' });
@@ -883,6 +1038,22 @@ router.post('/api/admin/users/:userId/toggle-status', authRequired, adminRequire
 
     const newStatus = user.status === 'active' ? 'inactive' : 'active';
     user.status = newStatus;
+    if (newStatus !== 'active') {
+      user.sessions = [];
+      try {
+        const { stopUserSession } = require('./userSessions');
+        if (typeof stopUserSession === 'function') {
+          stopUserSession(user.userId).catch(() => {});
+        }
+      } catch (e) {}
+      try {
+        const { invalidateApiTokenCache } = require('./index');
+        if (typeof invalidateApiTokenCache === 'function') {
+          invalidateApiTokenCache(user.userId);
+          if (user.apiToken) invalidateApiTokenCache(user.apiToken);
+        }
+      } catch (e) {}
+    }
     user.updatedAt = new Date();
     await user.save();
 
@@ -1953,6 +2124,7 @@ router.get('/api/user/api-token', authRequired, async (req, res) => {
 
 router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => {
   try {
+    const oldToken = req.user.apiToken;
     const tokenData = generateApiTokenData();
     req.user.apiToken = tokenData.rawToken;
     req.user.apiTokenHash = tokenData.hash;
@@ -1961,11 +2133,20 @@ router.post('/api/user/api-token/regenerate', authRequired, async (req, res) => 
     req.user.updatedAt = new Date();
     await req.user.save();
 
+    // Immediately evict old token from memory cache so old token stops working instantly
+    try {
+      const { invalidateApiTokenCache } = require('./index');
+      if (typeof invalidateApiTokenCache === 'function') {
+        invalidateApiTokenCache(req.user.userId);
+        if (oldToken) invalidateApiTokenCache(oldToken);
+      }
+    } catch (e) {}
+
     res.json({
       success: true,
       token: tokenData.rawToken,
       isMasked: false,
-      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है। इसे सुरक्षित स्थान पर सहेजें।'
+      message: 'नया API Token सफलतापूर्वक जनरेट हो गया है। पुराना टोकन तुरंत अमान्य कर दिया गया है।'
     });
   } catch (error) {
     console.error('Regenerate API token error:', error);
@@ -2083,9 +2264,12 @@ router.get('/api/user/plan-status', authRequired, async (req, res) => {
 
 router.post('/api/auth/logout', authRequired, async (req, res) => {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-  req.user.sessions = (req.user.sessions || []).filter(s => s.tokenHash !== tokenHash(token));
+  if (token) {
+    req.user.sessions = (req.user.sessions || []).filter(s => s.tokenHash !== tokenHash(token));
+  }
   await req.user.save();
-  res.json({ success: true });
+  res.clearCookie('wa_login', { httpOnly: true, sameSite: 'lax', path: '/' });
+  res.json({ success: true, message: 'सफलतापूर्वक लॉगआउट हो गया।' });
 });
 
 async function recordAdminWhatsAppSession(info = {}) {
@@ -3115,6 +3299,9 @@ module.exports = {
   ensureAdminUser, 
   recordAdminWhatsAppSession, 
   getUserPlanFeatures,
+  checkAndIncrementDailyUsage,
+  sanitizeUser,
+  getTodayDateIST,
   getDemoSettings,
   getSessionTokenTtlMs,
   generateApiTokenData,

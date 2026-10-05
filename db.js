@@ -145,6 +145,8 @@ async function initTables(pool) {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenPrefix" VARCHAR(20);`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "apiTokenLast4" VARCHAR(10);`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "email" TEXT DEFAULT '';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "dailyMessageCount" INTEGER DEFAULT 0;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "dailyCountDate" VARCHAR(10) DEFAULT '';`,
     `CREATE INDEX IF NOT EXISTS idx_users_username ON users("username");`,
     `CREATE INDEX IF NOT EXISTS idx_users_email ON users("email");`,
     `CREATE INDEX IF NOT EXISTS idx_users_mobile ON users("mobile");`,
@@ -360,6 +362,7 @@ async function initTables(pool) {
     `CREATE INDEX IF NOT EXISTS idx_reports_ownerUserId ON message_reports("ownerUserId");`,
     `CREATE INDEX IF NOT EXISTS idx_reports_status ON message_reports("status");`,
     `CREATE INDEX IF NOT EXISTS idx_reports_createdAt ON message_reports("createdAt");`,
+    `ALTER TABLE message_reports ADD COLUMN IF NOT EXISTS "statusUpdatedAt" TIMESTAMPTZ;`,
 
     // 12. app_settings (general persistent configuration for GDrive, Gmail, Gemini, EmailTemplate, WaQueue, etc.)
     `CREATE TABLE IF NOT EXISTS app_settings (
@@ -1179,7 +1182,7 @@ const MessageReport = createModel('message_reports', 'id', {
   recipient: ''
 }, [], [
   'id', 'date', 'ownerUserId', 'from', 'to', 'message', 'status', 'session',
-  'type', 'source', 'recipient', 'createdAt'
+  'type', 'source', 'recipient', 'createdAt', 'statusUpdatedAt'
 ]);
 
 const AppSettings = createModel('app_settings', 'key', {

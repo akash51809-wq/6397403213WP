@@ -25,6 +25,25 @@ async function startUserSession(userId) {
         };
     }
 
+    // ── Check User Account Status: Blocked/Inactive accounts cannot start session ──
+    if (!isAdminSlot) {
+        try {
+            const { User } = require('./auth');
+            const userDoc = await User.findOne({ userId: normalizedUserId }).lean();
+            if (userDoc && (userDoc.status === 'blocked' || userDoc.status === 'inactive')) {
+                console.warn(`[UserSession] BLOCKED socket startup for blocked/inactive user ${normalizedUserId}`);
+                return {
+                    status: 'blocked',
+                    error: 'Account is blocked or inactive. WhatsApp session cannot be started.',
+                    qr: null,
+                    connectedNumber: null
+                };
+            }
+        } catch (uErr) {
+            console.warn(`[UserSession] User status check warning:`, uErr.message);
+        }
+    }
+
     // ── Concurrency guard: prevent duplicate socket creation ──────────────────
     if (startingSessionIds.has(normalizedUserId)) {
         // Another call is already initialising this session right now — return current state
@@ -350,6 +369,17 @@ async function startUserSession(userId) {
             }
         } catch (err) {
             console.warn(`[UserSession ${userId}] messages.upsert warn:`, err.message);
+        }
+    });
+
+    socket.ev.on('messages.update', async (updates) => {
+        try {
+            const indexModule = require('./index');
+            if (indexModule && typeof indexModule.handleMessageStatusUpdates === 'function') {
+                indexModule.handleMessageStatusUpdates(updates, userId);
+            }
+        } catch (err) {
+            console.warn(`[UserSession ${userId}] messages.update warn:`, err.message);
         }
     });
 
@@ -740,15 +770,56 @@ async function restoreAllSessions() {
             console.warn('[UserSession] WhatsAppSession query warning:', e.message);
         }
 
-        console.log(`[UserSession] Found ${userIdsToRestore.size} sessions (user + admin slots) to restore & keep always-active`);
+        // 3. Filter by User table: Blocked / inactive users must NEVER be restored!
+        // Expired plan policy: If plan expired > 7 days ago (grace period ended), pause session to save memory!
+        const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const eligibleUserIds = [];
+
+        try {
+            const { User } = require('./auth');
+            const allUsers = await User.find({}).lean();
+            const userStatusMap = new Map();
+            for (const u of allUsers) {
+                userStatusMap.set(u.userId, u);
+            }
+
+            for (const uId of userIdsToRestore) {
+                if (String(uId).startsWith('admin_')) {
+                    eligibleUserIds.push(uId);
+                    continue;
+                }
+                const uDoc = userStatusMap.get(uId);
+                if (!uDoc) continue;
+                if (uDoc.status === 'blocked' || uDoc.status === 'inactive') {
+                    console.log(`[UserSession] Skipping restore for blocked/inactive user ${uId}`);
+                    continue;
+                }
+                // Check plan expiration grace period (7 days)
+                if (uDoc.role !== 'admin' && uDoc.planExpiresAt) {
+                    const expTime = new Date(uDoc.planExpiresAt).getTime();
+                    if (!isNaN(expTime) && (now - expTime > GRACE_PERIOD_MS)) {
+                        console.log(`[UserSession] Skipping restore for user ${uId} (Plan expired > 7 days ago, auto-paused)`);
+                        continue;
+                    }
+                }
+                eligibleUserIds.push(uId);
+            }
+        } catch (filterErr) {
+            console.warn('[UserSession] Filter active users warning:', filterErr.message);
+            // Fallback: keep non-admin user IDs if DB check fails
+            for (const uId of userIdsToRestore) eligibleUserIds.push(uId);
+        }
+
+        console.log(`[UserSession] Found ${eligibleUserIds.length} eligible active sessions to restore & keep active`);
         
-        for (const userId of userIdsToRestore) {
+        // Stagger startups by 1500ms to avoid memory and CPU spike
+        for (const userId of eligibleUserIds) {
             console.log(`[UserSession] Auto-restoring session for ${userId}`);
             await startUserSession(userId).catch(err => 
                 console.error(`[UserSession] Restore failed for ${userId}:`, err.message)
             );
-            // Stagger startups by 500ms to avoid spike
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1500));
         }
     } catch (error) {
         console.error('[UserSession] Error restoring sessions:', error);
@@ -812,6 +883,22 @@ function startUserSessionWatchdog() {
                             $or: [{ ownerUserId: uId }, { sessionId: uId.startsWith('admin_') ? uId : `user-${uId}` }] 
                         }).lean();
                         if (!dbRec || dbRec.status !== 'logged_out') {
+                            if (!uId.startsWith('admin_')) {
+                                try {
+                                    const { User } = require('./auth');
+                                    const uDoc = await User.findOne({ userId: uId }).lean();
+                                    if (uDoc && (uDoc.status === 'blocked' || uDoc.status === 'inactive')) {
+                                        continue;
+                                    }
+                                    if (uDoc && uDoc.role !== 'admin' && uDoc.planExpiresAt) {
+                                        const expTime = new Date(uDoc.planExpiresAt).getTime();
+                                        const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+                                        if (!isNaN(expTime) && (Date.now() - expTime > GRACE_PERIOD_MS)) {
+                                            continue;
+                                        }
+                                    }
+                                } catch (checkErr) {}
+                            }
                             console.log(`[Watchdog] Reviving offline session ${uId} to maintain 24/7 active status`);
                             startUserSession(uId).catch(e => console.error(`[Watchdog] Revive err for ${uId}:`, e.message));
                         }
