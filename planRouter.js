@@ -133,12 +133,13 @@ router.post('/api/plans/mobile/query', async (req, res) => {
 router.post(['/api/lookup/operator', '/api/lookup/full'], async (req, res) => {
   const t0 = performance.now();
   try {
-    const { mobile, userMobile } = req.body;
-    if (!mobile || String(mobile).trim().length < 10) {
+    const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
+    const { userMobile } = req.body;
+    if (!rawMobile || String(rawMobile).trim().length < 10) {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
-    const cleanMobile = String(mobile).trim().replace(/\D/g, '').slice(-10);
+    const cleanMobile = String(rawMobile).trim().replace(/\D/g, '').slice(-10);
 
     let hitInfo = null;
     if (userMobile) {
@@ -180,12 +181,14 @@ router.post(['/api/lookup/operator', '/api/lookup/full'], async (req, res) => {
 router.post('/api/roffer/query', async (req, res) => {
   const t0 = performance.now();
   try {
-    const { mobile, operatorCode, userMobile } = req.body;
-    if (!mobile || String(mobile).trim().length < 10) {
+    const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
+    const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
+    const { userMobile } = req.body;
+    if (!rawMobile || String(rawMobile).trim().length < 10) {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
-    const cleanMobile = String(mobile).trim().replace(/\D/g, '').slice(-10);
+    const cleanMobile = String(rawMobile).trim().replace(/\D/g, '').slice(-10);
 
     let hitInfo = null;
     if (userMobile) {
@@ -210,12 +213,14 @@ router.post('/api/roffer/query', async (req, res) => {
 router.post('/api/dth/query', async (req, res) => {
   const t0 = performance.now();
   try {
-    const { dthNumber, operatorCode, userMobile } = req.body;
-    if (!dthNumber || String(dthNumber).trim().length < 8) {
+    const rawNumber = req.body.dthNumber || req.body.mobile || req.body.number;
+    const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
+    const { userMobile } = req.body;
+    if (!rawNumber || String(rawNumber).trim().length < 8) {
       return res.status(400).json({ success: false, message: 'Valid DTH VC / Subscriber ID is required.' });
     }
 
-    const cleanNumber = String(dthNumber).trim().replace(/\D/g, '');
+    const cleanNumber = String(rawNumber).trim().replace(/\D/g, '');
 
     let hitInfo = null;
     if (userMobile) {
@@ -240,12 +245,14 @@ router.post('/api/dth/query', async (req, res) => {
 router.post('/api/recharge/query', async (req, res) => {
   const t0 = performance.now();
   try {
-    const { mobile, operatorCode, userMobile } = req.body;
-    if (!mobile || String(mobile).trim().length < 8) {
+    const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
+    const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
+    const { userMobile } = req.body;
+    if (!rawMobile || String(rawMobile).trim().length < 8) {
       return res.status(400).json({ success: false, message: 'Valid Mobile or VC number is required.' });
     }
 
-    const cleanNumber = String(mobile).trim().replace(/\D/g, '');
+    const cleanNumber = String(rawMobile).trim().replace(/\D/g, '');
 
     let hitInfo = null;
     if (userMobile) {

@@ -1,10 +1,17 @@
-const { chromium } = require('playwright');
+let chromium = null;
+try {
+  chromium = require('playwright').chromium;
+} catch (e) {
+  // Playwright is optional or not installed in this environment (e.g. Render web service)
+}
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const logger = require('./services/logger');
 const ezytmAccountService = require('./services/ezytmAccountService');
 const operatorCacheService = require('./services/operatorCacheService');
+const isLiveBrowserEnabled = process.env.ENABLE_LIVE_BROWSER === 'true';
+const seriesEngine = require('./services/seriesEngine');
 
 const CACHE_FILE = path.join(__dirname, 'data', 'operator_cache.json');
 
@@ -75,6 +82,11 @@ class EzytmAccountSession {
    * Initialize and log in this specific account session
    */
   async init(retries = 3) {
+    if (!isLiveBrowserEnabled || !chromium) {
+      this.sessionState = 'DISABLED';
+      return null;
+    }
+
     if (this.isHealthy()) {
       return this.page;
     }
@@ -389,6 +401,10 @@ class EzytmSessionPool {
    * Get or launch the shared Playwright Chromium Browser process
    */
   async getBrowser() {
+    if (!isLiveBrowserEnabled || !chromium) {
+      throw new Error('Live browser scraping is disabled or Playwright is not available.');
+    }
+
     if (this.sharedBrowser && this.sharedBrowser.isConnected()) {
       return this.sharedBrowser;
     }
@@ -462,6 +478,10 @@ class EzytmSessionPool {
    * Start the multi-account session pool (background non-blocking)
    */
   async startPool() {
+    if (!isLiveBrowserEnabled || !chromium) {
+      logger.info('Live browser scraping is disabled or Playwright not installed. Browser pool will remain dormant; operations will use series engine & cached data.');
+      return;
+    }
     if (this.isStarting || this.isStarted) return;
     this.isStarting = true;
 
@@ -545,6 +565,10 @@ class EzytmSessionPool {
    * 4. Auto-fallback / on-demand initialization
    */
   async acquireBestSession() {
+    if (!isLiveBrowserEnabled || !chromium) {
+      throw new Error('Live browser scraping is disabled or Playwright is not available. Falling back to cached/fallback telecom data.');
+    }
+
     const activeSessions = Array.from(this.sessions.values()).filter(
       s => s.status === 'Active' && s.sessionState !== 'CLOSED'
     );
@@ -632,6 +656,25 @@ class EzytmSessionPool {
         cached: true,
         responseTime: `${elapsedMs} ms`
       };
+    }
+
+    if (!isLiveBrowserEnabled || !chromium) {
+      const resolved = seriesEngine.resolveMobile(cleanMobile);
+      const elapsedMs = (performance.now() - t0).toFixed(3);
+      const result = {
+        mobile: cleanMobile,
+        operator: resolved.operator || 'Unknown',
+        circle: resolved.circle || 'Unknown',
+        opCode: resolved.opCode || '',
+        circleCode: resolved.circleCode || '',
+        cached: false,
+        engine: 'seriesEngine',
+        responseTime: `${elapsedMs} ms`
+      };
+      if (result.operator !== 'Unknown') {
+        await operatorCacheService.setOperator(cleanMobile, result);
+      }
+      return result;
     }
 
     return await this.dispatchTask(async (page) => {
@@ -922,7 +965,9 @@ class EzytmSessionPool {
 
 const ezytmSessionPool = new EzytmSessionPool();
 
-// Pre-warm pool in background asynchronously on module load
-ezytmSessionPool.startPool().catch(err => logger.warn('Session pool startup notice', { error: err.message }));
+// Pre-warm pool only if explicitly enabled in environment
+if (process.env.AUTO_START_BROWSER_POOL === 'true') {
+  ezytmSessionPool.startPool().catch(err => logger.warn('Session pool startup notice', { error: err.message }));
+}
 
 module.exports = ezytmSessionPool;
