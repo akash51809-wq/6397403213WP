@@ -9,32 +9,32 @@ const SERVICES = [
     label: 'WhatsApp',
     icon: '💬',
     color: '#10b981',
-    lightBg: 'rgba(16, 185, 129, 0.1)',
-    desc: 'High speed WhatsApp automation, Baileys connection, bulk campaigns & group tools'
+    softBg: '#f0fdf4',
+    desc: 'High-speed WhatsApp automation, Baileys session, bulk broadcast campaigns & group messaging.'
   },
   {
     id: 'sms',
     label: 'SMS Gateway',
     icon: '📱',
     color: '#0284c7',
-    lightBg: 'rgba(2, 132, 199, 0.1)',
-    desc: 'Turn Android devices into dedicated SMS gateways with Dual-SIM routing & fast OTP'
+    softBg: '#f0f9ff',
+    desc: 'Turn Android devices into dedicated SMS gateways with Dual-SIM routing & fast OTP delivery.'
   },
   {
     id: 'plan',
     label: 'Plan API',
     icon: '⚡',
     color: '#ea580c',
-    lightBg: 'rgba(234, 88, 12, 0.1)',
-    desc: 'Live prepaid/postpaid recharge plans, special R-offers & DTH operator tariff API'
+    softBg: '#fff7ed',
+    desc: 'Live prepaid/postpaid mobile recharge plans, special R-offers & DTH operator tariff API.'
   },
   {
     id: 'gst',
     label: 'GST Portal',
     icon: '🏛️',
     color: '#7c3aed',
-    lightBg: 'rgba(124, 58, 237, 0.1)',
-    desc: 'Instant GSTIN verification, legal profile, GSTR-1 & 3B return history & e-Invoice status'
+    softBg: '#faf5ff',
+    desc: 'Instant GSTIN taxpayer verification, legal profile, GSTR-1 & 3B return history & e-Invoice status.'
   }
 ]
 
@@ -66,7 +66,7 @@ const DEFAULT_PLANS = {
       deviceLimit: '1 Free + 2 Add-ons',
       badgeText: '⭐ Most Popular',
       isPopular: true,
-      description: 'Send messages to contacts and groups. Includes bulk campaigns.',
+      description: 'Send messages to contacts and groups. Includes bulk broadcast campaigns.',
       features: [
         '1,000 Messages / Day Quota',
         '1 Device Free (+2 Add-ons ₹49/ea)',
@@ -332,50 +332,110 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
       return p.features
     }
     const f = []
-    if (p.dailyLimit) f.push(`Daily Limit: ${p.dailyLimit}`)
+    if (p.dailyLimit) f.push(`Daily Quota: ${p.dailyLimit}`)
     if (p.validity) f.push(`Validity: ${p.validity}`)
     if (p.deviceLimit) f.push(`Device Limit: ${p.deviceLimit}`)
-    if (p.apiAccess) f.push('API & Developer Access Included')
+    if (p.apiAccess) f.push('REST API & Webhook Access')
     if (p.webAccess) f.push('Web Dashboard Access Included')
     if (p.bulkMsg) f.push('Bulk Message Campaigns')
     if (p.groupOption) f.push('Group Messaging Option')
-    if (p.scheduleMsg) f.push('Schedule Messages')
+    if (p.scheduleMsg) f.push('Scheduled Queue Sending')
     if (p.ipSecurity) f.push('IP Whitelist Security')
     return f.length > 0 ? f : ['All Core Features Included', 'Standard Support SLA']
   }
 
   return (
-    <section className="user-plans-page">
+    <section className="user-plans-page" style={{ color: '#0f172a' }}>
+      <style>{`
+        .service-tabs-bar {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+          width: 100%;
+          margin-bottom: 18px;
+        }
+        @media (max-width: 820px) {
+          .service-tabs-bar {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+        @media (max-width: 480px) {
+          .service-tabs-bar {
+            grid-template-columns: 1fr;
+          }
+        }
+        .pricing-cards-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 18px;
+          width: 100%;
+        }
+        .user-plans-page .nav-action-btn {
+          cursor: pointer;
+          transition: all 0.18s ease;
+        }
+        .user-plans-page .nav-action-btn:hover {
+          transform: translateY(-1px);
+        }
+      `}</style>
+
       {!isPreview && (
         <>
-          {/* Header & Subtitle */}
-          <div className="page-header d-flex flex-wrap align-items-center justify-content-between mb-3">
+          {/* Header & Section Title */}
+          <div className="d-flex flex-wrap align-items-center justify-content-between mb-3" style={{ gap: 12 }}>
             <div>
-              <h1 className="page-title mb-1" style={{ fontSize: 22, fontWeight: 800, color: 'inherit' }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px 0' }}>
                 💎 Subscription Plans &amp; Pricing
               </h1>
-              <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+              <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
                 Choose the best package for your business across WhatsApp, SMS, Plan API, and GST services.
               </p>
             </div>
-            <div className="d-flex align-items-center gap-2 mt-2 mt-md-0" style={{ gap: 10 }}>
+            <div className="d-flex align-items-center" style={{ gap: 10 }}>
               <button 
                 type="button" 
-                className={`btn ${activeTab === 'plans' ? 'btn-primary' : 'btn-outline-primary'}`}
+                className="nav-action-btn"
                 onClick={() => setActiveTab('plans')}
-                style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 600, fontSize: 13 }}
+                style={{ 
+                  borderRadius: 10, 
+                  padding: '8px 16px', 
+                  fontWeight: 700, 
+                  fontSize: 13,
+                  border: activeTab === 'plans' ? '1px solid #16a765' : '1px solid #cbd5e1',
+                  background: activeTab === 'plans' ? '#16a765' : '#ffffff',
+                  color: activeTab === 'plans' ? '#ffffff' : '#334155',
+                  boxShadow: activeTab === 'plans' ? '0 3px 10px rgba(22,167,101,0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
+                }}
               >
                 🏷️ Pricing Plans
               </button>
               <button 
                 type="button" 
-                className={`btn ${activeTab === 'requests' ? 'btn-primary' : 'btn-outline-primary'}`}
+                className="nav-action-btn"
                 onClick={() => setActiveTab('requests')}
-                style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 600, fontSize: 13, position: 'relative' }}
+                style={{ 
+                  borderRadius: 10, 
+                  padding: '8px 16px', 
+                  fontWeight: 700, 
+                  fontSize: 13, 
+                  position: 'relative',
+                  border: activeTab === 'requests' ? '1px solid #16a765' : '1px solid #cbd5e1',
+                  background: activeTab === 'requests' ? '#16a765' : '#ffffff',
+                  color: activeTab === 'requests' ? '#ffffff' : '#334155',
+                  boxShadow: activeTab === 'requests' ? '0 3px 10px rgba(22,167,101,0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
+                }}
               >
                 📋 My Purchase Requests
                 {pendingCount > 0 && (
-                  <span className="badge badge-warning" style={{ marginLeft: 6, fontSize: 10, padding: '2px 6px' }}>
+                  <span style={{ 
+                    marginLeft: 6, 
+                    fontSize: 10, 
+                    fontWeight: 800,
+                    padding: '2px 7px', 
+                    borderRadius: 999,
+                    background: '#eab308',
+                    color: '#000000'
+                  }}>
                     {pendingCount}
                   </span>
                 )}
@@ -386,14 +446,14 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
       )}
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#64748b' }}>
           <div className="spinner-border text-primary mb-2" role="status"></div>
-          <div>प्लान लोड हो रहे हैं (Loading pricing plans)...</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>लोड हो रहे हैं (Loading plans)...</div>
         </div>
       ) : activeTab === 'plans' ? (
         <>
-          {/* SERVICE SWITCHER TABS - WHATSAPP, SMS, PLAN, GST */}
-          <div className="d-flex align-items-center flex-wrap gap-2 mb-3" style={{ gap: 10 }}>
+          {/* 4 SERVICE BUTTONS LEFT TO RIGHT IN A SINGLE ROW */}
+          <div className="service-tabs-bar">
             {SERVICES.map((srv) => {
               const isSelected = selectedService === srv.id
               return (
@@ -401,90 +461,77 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   key={srv.id}
                   type="button"
                   onClick={() => setSelectedService(srv.id)}
-                  className="btn"
                   style={{
-                    borderRadius: 10,
-                    padding: '8px 18px',
-                    fontWeight: 700,
-                    fontSize: 13.5,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    border: isSelected ? `2px solid ${srv.color}` : '1px solid var(--zd-border, #e2e8f0)',
-                    backgroundColor: isSelected ? srv.lightBg : 'var(--zd-card-bg, #ffffff)',
-                    color: isSelected ? srv.color : 'inherit',
-                    boxShadow: isSelected ? `0 3px 12px ${srv.color}30` : 'none',
+                    justifyContent: 'center',
+                    gap: 10,
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: isSelected ? `2px solid ${srv.color}` : '1px solid #cbd5e1',
+                    background: isSelected ? srv.color : '#ffffff',
+                    color: isSelected ? '#ffffff' : '#334155',
+                    fontWeight: isSelected ? 800 : 700,
+                    fontSize: 14,
+                    cursor: 'pointer',
+                    boxShadow: isSelected ? `0 4px 14px ${srv.color}35` : '0 2px 4px rgba(0,0,0,0.03)',
                     transition: 'all 0.18s ease',
-                    cursor: 'pointer'
+                    outline: 'none'
                   }}
                 >
-                  <span style={{ fontSize: 16 }}>{srv.icon}</span>
+                  <span style={{ fontSize: 18 }}>{srv.icon}</span>
                   <span>{srv.label}</span>
                 </button>
               )
             })}
           </div>
 
-          {/* Current Active Plan Status Banner (Compact) */}
+          {/* ACTIVE SERVICE STATUS BANNER (NO REFRESH BUTTON, PURE CLEAN CONTRAST) */}
           <div 
-            className="card mb-3" 
             style={{ 
               borderRadius: 12, 
-              background: `linear-gradient(135deg, ${activeServiceConfig.lightBg} 0%, rgba(255,255,255,0.02) 100%)`, 
-              border: `1px solid ${activeServiceConfig.color}40`,
-              padding: '12px 18px'
+              background: '#ffffff', 
+              border: '1px solid #e2e8f0',
+              borderLeft: `5px solid ${activeServiceConfig.color}`,
+              padding: '14px 20px',
+              marginBottom: 20,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
             }}
           >
-            <div className="d-flex flex-wrap align-items-center justify-content-between" style={{ gap: 12 }}>
-              <div className="d-flex align-items-center" style={{ gap: 12 }}>
-                <div 
-                  style={{ 
-                    width: 36, 
-                    height: 36, 
-                    borderRadius: 10, 
-                    background: activeServiceConfig.color, 
-                    color: '#fff', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    fontSize: 18, 
-                    flexShrink: 0 
-                  }}
-                >
-                  {activeServiceConfig.icon}
-                </div>
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'inherit' }}>
-                    {activeServiceConfig.label} Service • Active Plan: <span style={{ color: activeServiceConfig.color }}>{currentPlan}</span>
-                  </div>
-                  <div className="text-muted" style={{ fontSize: 12 }}>
-                    {activeServiceConfig.desc}
-                  </div>
-                </div>
+            <div className="d-flex align-items-center" style={{ gap: 14 }}>
+              <div 
+                style={{ 
+                  width: 40, 
+                  height: 40, 
+                  borderRadius: 10, 
+                  background: activeServiceConfig.softBg, 
+                  color: activeServiceConfig.color, 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: 20, 
+                  flexShrink: 0,
+                  border: `1px solid ${activeServiceConfig.color}30`
+                }}
+              >
+                {activeServiceConfig.icon}
               </div>
-              <div>
-                <button 
-                  type="button" 
-                  className="btn btn-sm btn-outline-secondary"
-                  onClick={fetchPlansData}
-                  style={{ borderRadius: 8, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}
-                >
-                  ↻ Refresh
-                </button>
+              <div style={{ flexGrow: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
+                  {activeServiceConfig.label} Service • Current Plan:{' '}
+                  <span style={{ color: activeServiceConfig.color, fontWeight: 800 }}>
+                    {currentPlan}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 2 }}>
+                  {activeServiceConfig.desc}
+                </div>
               </div>
             </div>
           </div>
 
           {/* COMPACT PRICING CARDS GRID */}
-          <div 
-            className="pricing-cards-grid mb-4"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: 16,
-              maxWidth: 1240
-            }}
-          >
+          <div className="pricing-cards-grid mb-4">
             {displayedPlans.map((plan, idx) => {
               const isCurrent = currentPlan?.toLowerCase() === plan.name?.toLowerCase()
               const isPopular = plan.isPopular || plan.badgeText?.toLowerCase().includes('popular') || plan.badgeText?.toLowerCase().includes('recommended')
@@ -493,15 +540,17 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
               return (
                 <div
                   key={plan.planId || idx}
-                  className="pricing-card card h-100"
                   style={{
                     borderRadius: 14,
-                    border: isPopular ? `2px solid ${activeServiceConfig.color}` : '1px solid var(--zd-border, #e2e8f0)',
+                    background: '#ffffff',
+                    border: isPopular ? `2px solid ${activeServiceConfig.color}` : '1px solid #e2e8f0',
                     position: 'relative',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    boxShadow: isPopular ? `0 6px 18px ${activeServiceConfig.color}22` : '0 2px 6px rgba(0,0,0,0.03)',
+                    boxShadow: isPopular 
+                      ? `0 8px 24px ${activeServiceConfig.color}20` 
+                      : '0 2px 8px rgba(0,0,0,0.04)',
                     transition: 'all 0.2s ease',
                     overflow: 'hidden'
                   }}
@@ -511,13 +560,13 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     <div
                       style={{
                         position: 'absolute',
-                        top: 10,
-                        right: 12,
-                        background: isPopular ? activeServiceConfig.color : 'rgba(0,0,0,0.08)',
-                        color: isPopular ? '#ffffff' : 'inherit',
-                        fontSize: 10,
+                        top: 12,
+                        right: 14,
+                        background: isPopular ? activeServiceConfig.color : '#f1f5f9',
+                        color: isPopular ? '#ffffff' : '#475569',
+                        fontSize: 10.5,
                         fontWeight: 800,
-                        padding: '2px 8px',
+                        padding: '3px 10px',
                         borderRadius: 999,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em'
@@ -527,70 +576,71 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     </div>
                   )}
 
-                  <div className="card-body p-3 p-md-4" style={{ flexGrow: 1 }}>
+                  <div style={{ padding: '20px 20px 14px', flexGrow: 1 }}>
                     {/* Card Header: Service Icon + Plan Name */}
-                    <div className="d-flex align-items-center mb-1" style={{ gap: 8 }}>
-                      <span style={{ fontSize: 16 }}>{activeServiceConfig.icon}</span>
-                      <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'inherit' }}>
+                    <div className="d-flex align-items-center" style={{ gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 18 }}>{activeServiceConfig.icon}</span>
+                      <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#0f172a' }}>
                         {plan.name}
                       </h3>
                     </div>
 
-                    <p className="text-muted mb-3" style={{ fontSize: 12, minHeight: 32, lineHeight: 1.35 }}>
+                    <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 16px', minHeight: 34, lineHeight: 1.4 }}>
                       {plan.description || `${activeServiceConfig.label} Subscription Plan`}
                     </p>
 
-                    {/* Compact Price Pill */}
+                    {/* Price Box */}
                     <div
                       style={{
-                        background: activeServiceConfig.lightBg,
-                        padding: '9px 12px',
+                        background: activeServiceConfig.softBg,
+                        border: `1px solid ${activeServiceConfig.color}30`,
+                        padding: '10px 14px',
                         borderRadius: 10,
-                        marginBottom: 14,
+                        marginBottom: 16,
                         display: 'flex',
                         alignItems: 'baseline',
                         justifyContent: 'space-between'
                       }}
                     >
                       <div>
-                        <span style={{ fontSize: 22, fontWeight: 900, color: activeServiceConfig.color }}>
+                        <span style={{ fontSize: 24, fontWeight: 900, color: activeServiceConfig.color }}>
                           ₹{plan.price}
                         </span>
-                        <span className="text-muted" style={{ fontSize: 11.5, marginLeft: 4 }}>
+                        <span style={{ fontSize: 12, color: '#64748b', marginLeft: 5, fontWeight: 600 }}>
                           / {plan.validity || '30 Days'}
                         </span>
                       </div>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: activeServiceConfig.color }}>
-                        Instant Activation
+                      <span style={{ fontSize: 11, fontWeight: 700, color: activeServiceConfig.color }}>
+                        Active Support
                       </span>
                     </div>
 
-                    {/* Compact Features List */}
-                    <div style={{ borderTop: '1px solid var(--zd-border, #eef2f6)', paddingTop: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--zd-text-muted, #8a98ac)', letterSpacing: '0.04em', marginBottom: 8 }}>
-                        Plan Features &amp; Quotas:
+                    {/* Features List */}
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 10 }}>
+                        Included Features:
                       </div>
-                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.35 }}>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12.5, lineHeight: 1.45 }}>
                         {features.map((f, fIdx) => (
-                          <li key={fIdx} className="d-flex align-items-center mb-2" style={{ gap: 7 }}>
+                          <li key={fIdx} className="d-flex align-items-center mb-2" style={{ gap: 8 }}>
                             <span
                               style={{
-                                width: 16,
-                                height: 16,
+                                width: 17,
+                                height: 17,
                                 borderRadius: '50%',
-                                background: `${activeServiceConfig.color}20`,
+                                background: `${activeServiceConfig.color}18`,
                                 color: activeServiceConfig.color,
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                fontSize: 9.5,
+                                fontSize: 10,
                                 fontWeight: 900,
                                 flexShrink: 0
                               }}
                             >
                               ✓
                             </span>
-                            <span style={{ color: 'inherit' }}>{f}</span>
+                            <span style={{ color: '#1e293b', fontWeight: 500 }}>{f}</span>
                           </li>
                         ))}
                       </ul>
@@ -598,31 +648,41 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   </div>
 
                   {/* Card Action Button (Footer) */}
-                  <div className="card-footer p-3 pt-0" style={{ background: 'transparent', borderTop: 'none' }}>
+                  <div style={{ padding: '0 20px 20px', background: 'transparent' }}>
                     {isCurrent ? (
                       <button
                         type="button"
-                        className="btn btn-outline-success w-100"
                         disabled
-                        style={{ borderRadius: 8, fontWeight: 700, fontSize: 12.5, height: 36 }}
+                        style={{
+                          width: '100%',
+                          height: 40,
+                          borderRadius: 10,
+                          border: '1px solid #86efac',
+                          background: '#f0fdf4',
+                          color: '#15803d',
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: 'default'
+                        }}
                       >
                         ✓ Current Active Plan
                       </button>
                     ) : (
                       <button
                         type="button"
-                        className="btn w-100"
                         onClick={() => handleOpenPurchase(plan)}
                         style={{
-                          backgroundColor: activeServiceConfig.color,
-                          borderColor: activeServiceConfig.color,
+                          width: '100%',
+                          height: 40,
+                          borderRadius: 10,
+                          border: 'none',
+                          background: activeServiceConfig.color,
                           color: '#ffffff',
-                          borderRadius: 8,
-                          fontWeight: 700,
-                          fontSize: 12.5,
-                          height: 36,
-                          boxShadow: `0 3px 10px ${activeServiceConfig.color}35`,
-                          cursor: 'pointer'
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          boxShadow: `0 4px 14px ${activeServiceConfig.color}35`,
+                          transition: 'all 0.18s ease'
                         }}
                       >
                         Buy {plan.name}
@@ -635,100 +695,103 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
           </div>
         </>
       ) : (
-        /* MY PURCHASE REQUESTS TAB */
-        <div className="card shadow-sm" style={{ borderRadius: 14 }}>
-          <div className="card-header d-flex align-items-center justify-content-between" style={{ padding: '14px 18px', borderBottom: '1px solid var(--zd-border, rgba(0,0,0,0.06))' }}>
-            <div>
-              <h5 className="card-title mb-0" style={{ fontSize: 15, fontWeight: 700 }}>
-                📋 My Subscription Purchase History
-              </h5>
-              <small className="text-muted">Track all your submitted plan purchase payments and activation statuses.</small>
-            </div>
-            <button 
-              type="button" 
-              className="btn btn-sm btn-outline-primary"
-              onClick={fetchPlansData}
-              style={{ borderRadius: 8 }}
-            >
-              ↻ Refresh
-            </button>
+        /* MY PURCHASE REQUESTS TAB (NO REFRESH BUTTON, HIGH CONTRAST) */
+        <div style={{ borderRadius: 14, background: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)', overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
+            <h5 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: '0 0 2px 0' }}>
+              📋 My Subscription Purchase History
+            </h5>
+            <small style={{ color: '#64748b', fontSize: 12 }}>
+              Track all your submitted plan purchase payments and activation statuses.
+            </small>
           </div>
 
-          <div className="card-body p-0">
+          <div style={{ padding: 0 }}>
             {myRequests.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '50px 20px' }}>
+              <div style={{ textAlign: 'center', padding: '50px 20px', color: '#64748b' }}>
                 <div style={{ fontSize: 32, marginBottom: 10 }}>💳</div>
-                <h4>आपने अभी तक कोई पेमेंट रिक्वेस्ट नहीं भेजी है</h4>
-                <p className="text-muted mb-3">You haven't submitted any plan purchase requests yet.</p>
-                <button type="button" className="btn btn-primary" onClick={() => setActiveTab('plans')}>
+                <h4 style={{ color: '#0f172a', fontSize: 17, fontWeight: 700 }}>आपने अभी तक कोई पेमेंट रिक्वेस्ट नहीं भेजी है</h4>
+                <p style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
+                  You haven't submitted any plan purchase requests yet.
+                </p>
+                <button 
+                  type="button" 
+                  onClick={() => setActiveTab('plans')}
+                  style={{
+                    background: '#16a765',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 10,
+                    padding: '9px 20px',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: 'pointer'
+                  }}
+                >
                   Browse Plans &amp; Pricing
                 </button>
               </div>
             ) : (
               <div className="table-responsive">
-                <table className="table card-table table-vcenter text-nowrap mb-0">
+                <table className="table card-table table-vcenter text-nowrap mb-0" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: 'var(--zd-card-bg, #f8fafc)', borderBottom: '1px solid var(--zd-border, #eef2f6)' }}>
-                      <th style={{ fontWeight: 700 }}>Request ID</th>
-                      <th style={{ fontWeight: 700 }}>Plan Name</th>
-                      <th style={{ fontWeight: 700 }}>Amount</th>
-                      <th style={{ fontWeight: 700 }}>Payment Date</th>
-                      <th style={{ fontWeight: 700 }}>Bank / Txn Details</th>
-                      <th style={{ fontWeight: 700 }}>Status</th>
-                      <th style={{ fontWeight: 700 }}>Submitted On</th>
-                      <th style={{ fontWeight: 700 }}>Notes / Reason</th>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Request ID</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Plan Name</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Amount</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Payment Date</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Bank / Txn Details</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Status</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Submitted On</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Notes / Reason</th>
                     </tr>
                   </thead>
                   <tbody>
                     {myRequests.map((req) => (
-                      <tr key={req.requestId}>
-                        <td>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: 'var(--zd-text-muted, #64748b)' }}>
+                      <tr key={req.requestId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#64748b' }}>
                             {req.requestId}
                           </span>
                         </td>
-                        <td>
-                          <strong style={{ fontSize: 13.5 }}>{req.planName}</strong>
+                        <td style={{ padding: '12px 16px' }}>
+                          <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{req.planName}</strong>
                         </td>
-                        <td>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: '#10b981' }}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: '#16a765' }}>
                             ₹{req.amount}
                           </span>
                         </td>
-                        <td>
-                          <span style={{ fontSize: 12.5 }}>{req.paymentDate}</span>
+                        <td style={{ padding: '12px 16px', fontSize: 12.5, color: '#334155' }}>
+                          {req.paymentDate}
                         </td>
-                        <td>
-                          <div style={{ fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }} title={req.bankDetails}>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ fontSize: 12, color: '#475569', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }} title={req.bankDetails}>
                             {req.bankDetails}
                           </div>
                         </td>
-                        <td>
+                        <td style={{ padding: '12px 16px' }}>
                           {req.status === 'pending' && (
-                            <span className="badge badge-warning" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: '#fef3c7', color: '#b45309' }}>
                               ⏳ Pending Review
                             </span>
                           )}
                           {req.status === 'approved' && (
-                            <span className="badge badge-success" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: '#dcfce7', color: '#15803d' }}>
                               ✓ Activated / Approved
                             </span>
                           )}
                           {req.status === 'rejected' && (
-                            <span className="badge badge-danger" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: '#fee2e2', color: '#b91c1c' }}>
                               ✕ Rejected
                             </span>
                           )}
                         </td>
-                        <td>
-                          <span style={{ fontSize: 12, color: 'var(--zd-text-muted, #8a98ac)' }}>
-                            {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
-                          </span>
+                        <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>
+                          {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
                         </td>
-                        <td>
-                          <span style={{ fontSize: 12, color: 'var(--zd-text-muted, #8a98ac)' }}>
-                            {req.adminNotes || '-'}
-                          </span>
+                        <td style={{ padding: '12px 16px', fontSize: 12, color: '#64748b' }}>
+                          {req.adminNotes || '-'}
                         </td>
                       </tr>
                     ))}
