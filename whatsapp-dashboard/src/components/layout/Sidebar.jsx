@@ -19,7 +19,6 @@ export function Sidebar() {
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
   const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
   const isGstActive = location.pathname.startsWith('/gst') || location.pathname.startsWith('/services/gst')
-  const [reportsOpen, setReportsOpen] = useState(true)
   const closeMobile = () => setSidebarOpen(false)
 
   const isConnected = status?.status === 'connected'
@@ -389,61 +388,15 @@ export function Sidebar() {
               <span>▦</span><b>Group</b>
             </NavLink>
 
-            {/* Reports Nav Group */}
-            <div className={`nav-group ${reportsOpen || isReportsActive ? 'is-open' : ''}`}>
-              <div 
-                className={`nav-parent ${isReportsActive ? 'active' : ''}`}
-                role="button" 
-                tabIndex={0} 
-                data-title="Reports"
-                onClick={() => {
-                  if (sidebarCollapsed) {
-                    toggleSidebarCollapsed()
-                  } else {
-                    setReportsOpen(!reportsOpen)
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setReportsOpen(!reportsOpen)
-                  }
-                }}
-              >
-                <span>▥</span><b>Reports</b><i className="nav-caret">⌄</i>
-              </div>
-              <div className="nav-submenu">
-                {isAdmin ? (
-                  <>
-                    <NavLink 
-                      to="/report?type=admin" 
-                      className={() => (location.pathname === '/report' && (!location.search || location.search.includes('type=admin')) ? 'active' : '')} 
-                      onClick={closeMobile}
-                      data-title="Admin Msg Report"
-                    >
-                      <span>↳</span><b>Admin Msg Report</b>
-                    </NavLink>
-                    <NavLink 
-                      to="/report?type=users" 
-                      className={() => (location.pathname === '/report' && location.search.includes('type=users') ? 'active' : '')} 
-                      onClick={closeMobile}
-                      data-title="User Msg Report"
-                    >
-                      <span>↳</span><b>User Msg Report</b>
-                    </NavLink>
-                  </>
-                ) : (
-                  <NavLink 
-                    to="/report" 
-                    className={({ isActive }) => (isActive ? 'active' : '')} 
-                    onClick={closeMobile}
-                    data-title="Msg Report"
-                  >
-                    <span>↳</span><b>Msg Report</b>
-                  </NavLink>
-                )}
-              </div>
-            </div>
+            {/* Direct Msg Report Nav Item */}
+            <NavLink 
+              to="/report" 
+              className={({ isActive }) => (isActive || isReportsActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Msg Report"
+            >
+              <span>▥</span><b>Msg Report</b>
+            </NavLink>
 
             <NavLink 
               to="/campaigns" 
