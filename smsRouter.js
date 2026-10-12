@@ -316,49 +316,71 @@ router.get('/api/sms/webhook-deliveries', (req, res) => {
   }
 });
 
-// 9. INCOMING SMS ENDPOINT (CALLED BY ANDROID APP)
-router.post('/api/sms/incoming', async (req, res) => {
+// 9. INCOMING SMS ENDPOINTS (SUPPORTS /inbox, /api/inbox, /api/sms/inbox, /api/sms/incoming)
+router.post(['/inbox', '/api/inbox', '/api/sms/inbox', '/api/sms/incoming'], async (req, res) => {
   try {
-    const { deviceId, payload } = req.body;
-    const rawSender = req.body.sender || req.body.from || req.body.address || req.body.phoneNumber || req.body.mobile;
-    const rawMessage = req.body.message || req.body.body || req.body.text || req.body.msg;
-    const rawSlot = req.body.simSlot !== undefined ? req.body.simSlot : (req.body.slot !== undefined ? req.body.slot : 0);
-    const rawTs = req.body.timestamp || Date.now();
-    let smsData = null;
+    const rawItems = Array.isArray(req.body) 
+      ? req.body 
+      : (Array.isArray(req.body?.messages) ? req.body.messages : [req.body]);
 
-    if (payload) {
-      const apiKey = db.getSetting('api_key', 'ers_key_8899');
-      try {
-        smsData = decryptPayload(payload, apiKey);
-      } catch (e) {
-        return res.status(400).json({ success: false, message: 'Invalid encrypted payload: ' + e.message });
+    const apiKey = db.getSetting('api_key', 'ers_key_8899');
+    const savedRecords = [];
+
+    for (const item of rawItems) {
+      if (!item) continue;
+      let rawSender = item.sender || item.from || item.address || item.phoneNumber || item.mobile;
+      let rawMessage = item.content || item.message || item.body || item.text || item.msg;
+      const rawSlot = item.simSlot !== undefined 
+        ? item.simSlot 
+        : (item.simNumber !== undefined ? Math.max(0, parseInt(item.simNumber) - 1) : (item.slot !== undefined ? item.slot : 0));
+      const rawTs = item.createdAt ? new Date(item.createdAt).getTime() : (item.timestamp || Date.now());
+      const devId = item.deviceId || req.body.deviceId || 'android_device';
+
+      if (item.payload) {
+        try {
+          const dec = decryptPayload(item.payload, apiKey);
+          if (dec) {
+            rawSender = dec.sender || rawSender;
+            rawMessage = dec.message || dec.content || rawMessage;
+          }
+        } catch (e) {
+          console.warn('[SMS Gateway] Decrypt error for item:', e.message);
+        }
       }
-    } else if (rawSender && rawMessage) {
-      smsData = { sender: String(rawSender), message: String(rawMessage), simSlot: rawSlot, timestamp: rawTs };
-    } else {
-      return res.status(400).json({ success: false, message: 'Missing sender or message payload' });
+
+      if (!rawSender || !rawMessage) continue;
+
+      const senderStr = String(rawSender).trim();
+      const messageStr = String(rawMessage).trim();
+
+      // Duplicate check within 60s
+      if (db.isDuplicateSms(senderStr, messageStr, 60000)) {
+        continue;
+      }
+
+      const saved = db.saveIncomingSms({
+        deviceId: devId,
+        sender: senderStr,
+        message: messageStr,
+        simSlot: parseInt(rawSlot) || 0,
+        timestamp: Number(rawTs) || Date.now()
+      });
+
+      savedRecords.push(saved);
+
+      // Auto-dispatch webhook in background
+      processIncomingSmsWebhook(saved).catch(err => {
+        console.warn('[SMS Webhook] Background error:', err.message);
+      });
     }
 
-    // Duplicate check within 60s
-    if (db.isDuplicateSms(smsData.sender, smsData.message, 60000)) {
-      return res.json({ success: true, ignored: true, reason: 'Duplicate SMS' });
-    }
-
-    const saved = db.saveIncomingSms({
-      deviceId: deviceId || 'android_device',
-      sender: smsData.sender,
-      message: smsData.message,
-      simSlot: smsData.simSlot || 0,
-      timestamp: smsData.timestamp || Date.now()
+    res.json({ 
+      success: true, 
+      processedCount: savedRecords.length, 
+      messages: savedRecords 
     });
-
-    // Auto-dispatch webhook in background
-    processIncomingSmsWebhook(saved).catch(err => {
-      console.warn('[SMS Webhook] Background error:', err.message);
-    });
-
-    res.json({ success: true, messageId: saved.id, receivedAt: saved.receivedAt });
   } catch (err) {
+    console.error('[SMS Incoming Error]:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

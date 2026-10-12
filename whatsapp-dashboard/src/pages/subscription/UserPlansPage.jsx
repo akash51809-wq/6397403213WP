@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import PaymentDetailsModal from '../../components/modals/PaymentDetailsModal'
@@ -218,6 +218,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
   const [myRequests, setMyRequests] = useState([])
   const [activeTab, setActiveTab] = useState('plans')
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [selectedService, setSelectedService] = useState(() => {
     const s = searchParams.get('service')?.toLowerCase()
     return s && ['whatsapp', 'sms', 'plan', 'gst'].includes(s) ? s : 'whatsapp'
@@ -543,177 +544,421 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
             </div>
           </div>
 
-          {/* COMPACT PRICING CARDS GRID */}
-          <div className="pricing-cards-grid mb-4">
-            {displayedPlans.map((plan, idx) => {
-              const activePlanName = getActivePlanNameForService().toLowerCase()
-              const isCurrent = activePlanName.includes(plan.name?.toLowerCase()) || (plan.name && activePlanName === plan.name.toLowerCase())
-              const isPopular = plan.isPopular || plan.badgeText?.toLowerCase().includes('popular') || plan.badgeText?.toLowerCase().includes('recommended')
-              const features = getPlanFeatures(plan)
-
-              return (
-                <div
-                  key={plan.planId || idx}
-                  style={{
-                    borderRadius: 14,
-                    background: '#ffffff',
-                    border: isPopular ? `2px solid ${activeServiceConfig.color}` : '1px solid #e2e8f0',
-                    position: 'relative',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    boxShadow: isPopular 
-                      ? `0 8px 24px ${activeServiceConfig.color}20` 
-                      : '0 2px 8px rgba(0,0,0,0.04)',
-                    transition: 'all 0.2s ease',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {/* Top Badge (if any) */}
-                  {plan.badgeText && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 10,
-                        right: 12,
-                        background: isPopular ? activeServiceConfig.color : '#f1f5f9',
-                        color: isPopular ? '#ffffff' : '#475569',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        padding: '2px 8px',
-                        borderRadius: 999,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em'
-                      }}
-                    >
-                      {plan.badgeText}
-                    </div>
-                  )}
-
-                  <div style={{ padding: '16px 16px 10px', flexGrow: 1 }}>
-                    {/* Card Header: Service Icon + Plan Name */}
-                    <div className="d-flex align-items-center" style={{ gap: 6, marginBottom: 4 }}>
-                      <span style={{ fontSize: 16 }}>{activeServiceConfig.icon}</span>
-                      <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                        {plan.name}
-                      </h3>
-                    </div>
-
-                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px', minHeight: 28, lineHeight: 1.35 }}>
-                      {plan.description || `${activeServiceConfig.label} Subscription Plan`}
-                    </p>
-
-                    {/* Price Box */}
-                    <div
-                      style={{
-                        background: activeServiceConfig.softBg,
-                        border: `1px solid ${activeServiceConfig.color}25`,
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        marginBottom: 12,
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <div>
-                        <span style={{ fontSize: 22, fontWeight: 900, color: activeServiceConfig.color }}>
-                          ₹{selectedService === 'gst' ? (plan.pricePerHit ?? plan.price ?? 1) : plan.price}
-                        </span>
-                        <span style={{ fontSize: 11.5, color: '#64748b', marginLeft: 4, fontWeight: 600 }}>
-                          {selectedService === 'gst' 
-                            ? '/ Per Hit' 
-                            : (plan.isUnlimitedValidity ? '/ Lifetime' : `/ ${plan.validity || `${plan.validityDays} Days`}`)}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 10.5, fontWeight: 700, color: activeServiceConfig.color }}>
-                        Active Support
-                      </span>
-                    </div>
-
-                    {/* Features List */}
-                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 8 }}>
-                        Included Features:
-                      </div>
-                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.4 }}>
-                        {features.map((f, fIdx) => (
-                          <li key={fIdx} className="d-flex align-items-center" style={{ gap: 6, marginBottom: 5 }}>
-                            <span
-                              style={{
-                                width: 15,
-                                height: 15,
-                                borderRadius: '50%',
-                                background: `${activeServiceConfig.color}18`,
-                                color: activeServiceConfig.color,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: 9.5,
-                                fontWeight: 900,
-                                flexShrink: 0
-                              }}
-                            >
-                              ✓
-                            </span>
-                            <span style={{ color: '#1e293b', fontWeight: 500 }}>{f}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+          {selectedService === 'plan' || selectedService === 'gst' ? (
+            /* PAY-AS-YOU-GO DIRECT WALLET MODEL (NO BUY PLAN BUTTON) */
+            <div
+              style={{
+                borderRadius: 18,
+                background: '#ffffff',
+                border: `2px solid ${activeServiceConfig.color}35`,
+                boxShadow: `0 10px 32px ${activeServiceConfig.color}15`,
+                overflow: 'hidden',
+                marginBottom: 24
+              }}
+            >
+              {/* Card Banner Header */}
+              <div
+                style={{
+                  background: `linear-gradient(135deg, ${activeServiceConfig.color}18, ${activeServiceConfig.color}06)`,
+                  borderBottom: `1px solid ${activeServiceConfig.color}25`,
+                  padding: '22px 26px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 16
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 14,
+                      background: activeServiceConfig.color,
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 26,
+                      boxShadow: `0 6px 18px ${activeServiceConfig.color}45`
+                    }}
+                  >
+                    {activeServiceConfig.icon}
                   </div>
-
-                  {/* Card Action Button (Footer) */}
-                  <div style={{ padding: '0 16px 16px', background: 'transparent' }}>
-                    {isCurrent ? (
-                      <button
-                        type="button"
-                        disabled
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: 0, fontSize: 19, fontWeight: 900, color: '#0f172a' }}>
+                        {selectedService === 'plan' ? 'Plan API · Pay-As-You-Go' : 'GST Portal · Pay-Per-Hit'}
+                      </h3>
+                      <span
                         style={{
-                          width: '100%',
-                          height: 38,
-                          borderRadius: 8,
-                          border: '1px solid #86efac',
-                          background: '#f0fdf4',
-                          color: '#15803d',
+                          background: `${activeServiceConfig.color}22`,
+                          color: activeServiceConfig.color,
+                          fontSize: 11,
                           fontWeight: 800,
-                          fontSize: 12.5,
-                          cursor: 'default'
+                          padding: '3px 10px',
+                          borderRadius: 999,
+                          letterSpacing: '0.04em'
                         }}
                       >
-                        ✓ Current Active Plan
-                      </button>
-                    ) : (
+                        ⚡ DIRECT WALLET DEBIT
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
+                      {selectedService === 'plan'
+                        ? 'No monthly subscription package required. Charges are debited directly from your wallet balance per hit.'
+                        : 'No fixed subscription fee. GSTIN verifications are charged directly from your wallet balance per verification.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: `1px solid ${activeServiceConfig.color}35`,
+                    borderRadius: 14,
+                    padding: '12px 22px',
+                    textAlign: 'right',
+                    boxShadow: '0 3px 10px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Standard Rate
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: activeServiceConfig.color }}>
+                    ₹{selectedService === 'plan' ? '0.20' : '1.00'}
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginLeft: 4 }}>/ Hit</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card Main Body */}
+              <div style={{ padding: '24px 26px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 20 }}>
+                  {/* Current Wallet Balance Box */}
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      padding: '20px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11.5, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                        👛 Current User Wallet Balance
+                      </div>
+                      <div style={{ fontSize: 34, fontWeight: 900, color: Number(currentUser?.walletBalance || 0) >= (selectedService === 'plan' ? 0.20 : 1.0) ? '#10b981' : '#ef4444' }}>
+                        ₹{(Number(currentUser?.walletBalance || 0)).toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: 13, color: '#64748b', marginTop: 6 }}>
+                        {Number(currentUser?.walletBalance || 0) >= (selectedService === 'plan' ? 0.20 : 1.0) ? (
+                          <span style={{ color: '#10b981', fontWeight: 700 }}>
+                            ✓ Active: Sufficient balance for ~{Math.floor(Number(currentUser?.walletBalance || 0) / (selectedService === 'plan' ? 0.20 : 1.0))} hits.
+                          </span>
+                        ) : (
+                          <span style={{ color: '#ef4444', fontWeight: 700 }}>
+                            ⚠️ Insufficient balance for API hits. Please add funds to proceed.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       <button
                         type="button"
-                        onClick={() => handleOpenPurchase({ ...plan, service: selectedService })}
-                        className="buy-plan-btn"
+                        onClick={() => setShowAddFunds(true)}
+                        className="nav-action-btn"
                         style={{
-                          width: '100%',
-                          height: 38,
-                          borderRadius: 8,
+                          flex: '1 1 auto',
+                          minHeight: 42,
+                          padding: '10px 18px',
+                          borderRadius: 10,
                           border: 'none',
-                          background: `linear-gradient(135deg, ${activeServiceConfig.color}, ${activeServiceConfig.color}dd)`,
+                          background: 'linear-gradient(135deg, #10b981, #059669)',
                           color: '#ffffff',
                           fontWeight: 800,
-                          fontSize: 13,
+                          fontSize: 13.5,
                           cursor: 'pointer',
-                          boxShadow: `0 3px 12px ${activeServiceConfig.color}35`,
-                          transition: 'all 0.18s ease',
+                          boxShadow: '0 4px 14px rgba(16,185,129,0.3)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           gap: 6
                         }}
                       >
-                        <span>⚡</span> Buy {plan.name}
+                        <span>➕</span> Add Funds to Wallet
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => navigate(selectedService === 'plan' ? '/plans/api-docs' : '/gst/api-docs')}
+                        className="nav-action-btn"
+                        style={{
+                          minHeight: 42,
+                          padding: '10px 16px',
+                          borderRadius: 10,
+                          border: '1px solid #cbd5e1',
+                          background: '#ffffff',
+                          color: '#334155',
+                          fontWeight: 700,
+                          fontSize: 13,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📖 View API Docs
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Included Services & Endpoints */}
+                  <div
+                    style={{
+                      borderRadius: 14,
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      padding: '20px'
+                    }}
+                  >
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                      🚀 Included Features &amp; Supported APIs
+                    </div>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12.5, lineHeight: 1.6 }}>
+                      {selectedService === 'plan' ? (
+                        <>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Operator &amp; Circle Series Engine</b> (Instant &lt;0.5ms HLR series lookup)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Live Prepaid/Postpaid Plans</b> (Tariffs, data packs, and talktime)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Customer Best R-Offer Check</b> (Operator tailored custom offers)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>DTH Customer Info &amp; Balance</b> (VC subscriber verification)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>REST API Compatibility</b> with custom token &amp; IP whitelisting</span>
+                          </li>
+                        </>
+                      ) : (
+                        <>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Instant GSTIN Taxpayer Lookup</b> (Legal &amp; Trade Name Profile)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Official State &amp; Center Jurisdiction</b> with Constitution of Business</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>GSTR-1 &amp; GSTR-3B Return Filing History</b> (Real-Time Compliance Matrix)</span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Aadhaar Authentication &amp; e-Invoice Verification</b></span>
+                          </li>
+                          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                            <span><b>Standard Developer API</b> (<code>/api/v1/gst/verify</code>) with JSON payload</span>
+                          </li>
+                        </>
+                      )}
+                    </ul>
                   </div>
                 </div>
-              )
-            })}
-          </div>
+              </div>
+            </div>
+          ) : (
+            /* COMPACT 3D PRICING CARDS GRID FOR WHATSAPP & SMS */
+            <div 
+              className="pricing-cards-grid mb-4" 
+              style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 275px))', 
+                gap: 16, 
+                width: '100%' 
+              }}
+            >
+              {displayedPlans.map((plan, idx) => {
+                const activePlanName = getActivePlanNameForService().toLowerCase()
+                const isCurrent = activePlanName.includes(plan.name?.toLowerCase()) || (plan.name && activePlanName === plan.name.toLowerCase())
+                const isPopular = plan.isPopular || plan.badgeText?.toLowerCase().includes('popular') || plan.badgeText?.toLowerCase().includes('recommended')
+                const features = getPlanFeatures(plan)
+
+                return (
+                  <div
+                    key={plan.planId || idx}
+                    style={{
+                      borderRadius: 16,
+                      background: '#ffffff',
+                      border: isPopular ? `2px solid ${activeServiceConfig.color}` : '1px solid #e2e8f0',
+                      borderTop: `4px solid ${activeServiceConfig.color}`,
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      boxShadow: isPopular 
+                        ? `0 10px 28px ${activeServiceConfig.color}25` 
+                        : '0 4px 14px rgba(0,0,0,0.05)',
+                      transition: 'all 0.22s ease',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {/* Top Badge (if any) */}
+                    {plan.badgeText && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 10,
+                          right: 12,
+                          background: isPopular ? activeServiceConfig.color : '#f1f5f9',
+                          color: isPopular ? '#ffffff' : '#475569',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em'
+                        }}
+                      >
+                        {plan.badgeText}
+                      </div>
+                    )}
+
+                    <div style={{ padding: '16px 16px 10px', flexGrow: 1 }}>
+                      {/* Card Header: Service Icon + Plan Name */}
+                      <div className="d-flex align-items-center" style={{ gap: 6, marginBottom: 4 }}>
+                        <span style={{ fontSize: 16 }}>{activeServiceConfig.icon}</span>
+                        <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                          {plan.name}
+                        </h3>
+                      </div>
+
+                      <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px', minHeight: 28, lineHeight: 1.35 }}>
+                        {plan.description || `${activeServiceConfig.label} Subscription Plan`}
+                      </p>
+
+                      {/* Price Box */}
+                      <div
+                        style={{
+                          background: activeServiceConfig.softBg,
+                          border: `1px solid ${activeServiceConfig.color}25`,
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          marginBottom: 12,
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <div>
+                          <span style={{ fontSize: 22, fontWeight: 900, color: activeServiceConfig.color }}>
+                            ₹{plan.price}
+                          </span>
+                          <span style={{ fontSize: 11.5, color: '#64748b', marginLeft: 4, fontWeight: 600 }}>
+                            {plan.isUnlimitedValidity ? '/ Lifetime' : `/ ${plan.validity || `${plan.validityDays} Days`}`}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: activeServiceConfig.color }}>
+                          Active SLA
+                        </span>
+                      </div>
+
+                      {/* Features List */}
+                      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 8 }}>
+                          Included Features:
+                        </div>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.4 }}>
+                          {features.map((f, fIdx) => (
+                            <li key={fIdx} className="d-flex align-items-center" style={{ gap: 6, marginBottom: 5 }}>
+                              <span
+                                style={{
+                                  width: 15,
+                                  height: 15,
+                                  borderRadius: '50%',
+                                  background: `${activeServiceConfig.color}18`,
+                                  color: activeServiceConfig.color,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: 9.5,
+                                  fontWeight: 900,
+                                  flexShrink: 0
+                                }}
+                              >
+                                ✓
+                              </span>
+                              <span style={{ color: '#1e293b', fontWeight: 500 }}>{f}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Card Action Button (Footer) */}
+                    <div style={{ padding: '0 16px 16px', background: 'transparent' }}>
+                      {isCurrent ? (
+                        <button
+                          type="button"
+                          disabled
+                          style={{
+                            width: '100%',
+                            height: 40,
+                            borderRadius: 10,
+                            border: '1px solid #86efac',
+                            background: '#f0fdf4',
+                            color: '#15803d',
+                            fontWeight: 800,
+                            fontSize: 12.5,
+                            cursor: 'default'
+                          }}
+                        >
+                          ✓ Current Active Plan
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPurchase({ ...plan, service: selectedService })}
+                          className="buy-plan-btn"
+                          style={{
+                            width: '100%',
+                            height: 40,
+                            borderRadius: 10,
+                            border: 'none',
+                            background: `linear-gradient(135deg, ${activeServiceConfig.color}, #059669)`,
+                            color: '#ffffff',
+                            fontWeight: 800,
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            boxShadow: `0 4px 14px ${activeServiceConfig.color}35`,
+                            transition: 'all 0.18s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <span>⚡</span> Buy {plan.name}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       ) : (
         /* MY PURCHASE REQUESTS TAB */

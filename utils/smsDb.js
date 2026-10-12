@@ -211,9 +211,10 @@ function getSmsById(id) {
 
 function getSmsList({ limit = 50, offset = 0, sender, deviceId } = {}) {
   let query = `
-    SELECT m.*, d.status as webhook_status, d.http_status as webhook_http_status, d.target_url, d.attempts, d.id as delivery_id
+    SELECT m.*, 
+      COALESCE((SELECT status FROM webhook_deliveries WHERE sms_id = m.id ORDER BY id DESC LIMIT 1), 'PENDING') as webhook_status,
+      COALESCE((SELECT http_status FROM webhook_deliveries WHERE sms_id = m.id ORDER BY id DESC LIMIT 1), 0) as webhook_http_status
     FROM sms_messages m
-    LEFT JOIN webhook_deliveries d ON d.sms_id = m.id
     WHERE 1=1
   `;
   const params = [];

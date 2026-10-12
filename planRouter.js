@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const { authRequired } = require('./auth');
+const { authRequired, User } = require('./auth');
+const { User: DbUser } = require('./db');
 
 // Telecom Services from "plan API"
 const { resolveTelecomDetails, OPERATOR_CODE_MAP, CIRCLE_CODE_MAP } = require('./plan API/services/seriesEngine');
@@ -14,6 +15,123 @@ const operatorCacheService = require('./plan API/services/operatorCacheService')
 const { getUsers, saveUser, findUser, deductUserHit, regenerateUserToken } = require('./plan API/services/userService');
 const { authenticateApiRequest } = require('./plan API/services/clientService');
 const { getClientIp } = require('./plan API/services/ipService');
+
+// Helper to deduct hit & wallet balance for developer REST requests
+async function checkAndDeductPlanHit(auth, res, mobileNo = null) {
+  let appUser = null;
+  const UserModel = User || DbUser;
+  if (auth && auth.user && UserModel) {
+    try {
+      if (auth.user.id) {
+        appUser = await UserModel.findOne({ userId: auth.user.id }) || await UserModel.findOne({ id: auth.user.id });
+      }
+      if (!appUser && auth.user.mobile) {
+        appUser = await UserModel.findOne({ mobile: auth.user.mobile });
+      }
+    } catch (e) {}
+  }
+
+  const pricePerHit = 0.20;
+  if (appUser) {
+    const curBalance = Number(appUser.walletBalance || 0);
+    const isAdmin = appUser.role === 'admin' || String(appUser.userId).toUpperCase() === 'ADMIN';
+    if (!isAdmin && curBalance < pricePerHit) {
+      res.status(200).json({
+        "ERROR": "4",
+        "STATUS": "4",
+        "error": "4",
+        ...(mobileNo ? { "Mobile": String(mobileNo).trim(), "MOBILENO": String(mobileNo).trim() } : {}),
+        "Operator": "null",
+        "OpCode": "null",
+        "Circle": "null",
+        "CircleCode": "null",
+        "RDATA": null,
+        "DATA": null,
+        "Message": `Insufficient wallet balance! Hit requires ₹${pricePerHit.toFixed(2)}. Current balance: ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`,
+        "MESSAGE": `Insufficient wallet balance! Hit requires ₹${pricePerHit.toFixed(2)}. Current balance: ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`
+      });
+      return false;
+    }
+    if (!isAdmin) {
+      appUser.walletBalance = Math.max(0, curBalance - pricePerHit);
+      appUser.updatedAt = new Date();
+      await appUser.save();
+    }
+    return true;
+  }
+
+  // Fallback to hits quota
+  const hitCheck = await deductUserHit(auth.user.id);
+  if (!hitCheck.allowed) {
+    res.status(200).json({
+      "ERROR": "4",
+      "STATUS": "4",
+      "error": "4",
+      ...(mobileNo ? { "Mobile": String(mobileNo).trim(), "MOBILENO": String(mobileNo).trim() } : {}),
+      "Operator": "null",
+      "OpCode": "null",
+      "Circle": "null",
+      "CircleCode": "null",
+      "RDATA": null,
+      "DATA": null,
+      "Message": "Insufficient plan hits or wallet balance. Please add funds to your wallet.",
+      "MESSAGE": "Insufficient plan hits or wallet balance. Please add funds to your wallet."
+    });
+    return false;
+  }
+  return true;
+}
+
+// Helper to deduct hit from user wallet on portal panel requests
+async function checkAndDeductPanelHit(req, res) {
+  try {
+    const authHeader = req.headers['authorization'];
+    let token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '') || req.query.token;
+    if (!token && req.cookies && req.cookies.wa_login) token = req.cookies.wa_login;
+    if (!token && req.headers.cookie) {
+      const match = req.headers.cookie.match(/(?:^|;\s*)wa_login=([^;]+)/);
+      if (match) token = decodeURIComponent(match[1]).trim();
+    }
+
+    let authUser = req.user;
+    if (!authUser && token) {
+      const { authenticateToken } = require('./auth');
+      authUser = await authenticateToken(token);
+    }
+
+    if (!authUser) {
+      res.status(401).json({
+        success: false,
+        message: 'कृपया पहले लॉगिन करें।'
+      });
+      return false;
+    }
+
+    const isAdmin = authUser.role === 'admin' || String(authUser.userId).toUpperCase() === 'ADMIN';
+    const pricePerHit = 0.20;
+
+    if (!isAdmin) {
+      const curBalance = Number(authUser.walletBalance || 0);
+      if (curBalance < pricePerHit) {
+        res.status(402).json({
+          success: false,
+          code: 'INSUFFICIENT_BALANCE',
+          message: `अपर्याप्त वॉलेट बैलेंस! सर्च के लिए ₹${pricePerHit.toFixed(2)} प्रति हिट आवश्यक है। आपका वर्तमान वॉलेट बैलेंस ₹${curBalance.toFixed(2)} है। कृपया वॉलेट में फंड जोड़ें।`,
+          requiredAmount: pricePerHit,
+          walletBalance: curBalance
+        });
+        return false;
+      }
+
+      authUser.walletBalance = Math.max(0, curBalance - pricePerHit);
+      authUser.updatedAt = new Date();
+      await authUser.save();
+    }
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
 
 // User helper to get or auto-initialize Plan API user profile with test hits
 async function getOrCreatePlanUser(authUser) {
@@ -134,17 +252,14 @@ router.post(['/api/lookup/operator', '/api/lookup/full'], async (req, res) => {
   const t0 = performance.now();
   try {
     const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
-    const { userMobile } = req.body;
     if (!rawMobile || String(rawMobile).trim().length < 10) {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
     const cleanMobile = String(rawMobile).trim().replace(/\D/g, '').slice(-10);
 
-    let hitInfo = null;
-    if (userMobile) {
-      hitInfo = await deductUserHit(userMobile);
-    }
+    const allowed = await checkAndDeductPanelHit(req, res);
+    if (!allowed) return;
 
     // 1. Check cache first
     let result = await operatorCacheService.getOperator(cleanMobile);
@@ -168,7 +283,6 @@ router.post(['/api/lookup/operator', '/api/lookup/full'], async (req, res) => {
       success: true,
       data: {
         ...result,
-        remainingHits: hitInfo ? hitInfo.remainingHits : undefined,
         responseTime: `${elapsedMs} ms`
       }
     });
@@ -183,17 +297,14 @@ router.post('/api/roffer/query', async (req, res) => {
   try {
     const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
     const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
-    const { userMobile } = req.body;
     if (!rawMobile || String(rawMobile).trim().length < 10) {
       return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required.' });
     }
 
     const cleanMobile = String(rawMobile).trim().replace(/\D/g, '').slice(-10);
 
-    let hitInfo = null;
-    if (userMobile) {
-      hitInfo = await deductUserHit(userMobile);
-    }
+    const allowed = await checkAndDeductPanelHit(req, res);
+    if (!allowed) return;
 
     const result = await fetchRofferDetails(cleanMobile, operatorCode);
     const elapsedMs = (performance.now() - t0).toFixed(2);
@@ -201,8 +312,7 @@ router.post('/api/roffer/query', async (req, res) => {
     res.json({
       success: true,
       data: result,
-      responseTime: `${elapsedMs} ms`,
-      remainingHits: hitInfo ? hitInfo.remainingHits : undefined
+      responseTime: `${elapsedMs} ms`
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -215,17 +325,14 @@ router.post('/api/dth/query', async (req, res) => {
   try {
     const rawNumber = req.body.dthNumber || req.body.mobile || req.body.number;
     const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
-    const { userMobile } = req.body;
     if (!rawNumber || String(rawNumber).trim().length < 8) {
       return res.status(400).json({ success: false, message: 'Valid DTH VC / Subscriber ID is required.' });
     }
 
     const cleanNumber = String(rawNumber).trim().replace(/\D/g, '');
 
-    let hitInfo = null;
-    if (userMobile) {
-      hitInfo = await deductUserHit(userMobile);
-    }
+    const allowed = await checkAndDeductPanelHit(req, res);
+    if (!allowed) return;
 
     const result = await fetchDthInfoDetails(cleanNumber, operatorCode);
     const elapsedMs = (performance.now() - t0).toFixed(2);
@@ -233,8 +340,7 @@ router.post('/api/dth/query', async (req, res) => {
     res.json({
       success: true,
       data: result,
-      responseTime: `${elapsedMs} ms`,
-      remainingHits: hitInfo ? hitInfo.remainingHits : undefined
+      responseTime: `${elapsedMs} ms`
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -247,17 +353,14 @@ router.post('/api/recharge/query', async (req, res) => {
   try {
     const rawMobile = req.body.mobile || req.body.mobileNumber || req.body.number;
     const operatorCode = req.body.operatorCode || req.body.operator || req.body.opCode;
-    const { userMobile } = req.body;
     if (!rawMobile || String(rawMobile).trim().length < 8) {
       return res.status(400).json({ success: false, message: 'Valid Mobile or VC number is required.' });
     }
 
     const cleanNumber = String(rawMobile).trim().replace(/\D/g, '');
 
-    let hitInfo = null;
-    if (userMobile) {
-      hitInfo = await deductUserHit(userMobile);
-    }
+    const allowed = await checkAndDeductPanelHit(req, res);
+    if (!allowed) return;
 
     const result = await fetchLastRechargeDetails(cleanNumber, operatorCode);
     const elapsedMs = (performance.now() - t0).toFixed(2);
@@ -265,8 +368,7 @@ router.post('/api/recharge/query', async (req, res) => {
     res.json({
       success: true,
       data: result,
-      responseTime: `${elapsedMs} ms`,
-      remainingHits: hitInfo ? hitInfo.remainingHits : undefined
+      responseTime: `${elapsedMs} ms`
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -361,20 +463,9 @@ router.all(['/api/Mobile/OperatorFetchNew', '/api/mobile/operatorfetchnew'], asy
     });
   }
 
-  // Deduct hit
-  const hitCheck = await deductUserHit(auth.user.id);
-  if (!hitCheck.allowed) {
-    return res.status(200).json({
-      "ERROR": "4",
-      "STATUS": "4",
-      "Mobile": mobileNo ? String(mobileNo).trim() : "null",
-      "Operator": "null",
-      "OpCode": "null",
-      "Circle": "null",
-      "CircleCode": "null",
-      "Message": "Insufficient plan hits. Please recharge your plan."
-    });
-  }
+  // Deduct hit / wallet balance
+  const allowed = await checkAndDeductPlanHit(auth, res, mobileNo);
+  if (!allowed) return;
 
   if (!mobileNo || String(mobileNo).trim().replace(/\D/g, '').length < 10) {
     return res.status(200).json({
@@ -459,17 +550,8 @@ router.all(['/api/Mobile/Operatorplan', '/api/Mobile/PlanFetch'], async (req, re
     });
   }
 
-  const hitCheck = await deductUserHit(auth.user.id);
-  if (!hitCheck.allowed) {
-    return res.status(200).json({
-      "ERROR": "4",
-      "STATUS": "4",
-      "Operator": "null",
-      "Circle": "null",
-      "RDATA": null,
-      "MESSAGE": "Insufficient plan hits. Please recharge your plan."
-    });
-  }
+  const allowed = await checkAndDeductPlanHit(auth, res);
+  if (!allowed) return;
 
   if (!opCode) {
     return res.status(200).json({
@@ -525,16 +607,8 @@ router.all(['/api/Mobile/RofferCheck', '/api/Mobile/roffercheck', '/api/mobile/r
     });
   }
 
-  const hitCheck = await deductUserHit(auth.user.id);
-  if (!hitCheck.allowed) {
-    return res.status(200).json({
-      "ERROR": "4",
-      "STATUS": "4",
-      "MOBILENO": mobileNo ? String(mobileNo).trim() : "null",
-      "RDATA": null,
-      "MESSAGE": "Insufficient plan hits. Please recharge your plan."
-    });
-  }
+  const allowed = await checkAndDeductPlanHit(auth, res, mobileNo);
+  if (!allowed) return;
 
   if (!mobileNo || String(mobileNo).trim().replace(/\D/g, '').length < 10) {
     return res.status(200).json({
@@ -590,14 +664,8 @@ router.all([
     });
   }
 
-  const hitCheck = await deductUserHit(auth.user.id);
-  if (!hitCheck.allowed) {
-    return res.status(200).json({
-      "error": "4",
-      "DATA": null,
-      "Message": "Insufficient plan hits. Please recharge your plan."
-    });
-  }
+  const allowed = await checkAndDeductPlanHit(auth, res, mobileNo);
+  if (!allowed) return;
 
   if (!mobileNo || String(mobileNo).trim().replace(/\D/g, '').length < 8) {
     return res.status(200).json({

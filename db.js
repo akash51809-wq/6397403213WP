@@ -342,6 +342,7 @@ async function initTables(pool) {
     `CREATE INDEX IF NOT EXISTS idx_contacts_lid ON contacts("lid");`,
     `CREATE INDEX IF NOT EXISTS idx_contacts_ownerUserId ON contacts("ownerUserId");`,
     `CREATE INDEX IF NOT EXISTS idx_contacts_group ON contacts("group");`,
+    `DELETE FROM contacts WHERE "ownerUserId" IS NULL OR "phone" LIKE '%8416%' OR "name" IN ('Alice', 'Bob', 'Charlie', 'Sample Contact');`,
 
     // 9b. contact_groups
     `CREATE TABLE IF NOT EXISTS contact_groups (

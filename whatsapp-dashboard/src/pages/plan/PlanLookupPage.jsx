@@ -9,11 +9,7 @@ export default function PlanLookupPage() {
   const [mobile, setMobile] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
-  const [history, setHistory] = useState([
-    { mobile: '9840123456', operator: 'AIRTEL', circle: 'Chennai', opCode: '2', circleCode: '40', time: 'Just now' },
-    { mobile: '7000012345', operator: 'JIO', circle: 'Madhya Pradesh', opCode: '11', circleCode: '93', time: '1m ago' },
-    { mobile: '9820012345', operator: 'VI', circle: 'Mumbai', opCode: '6', circleCode: '92', time: '3m ago' }
-  ])
+  const [history, setHistory] = useState([])
 
   const handleLookup = async (e, numToQuery) => {
     if (e) e.preventDefault()
@@ -27,12 +23,20 @@ export default function PlanLookupPage() {
 
     try {
       setLoading(true)
+      const token = localStorage.getItem('token') || ''
       const res = await fetch('/api/lookup/operator', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ mobile: clean })
       })
       const data = await res.json()
+      if (res.status === 402 || data.code === 'INSUFFICIENT_BALANCE') {
+        notify(data.message || 'अपर्याप्त वॉलेट बैलेंस! कृपया वॉलेट में फंड जोड़ें।')
+        return
+      }
       if (data.success && data.data) {
         setResult(data.data)
         // Add to history
@@ -73,14 +77,6 @@ export default function PlanLookupPage() {
           <span className="eyebrow" style={{ color: '#ea580c' }}>SERIES ENGINE DISCOVERY</span>
           <h1>Operator & Circle Lookup</h1>
           <p>Instant Indian Telecom HLR/MSC mobile series detection with operator code & telecom circle mapping.</p>
-        </div>
-        <div className="actions">
-          <button type="button" className="btn" onClick={() => navigate('/plans/browse')}>
-            📋 Browse Plans
-          </button>
-          <button type="button" className="btn primary" onClick={() => navigate('/plans/roffer')}>
-            🎁 Check R-Offers
-          </button>
         </div>
       </div>
 
@@ -217,24 +213,6 @@ export default function PlanLookupPage() {
                   }}>
 {`GET /api/Mobile/OperatorFetchNew?Mobileno=${result.mobile}&ApiUserID=YOUR_MOBILE&token=YOUR_TOKEN`}
                   </pre>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={() => navigate('/plans/browse')}
-                  >
-                    📋 Browse All {result.operator} Plans
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => navigate('/plans/roffer')}
-                  >
-                    🎁 Check Best R-Offers for this SIM
-                  </button>
                 </div>
               </div>
             ) : (

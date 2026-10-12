@@ -71,21 +71,27 @@ function getTaxpayersDatabase() {
   return {};
 }
 
-// In-memory search history for quick recall
-const searchHistoryStore = [];
+// User-scoped in-memory search history for quick recall
+const userSearchHistoryMap = new Map();
 
-function recordSearchHistory(record) {
+function recordSearchHistory(userId, record) {
   try {
-    const existingIdx = searchHistoryStore.findIndex(item => item.gstin === record.gstin);
-    if (existingIdx >= 0) {
-      searchHistoryStore.splice(existingIdx, 1);
+    if (!userId) return;
+    const uid = String(userId);
+    if (!userSearchHistoryMap.has(uid)) {
+      userSearchHistoryMap.set(uid, []);
     }
-    searchHistoryStore.unshift({
+    const list = userSearchHistoryMap.get(uid);
+    const existingIdx = list.findIndex(item => item.gstin === record.gstin);
+    if (existingIdx >= 0) {
+      list.splice(existingIdx, 1);
+    }
+    list.unshift({
       ...record,
       searchedAt: new Date().toISOString()
     });
-    if (searchHistoryStore.length > 50) {
-      searchHistoryStore.pop();
+    if (list.length > 50) {
+      list.pop();
     }
   } catch (e) {}
 }
@@ -421,7 +427,7 @@ router.post('/api/gst/search', authRequired, async (req, res) => {
       });
     }
 
-    recordSearchHistory({
+    recordSearchHistory(user.userId, {
       gstin: profile.gstin,
       legalName: profile.legalName,
       tradeName: profile.tradeName,
@@ -474,55 +480,107 @@ router.post('/api/gst/filings', async (req, res) => {
   }
 });
 
-// 4. Search History
-router.get('/api/gst/history', (req, res) => {
-  if (searchHistoryStore.length === 0) {
-    Object.values(SAMPLE_RECORDS).forEach(rec => {
-      recordSearchHistory({
-        gstin: rec.gstin,
-        legalName: rec.legalName,
-        tradeName: rec.tradeName,
-        status: rec.status,
-        state: rec.state
-      });
+// 4. Search History (strictly user-scoped)
+router.get('/api/gst/history', authRequired, (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const list = userSearchHistoryMap.get(String(userId)) || [];
+    res.json({
+      success: true,
+      history: list.slice(0, 20)
     });
+  } catch (err) {
+    res.json({ success: true, history: [] });
   }
-
-  res.json({
-    success: true,
-    history: searchHistoryStore.slice(0, 15)
-  });
 });
 
-// 5. Public Developer API endpoint
-router.get('/api/v1/gst/verify', (req, res) => {
-  const gstin = req.query.gstin || req.query.gst;
-  if (!gstin) {
-    return res.status(400).json({
-      success: false,
-      error: 'GSTIN query parameter is required (e.g. ?gstin=09AKPPG5665E1ZU)'
-    });
-  }
+// 5. Developer API endpoint (Requires authentication & debits wallet per hit)
+router.get('/api/v1/gst/verify', async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '') || req.query.token || req.query.apiKey;
 
-  const clean = validateGstin(gstin);
-  if (!clean) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid 15-character GSTIN format.'
-    });
-  }
-
-  const profile = buildTaxpayerProfile(clean);
-  const filings = buildFilingRecords(clean, '2026-2027');
-
-  res.json({
-    success: true,
-    status: 200,
-    data: {
-      taxpayer: profile,
-      recentFilings: filings.summary
+    let authUser = null;
+    if (token) {
+      try {
+        const { verifyToken } = require('./auth');
+        const decoded = verifyToken(token);
+        if (decoded && decoded.userId) {
+          authUser = await User.findOne({ userId: decoded.userId });
+        }
+      } catch (e) {}
     }
-  });
+
+    if (!authUser) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized! Please provide a valid Bearer token in header or ?token=YOUR_TOKEN parameter.'
+      });
+    }
+
+    const pricePerHit = 1.0;
+    const curBalance = Number(authUser.walletBalance || 0);
+    const isAdmin = authUser.role === 'admin' || String(authUser.userId).toUpperCase() === 'ADMIN';
+
+    if (!isAdmin && curBalance < pricePerHit) {
+      return res.status(402).json({
+        success: false,
+        code: 'INSUFFICIENT_BALANCE',
+        error: `Insufficient wallet balance! GST verification requires ₹${pricePerHit} per hit. Your current balance is ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`
+      });
+    }
+
+    const gstin = req.query.gstin || req.query.gst;
+    if (!gstin) {
+      return res.status(400).json({
+        success: false,
+        error: 'GSTIN query parameter is required (e.g. ?gstin=ENTER_VALID_GST)'
+      });
+    }
+
+    const clean = validateGstin(gstin);
+    if (!clean) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid 15-character GSTIN format.'
+      });
+    }
+
+    // Deduct wallet balance for non-admin
+    if (!isAdmin) {
+      authUser.walletBalance = Math.max(0, curBalance - pricePerHit);
+      authUser.updatedAt = new Date();
+      await authUser.save();
+    }
+
+    const profile = buildTaxpayerProfile(clean);
+    const filings = buildFilingRecords(clean, '2026-2027');
+
+    // Record in user's search history
+    recordSearchHistory(authUser.userId, {
+      gstin: profile.gstin,
+      legalName: profile.legalName,
+      tradeName: profile.tradeName,
+      status: profile.status,
+      state: profile.state
+    });
+
+    res.json({
+      success: true,
+      status: 200,
+      data: {
+        taxpayer: profile,
+        recentFilings: filings.summary
+      },
+      charged: isAdmin ? 0 : pricePerHit,
+      walletBalance: isAdmin ? 999999 : authUser.walletBalance
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: 'GST verification API error: ' + err.message
+    });
+  }
 });
 
 module.exports = router;

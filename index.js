@@ -2316,13 +2316,11 @@ app.get('/api/contacts', authRequired, async (req, res) => {
     try {
         const { query: dbQuery } = require('./db');
         const userId = req.user.userId;
-        const isAdmin = req.user.role === 'admin';
         const groupFilter = req.query.group;
 
-        let sql = isAdmin 
-            ? `SELECT * FROM contacts WHERE 1=1`
-            : `SELECT * FROM contacts WHERE ("ownerUserId" = $1 OR "ownerUserId" IS NULL)`;
-        const params = isAdmin ? [] : [userId];
+        // Strictly return only real contacts owned by this user
+        let sql = `SELECT * FROM contacts WHERE "ownerUserId" = $1`;
+        const params = [userId];
 
         if (groupFilter && groupFilter !== 'All') {
             params.push(groupFilter);

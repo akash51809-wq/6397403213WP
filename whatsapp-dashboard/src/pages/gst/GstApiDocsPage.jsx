@@ -9,23 +9,27 @@ export default function GstApiDocsPage() {
   const codeSnippets = {
     curl: `curl -X POST "${origin}/api/gst/search" \\
   -H "Content-Type: application/json" \\
-  -d '{"gstin": "19MAJPS4713H1Z3"}'`,
+  -H "Authorization: Bearer YOUR_API_TOKEN" \\
+  -d '{"gstin": "ENTER_VALID_GST"}'`,
     node: `const axios = require('axios');
 
 async function verifyGstin(gstin) {
   const response = await axios.post('${origin}/api/gst/search', {
     gstin: gstin
+  }, {
+    headers: { 'Authorization': 'Bearer YOUR_API_TOKEN' }
   });
   console.log('Taxpayer Details:', response.data);
 }
 
-verifyGstin('19MAJPS4713H1Z3');`,
+verifyGstin('ENTER_VALID_GST');`,
     python: `import requests
 
 url = "${origin}/api/gst/search"
-payload = {"gstin": "19MAJPS4713H1Z3"}
+headers = {"Authorization": "Bearer YOUR_API_TOKEN"}
+payload = {"gstin": "ENTER_VALID_GST"}
 
-response = requests.post(url, json=payload)
+response = requests.post(url, json=payload, headers=headers)
 data = response.json()
 print("Taxpayer Status:", data.get('data', {}).get('status'))`
   }
@@ -138,24 +142,7 @@ print("Taxpayer Status:", data.get('data', {}).get('status'))`
                   <td>Verify GSTIN and get complete taxpayer registration profile</td>
                   <td>
                     <code style={{ background: '#f5f3ff', padding: '2px 6px', borderRadius: 4, color: '#6d28d9' }}>
-                      {`{ "gstin": "19MAJPS4713H1Z3" }`}
-                    </code>
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    <span className="badge" style={{ background: '#ede9fe', color: '#7c3aed', borderColor: '#c4b5fd' }}>
-                      POST
-                    </span>
-                  </td>
-                  <td>
-                    <strong style={{ fontFamily: 'monospace', color: '#7c3aed' }}>/api/gst/filings</strong>
-                  </td>
-                  <td>Get GSTR-1 and GSTR-3B return filing history for a financial year</td>
-                  <td>
-                    <code style={{ background: '#f5f3ff', padding: '2px 6px', borderRadius: 4, color: '#6d28d9' }}>
-                      {`{ "gstin": "19MAJPS4713H1Z3", "year": "2026-2027" }`}
+                      {`{ "gstin": "ENTER_VALID_GST" }`}
                     </code>
                   </td>
                 </tr>
@@ -169,10 +156,10 @@ print("Taxpayer Status:", data.get('data', {}).get('status'))`
                   <td>
                     <strong style={{ fontFamily: 'monospace', color: '#7c3aed' }}>/api/v1/gst/verify</strong>
                   </td>
-                  <td>Public lightweight verification endpoint</td>
+                  <td>Developer verification endpoint (Debits wallet balance per hit)</td>
                   <td>
                     <code style={{ background: '#f5f3ff', padding: '2px 6px', borderRadius: 4, color: '#6d28d9' }}>
-                      ?gstin=19MAJPS4713H1Z3
+                      ?gstin=ENTER_VALID_GST&token=YOUR_API_TOKEN
                     </code>
                   </td>
                 </tr>
@@ -203,21 +190,23 @@ print("Taxpayer Status:", data.get('data', {}).get('status'))`
 {`{
   "success": true,
   "data": {
-    "gstin": "19MAJPS4713H1Z3",
-    "legalName": "BISWAJIT SHARMA",
-    "tradeName": "YE WALLET",
-    "registrationDate": "08/05/2022",
-    "constitutionOfBusiness": "Proprietorship",
+    "gstin": "GST no",
+    "legalName": "party name",
+    "tradeName": "trade name",
+    "registrationDate": "date of registration",
+    "constitutionOfBusiness": "constitution type",
     "status": "Active",
     "taxpayerType": "Regular",
-    "state": "West Bengal",
-    "stateCode": "19",
-    "pan": "MAJPS4713H",
-    "principalAddress": "1/109, Rasulpur Kuchut Road, Chak Nara Bus Stop, SKPARA, Ulara, Purba Bardhaman, West Bengal, 713151",
+    "state": "state name",
+    "stateCode": "state code",
+    "pan": "PAN no",
+    "principalAddress": "registered address",
     "aadhaarAuthenticated": "Yes",
-    "aadhaarAuthDate": "26/11/2024",
+    "aadhaarAuthDate": "auth date",
     "einvoiceStatus": "Yes"
   },
+  "charged": 1.0,
+  "walletBalance": 499.00,
   "timestamp": "2026-10-12T15:50:00.000Z"
 }`}
           </pre>

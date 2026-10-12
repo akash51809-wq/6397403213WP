@@ -73,49 +73,31 @@ export function Sidebar() {
         {sidebarCollapsed ? '›' : '‹'}
       </button>
 
-      {/* Brand Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-        {isSmsActive ? (
-          <NavLink className="brand" to="/sms/dashboard" onClick={closeMobile} data-title="Mobile SMS Gateway">
-            <span className="brand-mark" style={{ background: 'linear-gradient(145deg, #38bdf8, #0284c7)', color: '#fff' }}>📱</span>
-            <div>
-              <strong>Mobile SMS</strong>
-              <small>Gateway & Webhook</small>
-            </div>
-          </NavLink>
-        ) : isPlanApiActive ? (
-          <NavLink className="brand" to="/plans/dashboard" onClick={closeMobile} data-title="Plan & Recharge API">
-            <span className="brand-mark" style={{ background: 'linear-gradient(145deg, #fb923c, #ea580c)', color: '#fff' }}>⚡</span>
-            <div>
-              <strong>Plan API</strong>
-              <small>Recharge & Info</small>
-            </div>
-          </NavLink>
-        ) : isGstActive ? (
-          <NavLink className="brand" to="/gst/dashboard" onClick={closeMobile} data-title="GST Verification Portal">
-            <span className="brand-mark" style={{ background: 'linear-gradient(145deg, #a855f7, #7c3aed)', color: '#fff' }}>🏛️</span>
-            <div>
-              <strong>GST Portal</strong>
-              <small>Taxpayer & Filings</small>
-            </div>
-          </NavLink>
-        ) : (
-          <NavLink className="brand" to="/dashboard" onClick={closeMobile} data-title={companySettings?.companyName || "WhatsApp Automation"}>
-            {companySettings?.logoUrl ? (
-              <img
-                src={companySettings.logoUrl}
-                alt={companySettings?.companyName || "Logo"}
-                style={{ maxHeight: 38, maxWidth: 120, objectFit: 'contain' }}
-              />
-            ) : (
-              <span className="brand-mark">⚡</span>
-            )}
-            <div>
-              <strong>{companySettings?.companyName || "WhatsApp Automation"}</strong>
-              <small>WhatsApp Automation</small>
-            </div>
-          </NavLink>
-        )}
+      {/* Brand Header - Logo Only */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '12px 14px', boxSizing: 'border-box', overflow: 'hidden' }}>
+        <NavLink 
+          to={isSmsActive ? "/sms/dashboard" : isPlanApiActive ? "/plans/dashboard" : isGstActive ? "/gst/dashboard" : "/dashboard"} 
+          onClick={closeMobile} 
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', overflow: 'hidden' }}
+          title={companySettings?.companyName || "Easy Recharge Solution"}
+        >
+          <img
+            src={companySettings?.logoUrl || "/logo.png"}
+            alt={companySettings?.companyName || "Logo"}
+            onError={(e) => {
+              if (e.target.src !== '/logo.png') {
+                e.target.src = '/logo.png'
+              }
+            }}
+            style={{ 
+              maxHeight: 44, 
+              maxWidth: '100%', 
+              objectFit: 'contain', 
+              display: 'block', 
+              margin: '0 auto' 
+            }}
+          />
+        </NavLink>
         <button 
           type="button" 
           className="mobile-close-btn" 
@@ -199,9 +181,9 @@ export function Sidebar() {
               to="/sms/reports" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
-              data-title="Delivery Reports"
+              data-title="Send Msg Report"
             >
-              <span>▥</span><b>Delivery Reports</b>
+              <span>▥</span><b>Send Msg Report</b>
             </NavLink>
           </>
         ) : isPlanApiActive ? (

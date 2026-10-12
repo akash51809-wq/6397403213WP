@@ -134,8 +134,8 @@ export default function SmsInboxPage() {
                       </td>
                       <td style={{ fontSize: 11, color: '#64748b' }}>{sms.received_at}</td>
                       <td>
-                        <span className={`badge ${sms.delivery_status === 'DELIVERED' ? 'success' : sms.delivery_status === 'FAILED' ? 'failed' : 'pending'}`}>
-                          {sms.delivery_status || 'PROCESSED'}
+                        <span className={`badge ${(sms.webhook_status || sms.delivery_status) === 'DELIVERED' ? 'success' : (sms.webhook_status || sms.delivery_status) === 'FAILED' ? 'failed' : 'pending'}`}>
+                          {sms.webhook_status || sms.delivery_status || 'PROCESSED'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>

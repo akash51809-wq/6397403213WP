@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-const DEFAULT_SAMPLES = [
-  { gstin: '09AKPPG5665E1ZU', label: '09AKPPG5665E1ZU (Easy Recharge Solution - Uttar Pradesh)', state: 'Uttar Pradesh' },
-  { gstin: '19MAJPS4713H1Z3', label: '19MAJPS4713H1Z3 (YE WALLET - West Bengal)', state: 'West Bengal' },
-  { gstin: '27AAACR4849R1ZZ', label: '27AAACR4849R1ZZ (Reliance Retail - Maharashtra)', state: 'Maharashtra' }
-]
-
 export default function GstDashboardPage() {
   const navigate = useNavigate()
   const [searchInput, setSearchInput] = useState('')
@@ -20,7 +14,10 @@ export default function GstDashboardPage() {
 
   const fetchRecentHistory = async () => {
     try {
-      const res = await fetch('/api/gst/history')
+      const token = localStorage.getItem('token') || ''
+      const res = await fetch('/api/gst/history', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      })
       const data = await res.json()
       if (data.success && data.history) {
         setRecentSearches(data.history)
@@ -39,12 +36,6 @@ export default function GstDashboardPage() {
     }
     setError('')
     navigate(`/gst/search?gstin=${encodeURIComponent(clean)}`)
-  }
-
-  const selectSampleGstin = (gstin) => {
-    setSearchInput(gstin)
-    setError('')
-    navigate(`/gst/search?gstin=${encodeURIComponent(gstin)}`)
   }
 
   return (
@@ -67,7 +58,7 @@ export default function GstDashboardPage() {
               <input
                 type="text"
                 className="input"
-                placeholder="उदा: 19MAJPS4713H1Z3"
+                placeholder="ENTER VALID GST"
                 value={searchInput}
                 maxLength={15}
                 onChange={(e) => {
@@ -101,30 +92,6 @@ export default function GstDashboardPage() {
               ⚠️ {error}
             </div>
           )}
-
-          {/* Sample GSTIN Chips */}
-          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: '#6d28d9', fontWeight: 600 }}>Quick Test Samples:</span>
-            {DEFAULT_SAMPLES.map((sample) => (
-              <button
-                key={sample.gstin}
-                type="button"
-                onClick={() => selectSampleGstin(sample.gstin)}
-                style={{
-                  background: '#f5f3ff',
-                  border: '1px solid #ddd6fe',
-                  color: '#6d28d9',
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                {sample.label}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
