@@ -47,6 +47,9 @@ mobile SMS app/ers-sms-android/**/.gradle/
 mobile SMS app/ers-sms-android/**/.idea/
 mobile SMS app/ers-sms-android/local.properties
 mobile SMS app/ers-sms-android/**/*.apk
+!mobile SMS app/ERS-SMS-Gateway.apk
+!whatsapp-dashboard/public/downloads/
+!whatsapp-dashboard/public/downloads/**
 !frontend design/
 !frontend design/**
 *.zip

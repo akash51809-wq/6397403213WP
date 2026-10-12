@@ -31,37 +31,12 @@ async function checkAndDeductPlanHit(auth, res, mobileNo = null) {
     } catch (e) {}
   }
 
-  const pricePerHit = 0.20;
-  if (appUser) {
-    const curBalance = Number(appUser.walletBalance || 0);
-    const isAdmin = appUser.role === 'admin' || String(appUser.userId).toUpperCase() === 'ADMIN';
-    if (!isAdmin && curBalance < pricePerHit) {
-      res.status(200).json({
-        "ERROR": "4",
-        "STATUS": "4",
-        "error": "4",
-        ...(mobileNo ? { "Mobile": String(mobileNo).trim(), "MOBILENO": String(mobileNo).trim() } : {}),
-        "Operator": "null",
-        "OpCode": "null",
-        "Circle": "null",
-        "CircleCode": "null",
-        "RDATA": null,
-        "DATA": null,
-        "Message": `Insufficient wallet balance! Hit requires ₹${pricePerHit.toFixed(2)}. Current balance: ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`,
-        "MESSAGE": `Insufficient wallet balance! Hit requires ₹${pricePerHit.toFixed(2)}. Current balance: ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`
-      });
-      return false;
-    }
-    if (!isAdmin) {
-      appUser.walletBalance = Math.max(0, curBalance - pricePerHit);
-      appUser.updatedAt = new Date();
-      await appUser.save();
-    }
-    return true;
-  }
+  const isAdmin = appUser && (appUser.role === 'admin' || String(appUser.userId).toUpperCase() === 'ADMIN');
+  if (isAdmin) return true;
 
-  // Fallback to hits quota
-  const hitCheck = await deductUserHit(auth.user.id);
+  // Deduct from plan hit quota
+  const userId = auth?.user?.id || appUser?.userId || appUser?.id || appUser?.mobile;
+  const hitCheck = await deductUserHit(userId);
   if (!hitCheck.allowed) {
     res.status(200).json({
       "ERROR": "4",
@@ -74,15 +49,15 @@ async function checkAndDeductPlanHit(auth, res, mobileNo = null) {
       "CircleCode": "null",
       "RDATA": null,
       "DATA": null,
-      "Message": "Insufficient plan hits or wallet balance. Please add funds to your wallet.",
-      "MESSAGE": "Insufficient plan hits or wallet balance. Please add funds to your wallet."
+      "Message": "Active Plan Required! Insufficient plan API hits. Please purchase or renew your Plan API package from subscription plans.",
+      "MESSAGE": "Active Plan Required! Insufficient plan API hits. Please purchase or renew your Plan API package from subscription plans."
     });
     return false;
   }
   return true;
 }
 
-// Helper to deduct hit from user wallet on portal panel requests
+// Helper to check user plan hit quota on portal panel requests
 async function checkAndDeductPanelHit(req, res) {
   try {
     const authHeader = req.headers['authorization'];
@@ -108,24 +83,18 @@ async function checkAndDeductPanelHit(req, res) {
     }
 
     const isAdmin = authUser.role === 'admin' || String(authUser.userId).toUpperCase() === 'ADMIN';
-    const pricePerHit = 0.20;
+    if (isAdmin) return true;
 
-    if (!isAdmin) {
-      const curBalance = Number(authUser.walletBalance || 0);
-      if (curBalance < pricePerHit) {
-        res.status(402).json({
-          success: false,
-          code: 'INSUFFICIENT_BALANCE',
-          message: `अपर्याप्त वॉलेट बैलेंस! सर्च के लिए ₹${pricePerHit.toFixed(2)} प्रति हिट आवश्यक है। आपका वर्तमान वॉलेट बैलेंस ₹${curBalance.toFixed(2)} है। कृपया वॉलेट में फंड जोड़ें।`,
-          requiredAmount: pricePerHit,
-          walletBalance: curBalance
-        });
-        return false;
-      }
-
-      authUser.walletBalance = Math.max(0, curBalance - pricePerHit);
-      authUser.updatedAt = new Date();
-      await authUser.save();
+    // Deduct from user's Plan API hit quota
+    const userId = authUser.userId || authUser.id || authUser.mobile;
+    const hitCheck = await deductUserHit(userId);
+    if (!hitCheck.allowed) {
+      res.status(403).json({
+        success: false,
+        code: 'PLAN_REQUIRED',
+        message: 'Active Plan API पैकेज की आवश्यकता है! कृपया Subscription पेज पर जाकर Plan API प्लान खरीदें।'
+      });
+      return false;
     }
     return true;
   } catch (e) {

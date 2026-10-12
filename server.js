@@ -329,6 +329,23 @@ app.use(require('./planRouter'));
 app.use(require('./gstRouter'));
 app.use(botApp);
 
+// Direct Download Route for ERS SMS Gateway Android App APK
+app.get(['/download/ERS-SMS-Gateway.apk', '/downloads/ERS-SMS-Gateway.apk', '/api/sms/download-apk'], (req, res) => {
+  const possiblePaths = [
+    path.join(__dirname, 'whatsapp-dashboard', 'public', 'downloads', 'ERS-SMS-Gateway.apk'),
+    path.join(__dirname, 'whatsapp-dashboard', 'dist', 'downloads', 'ERS-SMS-Gateway.apk'),
+    path.join(__dirname, 'mobile SMS app', 'ERS-SMS-Gateway.apk')
+  ];
+  for (const apkPath of possiblePaths) {
+    if (fs.existsSync(apkPath)) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="ERS-SMS-Gateway.apk"');
+      return res.sendFile(apkPath);
+    }
+  }
+  return res.status(404).json({ success: false, message: 'ERS-SMS-Gateway.apk file not found on server.' });
+});
+
 // 5. React Dashboard SPA fallback (/login, /signup, /dashboard, /subscription, /admin, etc.)
 app.use((req, res, next) => {
   if (

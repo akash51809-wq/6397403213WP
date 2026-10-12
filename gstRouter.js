@@ -518,7 +518,16 @@ router.get('/api/v1/gst/verify', async (req, res) => {
       });
     }
 
-    const pricePerHit = 1.0;
+    let pricePerHit = 1.0;
+    try {
+      const planDoc = await Plan.findOne({ service: 'gst', active: true }).sort({ sortOrder: 1, pricePerHit: 1 });
+      if (planDoc && (planDoc.pricePerHit !== undefined && planDoc.pricePerHit !== null)) {
+        pricePerHit = Number(planDoc.pricePerHit);
+      } else if (planDoc && planDoc.price !== undefined) {
+        pricePerHit = Number(planDoc.price);
+      }
+    } catch (e) {}
+
     const curBalance = Number(authUser.walletBalance || 0);
     const isAdmin = authUser.role === 'admin' || String(authUser.userId).toUpperCase() === 'ADMIN';
 

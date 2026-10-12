@@ -2701,6 +2701,61 @@ router.delete('/api/admin/plans/:planId', authRequired, adminRequired, async (re
   }
 });
 
+// Admin: Get GST price per hit
+router.get('/api/admin/plans/gst-price', authRequired, async (req, res) => {
+  try {
+    const gstPlan = await Plan.findOne({ service: 'gst', active: true });
+    const price = gstPlan ? (gstPlan.pricePerHit ?? gstPlan.price ?? 1.0) : 1.0;
+    res.json({ success: true, pricePerHit: Number(price) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Admin: Set GST price per hit
+router.post('/api/admin/plans/gst-price', authRequired, adminRequired, async (req, res) => {
+  try {
+    const priceVal = Number(req.body.pricePerHit ?? req.body.price);
+    if (isNaN(priceVal) || priceVal < 0) {
+      return res.status(400).json({ success: false, message: 'कृपया मान्य GST मूल्य भरें।' });
+    }
+
+    let gstPlan = await Plan.findOne({ service: 'gst' });
+    if (!gstPlan) {
+      gstPlan = await Plan.create({
+        planId: 'plan_gst_hit',
+        name: 'GST Pay-Per-Hit',
+        service: 'gst',
+        price: priceVal,
+        pricePerHit: priceVal,
+        validity: 'Pay-per-hit',
+        validityDays: 365,
+        description: `Pay ₹${priceVal} per lookup deducted directly from user wallet balance.`,
+        headerColor: '#7c3aed',
+        active: true,
+        sortOrder: 1
+      });
+    } else {
+      gstPlan.price = priceVal;
+      gstPlan.pricePerHit = priceVal;
+      gstPlan.description = `Pay ₹${priceVal} per lookup deducted directly from user wallet balance.`;
+      gstPlan.active = true;
+      gstPlan.updatedAt = new Date();
+      await gstPlan.save();
+    }
+
+    res.json({
+      success: true,
+      message: `GST प्रति सर्च हिट शुल्क ₹${priceVal} सफलतापूर्वक सेव कर दिया गया!`,
+      pricePerHit: priceVal,
+      plan: gstPlan
+    });
+  } catch (error) {
+    console.error('Admin set GST price error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // 6. User: Submit plan purchase request
 router.post('/api/plans/purchase', authRequired, async (req, res) => {
   try {

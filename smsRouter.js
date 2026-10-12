@@ -484,6 +484,28 @@ router.get('/api/sms/outbox', (req, res) => {
   res.json({ success: true, outbox: outboxMessages });
 });
 
+// Download ERS SMS Gateway Android APK
+const path = require('path');
+const fs = require('fs');
+
+router.get(['/api/sms/download-apk', '/download/ERS-SMS-Gateway.apk'], (req, res) => {
+  const possiblePaths = [
+    path.join(__dirname, 'whatsapp-dashboard', 'public', 'downloads', 'ERS-SMS-Gateway.apk'),
+    path.join(__dirname, 'whatsapp-dashboard', 'dist', 'downloads', 'ERS-SMS-Gateway.apk'),
+    path.join(__dirname, 'mobile SMS app', 'ERS-SMS-Gateway.apk')
+  ];
+
+  for (const apkPath of possiblePaths) {
+    if (fs.existsSync(apkPath)) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="ERS-SMS-Gateway.apk"');
+      return res.sendFile(apkPath);
+    }
+  }
+
+  res.status(404).json({ success: false, message: 'ERS-SMS-Gateway.apk file not found on server.' });
+});
+
 router.initSmsWebSocket = initSmsWebSocket;
 router.phoneSockets = phoneSockets;
 

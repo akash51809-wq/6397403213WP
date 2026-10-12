@@ -544,8 +544,8 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
             </div>
           </div>
 
-          {selectedService === 'plan' || selectedService === 'gst' ? (
-            /* PAY-AS-YOU-GO DIRECT WALLET MODEL (NO BUY PLAN BUTTON) */
+          {selectedService === 'gst' ? (
+            /* PAY-AS-YOU-GO DIRECT WALLET MODEL EXCLUSIVE TO GST */
             <div
               style={{
                 borderRadius: 18,
@@ -589,7 +589,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                       <h3 style={{ margin: 0, fontSize: 19, fontWeight: 900, color: '#0f172a' }}>
-                        {selectedService === 'plan' ? 'Plan API · Pay-As-You-Go' : 'GST Portal · Pay-Per-Hit'}
+                        GST Portal · Pay-Per-Hit
                       </h3>
                       <span
                         style={{
@@ -606,9 +606,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                       </span>
                     </div>
                     <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
-                      {selectedService === 'plan'
-                        ? 'No monthly subscription package required. Charges are debited directly from your wallet balance per hit.'
-                        : 'No fixed subscription fee. GSTIN verifications are charged directly from your wallet balance per verification.'}
+                      No fixed monthly subscription fee. GSTIN verifications are charged directly from your wallet balance per verification.
                     </p>
                   </div>
                 </div>
@@ -627,7 +625,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     Standard Rate
                   </div>
                   <div style={{ fontSize: 26, fontWeight: 900, color: activeServiceConfig.color }}>
-                    ₹{selectedService === 'plan' ? '0.20' : '1.00'}
+                    ₹{(plans.find(p => (p.service || '').toLowerCase() === 'gst')?.pricePerHit || plans.find(p => (p.service || '').toLowerCase() === 'gst')?.price || 1.0).toFixed(2)}
                     <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginLeft: 4 }}>/ Hit</span>
                   </div>
                 </div>
@@ -652,17 +650,17 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                       <div style={{ fontSize: 11.5, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
                         👛 Current User Wallet Balance
                       </div>
-                      <div style={{ fontSize: 34, fontWeight: 900, color: Number(currentUser?.walletBalance || 0) >= (selectedService === 'plan' ? 0.20 : 1.0) ? '#10b981' : '#ef4444' }}>
+                      <div style={{ fontSize: 34, fontWeight: 900, color: Number(currentUser?.walletBalance || 0) >= 1.0 ? '#10b981' : '#ef4444' }}>
                         ₹{(Number(currentUser?.walletBalance || 0)).toFixed(2)}
                       </div>
                       <div style={{ fontSize: 13, color: '#64748b', marginTop: 6 }}>
-                        {Number(currentUser?.walletBalance || 0) >= (selectedService === 'plan' ? 0.20 : 1.0) ? (
+                        {Number(currentUser?.walletBalance || 0) >= 1.0 ? (
                           <span style={{ color: '#10b981', fontWeight: 700 }}>
-                            ✓ Active: Sufficient balance for ~{Math.floor(Number(currentUser?.walletBalance || 0) / (selectedService === 'plan' ? 0.20 : 1.0))} hits.
+                            ✓ Active: Sufficient balance for ~{Math.floor(Number(currentUser?.walletBalance || 0) / (Number(plans.find(p => (p.service || '').toLowerCase() === 'gst')?.pricePerHit || 1.0)))} hits.
                           </span>
                         ) : (
                           <span style={{ color: '#ef4444', fontWeight: 700 }}>
-                            ⚠️ Insufficient balance for API hits. Please add funds to proceed.
+                            ⚠️ Insufficient balance for GST hits. Please add funds to proceed.
                           </span>
                         )}
                       </div>
@@ -695,7 +693,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                       </button>
                       <button
                         type="button"
-                        onClick={() => navigate(selectedService === 'plan' ? '/plans/api-docs' : '/gst/api-docs')}
+                        onClick={() => navigate('/gst/api-docs')}
                         className="nav-action-btn"
                         style={{
                           minHeight: 42,
@@ -727,60 +725,33 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                       🚀 Included Features &amp; Supported APIs
                     </div>
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12.5, lineHeight: 1.6 }}>
-                      {selectedService === 'plan' ? (
-                        <>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Operator &amp; Circle Series Engine</b> (Instant &lt;0.5ms HLR series lookup)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Live Prepaid/Postpaid Plans</b> (Tariffs, data packs, and talktime)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Customer Best R-Offer Check</b> (Operator tailored custom offers)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>DTH Customer Info &amp; Balance</b> (VC subscriber verification)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>REST API Compatibility</b> with custom token &amp; IP whitelisting</span>
-                          </li>
-                        </>
-                      ) : (
-                        <>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Instant GSTIN Taxpayer Lookup</b> (Legal &amp; Trade Name Profile)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Official State &amp; Center Jurisdiction</b> with Constitution of Business</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>GSTR-1 &amp; GSTR-3B Return Filing History</b> (Real-Time Compliance Matrix)</span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Aadhaar Authentication &amp; e-Invoice Verification</b></span>
-                          </li>
-                          <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
-                            <span><b>Standard Developer API</b> (<code>/api/v1/gst/verify</code>) with JSON payload</span>
-                          </li>
-                        </>
-                      )}
+                      <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                        <span><b>Instant GSTIN Taxpayer Lookup</b> (Legal &amp; Trade Name Profile)</span>
+                      </li>
+                      <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                        <span><b>Official State &amp; Center Jurisdiction</b> with Constitution of Business</span>
+                      </li>
+                      <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                        <span><b>GSTR-1 &amp; GSTR-3B Return Filing History</b> (Real-Time Compliance Matrix)</span>
+                      </li>
+                      <li style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                        <span><b>Aadhaar Authentication &amp; e-Invoice Verification</b></span>
+                      </li>
+                      <li style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: '#10b981', fontWeight: 900 }}>✓</span>
+                        <span><b>Standard Developer API</b> (<code>/api/v1/gst/verify</code>) with JSON payload</span>
+                      </li>
                     </ul>
                   </div>
                 </div>
               </div>
             </div>
           ) : (
-            /* COMPACT 3D PRICING CARDS GRID FOR WHATSAPP & SMS */
+            /* COMPACT 3D PRICING CARDS GRID FOR WHATSAPP, SMS & PLAN API */
             <div 
               className="pricing-cards-grid mb-4" 
               style={{ 

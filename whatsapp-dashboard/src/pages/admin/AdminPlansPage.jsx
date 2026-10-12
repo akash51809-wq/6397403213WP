@@ -31,6 +31,8 @@ export default function AdminPlansPage({ notify: propNotify }) {
   const [previewMode, setPreviewMode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState('')
+  const [gstPriceInput, setGstPriceInput] = useState('1.0')
+  const [savingGstPrice, setSavingGstPrice] = useState(false)
 
   const emptyForm = {
     service: 'whatsapp',
@@ -67,6 +69,10 @@ export default function AdminPlansPage({ notify: propNotify }) {
       const d = await api('/api/admin/plans')
       if (d.success) {
         setPlans(d.plans || [])
+        const gstPlan = (d.plans || []).find(p => (p.service || '').toLowerCase() === 'gst' && p.active)
+        if (gstPlan) {
+          setGstPriceInput(String(gstPlan.pricePerHit ?? gstPlan.price ?? 1.0))
+        }
       }
     } catch (e) {
       notify('प्लान लोड करने में त्रुटि: ' + e.message)
@@ -78,6 +84,30 @@ export default function AdminPlansPage({ notify: propNotify }) {
   useEffect(() => {
     fetchPlans()
   }, [fetchPlans])
+
+  const handleSaveGstPrice = async () => {
+    const val = Number(gstPriceInput)
+    if (isNaN(val) || val < 0) {
+      return notify('कृपया मान्य GST प्रति हिट शुल्क भरें।')
+    }
+    setSavingGstPrice(true)
+    try {
+      const res = await api('/api/admin/plans/gst-price', {
+        method: 'POST',
+        body: JSON.stringify({ pricePerHit: val })
+      })
+      if (res.success) {
+        notify(res.message || `GST प्रति हिट शुल्क ₹${val} सफलतापूर्वक सेट कर दिया गया!`)
+        fetchPlans()
+      } else {
+        notify(res.message || 'GST शुल्क अपडेट करने में त्रुटि')
+      }
+    } catch (err) {
+      notify('GST Price Update Error: ' + err.message)
+    } finally {
+      setSavingGstPrice(false)
+    }
+  }
 
   const openCreateModal = () => {
     setEditingPlan(null)
@@ -445,6 +475,85 @@ export default function AdminPlansPage({ notify: propNotify }) {
               </div>
             </div>
           </div>
+
+          {/* GST Pay-Per-Hit Configuration Card */}
+          {selectedService === 'gst' && (
+            <div 
+              className="card shadow-sm mb-4" 
+              style={{ 
+                borderRadius: 16, 
+                border: '2px solid #7c3aed45', 
+                background: 'linear-gradient(135deg, #faf5ff 0%, #ffffff 100%)',
+                boxShadow: '0 4px 18px rgba(124, 58, 237, 0.08)'
+              }}
+            >
+              <div className="card-body p-4 d-flex flex-wrap align-items-center justify-content-between gap-3">
+                <div className="d-flex align-items-center gap-3">
+                  <div 
+                    style={{ 
+                      width: 50, 
+                      height: 50, 
+                      borderRadius: 12, 
+                      background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', 
+                      color: '#ffffff', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontSize: 24, 
+                      boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
+                      flexShrink: 0
+                    }}
+                  >
+                    🏛️
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#0f172a' }}>
+                      GST Per-Hit Pricing Configuration (प्रति सर्च हिट शुल्क सेटिंग)
+                    </h4>
+                    <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
+                      यूज़र जब GST सर्च या API हिट करेगा तो उसके वॉलेट से यह राशि सीधे कटेगी (Pay-Per-Hit मॉडल)।
+                    </p>
+                  </div>
+                </div>
+                <div className="d-flex align-items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                  <div className="input-group" style={{ width: 180 }}>
+                    <span className="input-group-text font-weight-bold" style={{ background: '#f3e8ff', color: '#7c3aed', borderColor: '#d8b4fe' }}>₹</span>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      min="0"
+                      className="form-control font-weight-bold" 
+                      value={gstPriceInput}
+                      onChange={e => setGstPriceInput(e.target.value)}
+                      style={{ borderColor: '#d8b4fe', fontSize: 15 }}
+                      placeholder="1.0"
+                    />
+                    <span className="input-group-text" style={{ background: '#f3e8ff', color: '#7c3aed', borderColor: '#d8b4fe', fontSize: 12 }}>/ hit</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleSaveGstPrice}
+                    disabled={savingGstPrice}
+                    style={{ 
+                      background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', 
+                      borderColor: '#7c3aed', 
+                      borderRadius: 8, 
+                      padding: '8px 20px', 
+                      fontWeight: 800,
+                      boxShadow: '0 4px 14px rgba(124,58,237,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    <span>💾</span>
+                    <span>{savingGstPrice ? 'Saving...' : 'Save GST Price'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Table Container Card */}
           <div className="card shadow-sm mb-4" style={{ borderRadius: 16 }}>

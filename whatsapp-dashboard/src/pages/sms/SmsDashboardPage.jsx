@@ -51,9 +51,31 @@ export default function SmsDashboardPage() {
         <div>
           <span className="eyebrow">MOBILE SMS HUB</span>
           <h1>SMS Gateway Dashboard</h1>
-          <p>Android phone SMS receiver & real-time webhook automation hub</p>
+          <p>Android phone SMS receiver &amp; real-time webhook automation hub</p>
         </div>
-        <div className="actions">
+        <div className="actions" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <a
+            href="/download/ERS-SMS-Gateway.apk"
+            download="ERS-SMS-Gateway.apk"
+            className="apk-blink-btn-hero"
+            style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #0284c7 100%)',
+              color: '#ffffff',
+              padding: '8px 16px',
+              borderRadius: 10,
+              fontWeight: 800,
+              fontSize: 13,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              textDecoration: 'none',
+              animation: 'apk-blink-glow 2s infinite ease-in-out',
+              boxShadow: '0 4px 16px rgba(16, 185, 129, 0.45)'
+            }}
+          >
+            <span className="apk-pulse-dot"></span>
+            <span>📲 Download APK (v1.0)</span>
+          </a>
           <button 
             type="button"
             className="btn" 
@@ -69,6 +91,148 @@ export default function SmsDashboardPage() {
           >
             + Connect Device (QR)
           </button>
+        </div>
+      </div>
+
+      {/* Embedded CSS for Animated Blinking APK Button */}
+      <style>{`
+        @keyframes apk-blink-glow {
+          0% {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7), 0 4px 18px rgba(2, 132, 199, 0.4);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 0 8px rgba(16, 185, 129, 0), 0 4px 28px rgba(16, 185, 129, 0.85);
+            transform: scale(1.025);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0), 0 4px 18px rgba(2, 132, 199, 0.4);
+            transform: scale(1);
+          }
+        }
+        @keyframes apk-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.3; transform: scale(0.85); }
+        }
+        .apk-pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #ffffff;
+          display: inline-block;
+          animation: apk-pulse 1.2s infinite ease-in-out;
+        }
+        .apk-blink-action-btn:hover {
+          transform: translateY(-2px) scale(1.03) !important;
+          filter: brightness(1.1);
+        }
+      `}</style>
+
+      {/* Prominent Animated Callout Banner for APK Download */}
+      <div 
+        className="card apk-download-banner" 
+        style={{ 
+          marginBottom: 22,
+          borderRadius: 16,
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          border: '2px solid rgba(16, 185, 129, 0.55)',
+          boxShadow: '0 10px 30px rgba(2, 132, 199, 0.2)',
+          overflow: 'hidden',
+          position: 'relative'
+        }}
+      >
+        <div style={{
+          position: 'absolute',
+          top: -40,
+          right: -40,
+          width: 140,
+          height: 140,
+          background: 'radial-gradient(circle, rgba(16, 185, 129, 0.3) 0%, transparent 70%)',
+          pointerEvents: 'none'
+        }} />
+        
+        <div style={{
+          padding: '18px 22px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div 
+              style={{
+                width: 50,
+                height: 50,
+                borderRadius: 14,
+                background: 'linear-gradient(135deg, #10b981, #0284c7)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 26,
+                boxShadow: '0 6px 18px rgba(16, 185, 129, 0.45)',
+                flexShrink: 0
+              }}
+            >
+              📲
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#ffffff' }}>
+                  ERS SMS Gateway Android App (v1.0)
+                </h3>
+                <span 
+                  style={{
+                    background: '#10b981',
+                    color: '#ffffff',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  <span className="apk-pulse-dot" style={{ width: 6, height: 6 }}></span>
+                  OFFICIAL APK
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: '#94a3b8', lineHeight: 1.4 }}>
+                Android फोन में SMS रिसीव करने, डुअल-सिम राउटिंग और रियल-टाइम सिंक के लिए ऐप इंस्टॉल करें।
+              </p>
+            </div>
+          </div>
+
+          <a
+            href="/download/ERS-SMS-Gateway.apk"
+            download="ERS-SMS-Gateway.apk"
+            className="apk-blink-action-btn"
+            style={{
+              background: 'linear-gradient(135deg, #10b981 0%, #0284c7 100%)',
+              color: '#ffffff',
+              padding: '11px 22px',
+              borderRadius: 12,
+              fontWeight: 800,
+              fontSize: 13.5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              textDecoration: 'none',
+              animation: 'apk-blink-glow 2.2s infinite ease-in-out',
+              boxShadow: '0 4px 20px rgba(16, 185, 129, 0.5)',
+              cursor: 'pointer',
+              flexShrink: 0
+            }}
+          >
+            <span style={{ fontSize: 20 }}>📥</span>
+            <div style={{ textAlign: 'left', lineHeight: 1.25 }}>
+              <div style={{ fontWeight: 900 }}>Download APK</div>
+              <div style={{ fontSize: 11, opacity: 0.9, fontWeight: 600 }}>v1.0 (7.1 MB) • Direct Install</div>
+            </div>
+          </a>
         </div>
       </div>
 
