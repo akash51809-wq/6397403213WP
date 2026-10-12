@@ -325,6 +325,7 @@ app.use('/api/settings/company', express.json({ limit: '15mb' }));
 app.use('/api/user/settings/auto-image', express.json({ limit: '15mb' }));
 app.use(authRouter);
 app.use(require('./smsRouter'));
+app.use(require('./planRouter'));
 app.use(botApp);
 
 // 5. React Dashboard SPA fallback (/login, /signup, /dashboard, /subscription, /admin, etc.)

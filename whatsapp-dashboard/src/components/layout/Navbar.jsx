@@ -36,6 +36,15 @@ const pageMeta = {
   '/sms/reports': { title: 'Delivery Reports', eyebrow: 'DELIVERY LOGS' },
   '/services/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
   '/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
+  '/plans': { title: 'Plan API Dashboard', eyebrow: 'TELECOM ENGINE' },
+  '/plans/dashboard': { title: 'Plan API Dashboard', eyebrow: 'TELECOM ENGINE' },
+  '/plans/lookup': { title: 'Operator Lookup', eyebrow: 'SERIES ENGINE' },
+  '/plans/browse': { title: 'Browse Plans', eyebrow: 'TARIFF & OFFERS' },
+  '/plans/roffer': { title: 'R-Offer Check', eyebrow: 'BEST OFFERS' },
+  '/plans/dth': { title: 'DTH Customer Info', eyebrow: 'DTH VERIFICATION' },
+  '/plans/recharge-status': { title: 'Last Recharge Status', eyebrow: 'RECHARGE HISTORY' },
+  '/plans/api-docs': { title: 'Plan API Docs', eyebrow: 'DEVELOPER API' },
+  '/plans/pricing': { title: 'Buy API Hits', eyebrow: 'PRICING & HITS' },
   '/services/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
   '/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
   '/services/gst-api': { title: 'GST API', eyebrow: 'TAX & VERIFICATION' },
@@ -45,7 +54,7 @@ const pageMeta = {
 const servicesList = [
   { id: 'whatsapp', name: 'WhatsApp', path: '/dashboard', icon: '💬', badge: 'Active', desc: 'WhatsApp Automation' },
   { id: 'mobile-sms', name: 'Mobile SMS', path: '/sms/dashboard', icon: '📱', badge: 'New', desc: 'SMS & OTP Service' },
-  { id: 'plan-api', name: 'Plan API', path: '/services/plan-api', icon: '⚡', badge: 'New', desc: 'Recharge & Plans' },
+  { id: 'plan-api', name: 'Plan API', path: '/plans/dashboard', icon: '⚡', badge: 'New', desc: 'Recharge & Plans' },
   { id: 'gst-api', name: 'GST API', path: '/services/gst-api', icon: '🏛️', badge: 'New', desc: 'GST Verification' }
 ]
 
@@ -71,12 +80,13 @@ export function Navbar() {
   const serviceMenuRef = useRef(null)
 
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
+  const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
 
   // Determine active service from current route
   let activeService = servicesList[0] // Default WhatsApp
   if (isSmsActive) {
     activeService = servicesList[1]
-  } else if (location.pathname.includes('plan-api')) {
+  } else if (isPlanApiActive) {
     activeService = servicesList[2]
   } else if (location.pathname.includes('gst-api')) {
     activeService = servicesList[3]

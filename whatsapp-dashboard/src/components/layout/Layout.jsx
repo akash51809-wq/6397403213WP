@@ -11,6 +11,7 @@ export function Layout() {
   const location = useLocation()
 
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
+  const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
 
   // Clear previous page errors on route transition so errors don't follow user across pages
   useEffect(() => {
@@ -18,7 +19,7 @@ export function Layout() {
   }, [location.pathname, setError])
 
   return (
-    <div className={`app ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${isSmsActive ? 'theme-sms' : ''}`}>
+    <div className={`app ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${isSmsActive ? 'theme-sms' : ''} ${isPlanApiActive ? 'theme-plan-api' : ''}`}>
       {sidebarOpen && (
         <div 
           className="sidebar-backdrop" 

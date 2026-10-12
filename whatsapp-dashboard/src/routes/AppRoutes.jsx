@@ -31,6 +31,16 @@ import SmsInboxPage from '../pages/sms/SmsInboxPage'
 import SmsWebhookPage from '../pages/sms/SmsWebhookPage'
 import SmsReportsPage from '../pages/sms/SmsReportsPage'
 
+// Plan API Pages
+import PlanDashboardPage from '../pages/plan/PlanDashboardPage'
+import PlanLookupPage from '../pages/plan/PlanLookupPage'
+import PlanBrowsePage from '../pages/plan/PlanBrowsePage'
+import PlanRofferPage from '../pages/plan/PlanRofferPage'
+import PlanDthPage from '../pages/plan/PlanDthPage'
+import PlanRechargePage from '../pages/plan/PlanRechargePage'
+import PlanApiDocsPage from '../pages/plan/PlanApiDocsPage'
+import PlanPricingPage from '../pages/plan/PlanPricingPage'
+
 function ProtectedRoute({ children }) {
   const { login } = useAuth()
   if (!login) {
@@ -124,8 +134,19 @@ export default function AppRoutes() {
         <Route path="services/mobile-sms" element={<Navigate to="/sms/dashboard" replace />} />
         <Route path="mobile-sms" element={<Navigate to="/sms/dashboard" replace />} />
 
-        <Route path="services/plan-api" element={<ServiceDashboardPage service="plan-api" />} />
-        <Route path="plan-api" element={<Navigate to="/services/plan-api" replace />} />
+        {/* Telecom Plan API Routes */}
+        <Route path="plans" element={<Navigate to="/plans/dashboard" replace />} />
+        <Route path="plans/dashboard" element={<PlanDashboardPage />} />
+        <Route path="plans/lookup" element={<PlanLookupPage />} />
+        <Route path="plans/browse" element={<PlanBrowsePage />} />
+        <Route path="plans/roffer" element={<PlanRofferPage />} />
+        <Route path="plans/dth" element={<PlanDthPage />} />
+        <Route path="plans/recharge-status" element={<PlanRechargePage />} />
+        <Route path="plans/api-docs" element={<PlanApiDocsPage />} />
+        <Route path="plans/pricing" element={<PlanPricingPage />} />
+
+        <Route path="services/plan-api" element={<Navigate to="/plans/dashboard" replace />} />
+        <Route path="plan-api" element={<Navigate to="/plans/dashboard" replace />} />
 
         <Route path="services/gst-api" element={<ServiceDashboardPage service="gst-api" />} />
         <Route path="gst-api" element={<Navigate to="/services/gst-api" replace />} />

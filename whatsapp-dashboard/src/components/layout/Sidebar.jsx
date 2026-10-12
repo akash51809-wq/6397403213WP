@@ -17,12 +17,14 @@ export function Sidebar() {
   const location = useLocation()
   const isReportsActive = location.pathname.startsWith('/report') || location.pathname === '/msg-report'
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
+  const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
   const [reportsOpen, setReportsOpen] = useState(true)
   const closeMobile = () => setSidebarOpen(false)
 
   const isConnected = status?.status === 'connected'
 
   const [smsStats, setSmsStats] = useState({ activeDevicesCount: 0, totalSms: 0 })
+  const [planStats, setPlanStats] = useState({ remainingHits: 100 })
 
   useEffect(() => {
     if (!isSmsActive) return
@@ -40,6 +42,23 @@ export function Sidebar() {
     const timer = setInterval(fetchSmsStatus, 15000)
     return () => { mounted = false; clearInterval(timer) }
   }, [isSmsActive])
+
+  useEffect(() => {
+    if (!isPlanApiActive) return
+    let mounted = true
+    const fetchPlanStatus = async () => {
+      try {
+        const res = await fetch('/api/plans/user/stats')
+        const data = await res.json()
+        if (mounted && data.success && data.stats) {
+          setPlanStats(data.stats)
+        }
+      } catch (e) {}
+    }
+    fetchPlanStatus()
+    const timer = setInterval(fetchPlanStatus, 20000)
+    return () => { mounted = false; clearInterval(timer) }
+  }, [isPlanApiActive])
 
   return (
     <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
@@ -62,6 +81,14 @@ export function Sidebar() {
             <div>
               <strong>Mobile SMS</strong>
               <small>Gateway & Webhook</small>
+            </div>
+          </NavLink>
+        ) : isPlanApiActive ? (
+          <NavLink className="brand" to="/plans/dashboard" onClick={closeMobile} data-title="Plan & Recharge API">
+            <span className="brand-mark" style={{ background: 'linear-gradient(145deg, #fb923c, #ea580c)', color: '#fff' }}>⚡</span>
+            <div>
+              <strong>Plan API</strong>
+              <small>Recharge & Info</small>
             </div>
           </NavLink>
         ) : (
@@ -167,6 +194,83 @@ export function Sidebar() {
               data-title="Delivery Reports"
             >
               <span>▥</span><b>Delivery Reports</b>
+            </NavLink>
+          </>
+        ) : isPlanApiActive ? (
+          /* =========================================================
+             PLAN API NAVIGATION (8 FOCUSED MENUS)
+             ========================================================= */
+          <>
+            <NavLink 
+              to="/plans/dashboard" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Plan API Dashboard"
+            >
+              <span>⌂</span><b>Dashboard</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/lookup" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Operator Lookup"
+            >
+              <span>🔍</span><b>Operator Lookup</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/browse" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Browse Plans"
+            >
+              <span>📋</span><b>Browse Plans</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/roffer" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Customer R-Offer"
+            >
+              <span>🎁</span><b>R-Offer (Offers)</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/dth" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="DTH Customer Info"
+            >
+              <span>📺</span><b>DTH Info</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/recharge-status" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Last Recharge Status"
+            >
+              <span>⚡</span><b>Last Recharge</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/api-docs" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Plan API Docs"
+            >
+              <span>🔑</span><b>API Documents</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/pricing" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Buy API Hits"
+            >
+              <span>💎</span><b>Buy Hits</b>
             </NavLink>
           </>
         ) : (
@@ -397,6 +501,22 @@ export function Sidebar() {
             <strong>{smsStats?.activeDevicesCount > 0 ? 'Gateway Online' : 'Gateway Ready'}</strong>
             <small>
               {smsStats?.activeDevicesCount > 0 ? `${smsStats.activeDevicesCount} Device Active` : 'Scan QR to Pair'}
+            </small>
+          </div>
+        </div>
+      ) : isPlanApiActive ? (
+        <div className="sidebar-status" data-title="Plan API Active">
+          <span 
+            className="dot dot-plan" 
+            style={{ 
+              backgroundColor: '#f97316',
+              boxShadow: '0 0 10px rgba(249,115,22,.75)'
+            }}
+          ></span>
+          <div>
+            <strong style={{ color: '#431407' }}>Plan API Active</strong>
+            <small style={{ color: '#c2410c' }}>
+              {planStats?.remainingHits !== undefined ? `${planStats.remainingHits} Hits Remaining` : '100 Hits Free'}
             </small>
           </div>
         </div>
