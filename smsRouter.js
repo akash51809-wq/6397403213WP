@@ -190,11 +190,14 @@ router.get('/api/sms/qr', async (req, res) => {
     // Mobile phones cannot connect to 'localhost' or '127.0.0.1' (localhost on phone refers to phone itself).
     // Prefer external APP_URL if not localhost; else request host if not localhost; otherwise local LAN IP.
     const reqHost = req.get('host') || '';
-    const reqProtocol = req.protocol || 'http';
+    const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1') || reqHost.startsWith('192.168.') || reqHost.startsWith('10.');
+    const reqProtocol = (!isLocal) ? 'https' : (req.headers['x-forwarded-proto'] || req.protocol || 'http');
     let serverUrl = '';
 
     if (process.env.APP_URL && !process.env.APP_URL.includes('localhost') && !process.env.APP_URL.includes('127.0.0.1')) {
       serverUrl = process.env.APP_URL.trim().replace(/\/$/, '');
+    } else if (reqHost && !isLocal) {
+      serverUrl = `https://${reqHost}`;
     } else if (reqHost && !reqHost.includes('localhost') && !reqHost.includes('127.0.0.1')) {
       serverUrl = `${reqProtocol}://${reqHost}`;
     } else {
@@ -230,6 +233,25 @@ router.get('/api/sms/devices', (req, res) => {
   try {
     const devices = db.getAllDevices();
     res.json({ success: true, devices });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 3b. REGISTER DEVICE VIA HTTP POST
+router.post('/api/sms/devices/register', (req, res) => {
+  try {
+    const data = req.body || {};
+    const devId = data.deviceId || req.headers['x-device-id'] || 'android_phone';
+    db.upsertDevice({
+      deviceId: devId,
+      deviceName: data.deviceName || 'Android Device',
+      batteryLevel: data.batteryLevel !== undefined ? Number(data.batteryLevel) : 100,
+      isCharging: !!data.isCharging,
+      simCards: data.simCards || []
+    });
+    db.setDeviceOnlineStatus(devId, true);
+    res.json({ success: true, message: 'Device registered successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

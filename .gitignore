@@ -39,7 +39,14 @@ Thumbs.db
 # Raw UI template assets & archives
 ADMIN UI/
 /WP-UI-design-main/
-mobile SMS app/
+mobile SMS app/*
+!mobile SMS app/ers-sms-android
+!mobile SMS app/ers-sms-android/**
+mobile SMS app/ers-sms-android/**/build/
+mobile SMS app/ers-sms-android/**/.gradle/
+mobile SMS app/ers-sms-android/**/.idea/
+mobile SMS app/ers-sms-android/local.properties
+mobile SMS app/ers-sms-android/**/*.apk
 !frontend design/
 !frontend design/**
 *.zip

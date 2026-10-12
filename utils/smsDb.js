@@ -83,7 +83,57 @@ function initSchema() {
   }
 }
 
-initSchema();
+let pg = null;
+function getPg() {
+  if (!pg) {
+    try {
+      pg = require('../db');
+      if (pg?.connection) {
+        pg.connection.on('connected', () => {
+          setTimeout(() => syncFromPostgres().catch(() => {}), 1500);
+        });
+      }
+    } catch (e) {}
+  }
+  return pg;
+}
+
+// Sync existing SMS and devices from PostgreSQL into local SQLite on startup
+async function syncFromPostgres() {
+  try {
+    const pgMod = getPg();
+    if (!pgMod?.connection?.pool) return;
+
+    // Sync devices
+    const devRes = await pgMod.query('SELECT * FROM sms_devices ORDER BY last_seen_at DESC LIMIT 50');
+    if (devRes?.rows?.length > 0) {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO devices (
+          device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const d of devRes.rows) {
+        stmt.run(d.device_id, d.device_name, d.battery_level, d.is_charging, d.sim_cards_json, d.is_online, d.last_seen_at, d.created_at);
+      }
+    }
+
+    // Sync messages
+    const msgRes = await pgMod.query('SELECT * FROM sms_messages ORDER BY id DESC LIMIT 500');
+    if (msgRes?.rows?.length > 0) {
+      const stmt = db.prepare(`
+        INSERT OR IGNORE INTO sms_messages (
+          id, device_id, sender, message, sim_slot, received_at, received_timestamp, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const m of msgRes.rows) {
+        stmt.run(m.id, m.device_id, m.sender, m.message, m.sim_slot, m.received_at, m.received_timestamp, m.created_at);
+      }
+      console.log(`[SMS Gateway] Restored ${msgRes.rows.length} messages from PostgreSQL`);
+    }
+  } catch (err) {
+    console.warn('[SMS Gateway] PostgreSQL sync notice:', err.message);
+  }
+}
 
 // Settings Helpers
 function getSetting(key, defaultValue = '') {
@@ -132,6 +182,32 @@ function upsertDevice(dev) {
     now,
     now
   );
+
+  // Async Dual-Write to PostgreSQL
+  try {
+    const pgMod = getPg();
+    if (pgMod?.connection?.pool) {
+      pgMod.query(`
+        INSERT INTO sms_devices (
+          device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at
+        ) VALUES ($1, $2, $3, $4, $5, 1, $6, $6)
+        ON CONFLICT(device_id) DO UPDATE SET
+          device_name = EXCLUDED.device_name,
+          battery_level = EXCLUDED.battery_level,
+          is_charging = EXCLUDED.is_charging,
+          sim_cards_json = EXCLUDED.sim_cards_json,
+          is_online = 1,
+          last_seen_at = EXCLUDED.last_seen_at
+      `, [
+        dev.deviceId,
+        dev.deviceName || 'Android Device',
+        dev.batteryLevel !== undefined ? dev.batteryLevel : 100,
+        dev.isCharging ? 1 : 0,
+        JSON.stringify(dev.simCards || []),
+        now
+      ]).catch(e => console.warn('[SMS DB PG Device write warning]:', e.message));
+    }
+  } catch (e) {}
 }
 
 function updateDeviceConfig(deviceId, webhookUrl, senderWhitelist) {
@@ -143,8 +219,17 @@ function updateDeviceConfig(deviceId, webhookUrl, senderWhitelist) {
 }
 
 function setDeviceOnlineStatus(deviceId, isOnline) {
+  const now = Date.now();
   db.prepare('UPDATE devices SET is_online = ?, last_seen_at = ? WHERE device_id = ?')
-    .run(isOnline ? 1 : 0, Date.now(), deviceId);
+    .run(isOnline ? 1 : 0, now, deviceId);
+
+  try {
+    const pgMod = getPg();
+    if (pgMod?.connection?.pool) {
+      pgMod.query(`UPDATE sms_devices SET is_online = $1, last_seen_at = $2 WHERE device_id = $3`, [isOnline ? 1 : 0, now, deviceId])
+        .catch(() => {});
+    }
+  } catch (e) {}
 }
 
 function getDevice(deviceId) {
@@ -194,7 +279,7 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
     now
   );
 
-  return {
+  const record = {
     id: Number(res.lastInsertRowid),
     deviceId: deviceId || 'unknown',
     sender: String(sender).trim(),
@@ -203,6 +288,29 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
     receivedAt: istString,
     receivedTimestamp: ts
   };
+
+  // Async Dual-Write to PostgreSQL
+  try {
+    const pgMod = getPg();
+    if (pgMod?.connection?.pool) {
+      pgMod.query(`
+        INSERT INTO sms_messages (
+          device_id, sender, message, sim_slot, received_at, received_timestamp, webhook_status, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [
+        record.deviceId,
+        record.sender,
+        record.message,
+        record.simSlot,
+        record.receivedAt,
+        record.receivedTimestamp,
+        'DELIVERED',
+        now
+      ]).catch(e => console.warn('[SMS DB PG Write warning]:', e.message));
+    }
+  } catch (e) {}
+
+  return record;
 }
 
 function getSmsById(id) {
@@ -358,5 +466,6 @@ module.exports = {
   getPendingRetries,
   getRecentDeliveries,
   getTotalDeliveriesCount,
-  cleanupOldData
+  cleanupOldData,
+  syncFromPostgres
 };

@@ -399,6 +399,14 @@ async function startServer() {
     await connectPostgres(DATABASE_URL);
 
     console.log('PostgreSQL Connected Successfully');
+    try {
+      const { syncFromPostgres } = require('./utils/smsDb');
+      if (typeof syncFromPostgres === 'function') {
+        await syncFromPostgres();
+      }
+    } catch (smsSyncErr) {
+      console.warn('[SMS Gateway] PostgreSQL sync notice:', smsSyncErr.message);
+    }
     await ensureAdminUser();
     try {
       const { migrateUnencryptedSessionAuth } = require('./pgAuthState');

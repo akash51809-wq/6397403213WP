@@ -440,7 +440,36 @@ async function initTables(pool) {
       "createdAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
     `CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_messages("ownerUserId");`,
-    `CREATE INDEX IF NOT EXISTS idx_sched_time ON scheduled_messages("scheduledAt", "status");`
+    `CREATE INDEX IF NOT EXISTS idx_sched_time ON scheduled_messages("scheduledAt", "status");`,
+
+    // 16. sms_messages (Persistent incoming SMS gateway messages)
+    `CREATE TABLE IF NOT EXISTS sms_messages (
+      "id" SERIAL PRIMARY KEY,
+      "device_id" VARCHAR(100),
+      "sender" VARCHAR(100),
+      "message" TEXT,
+      "sim_slot" INT DEFAULT 0,
+      "received_at" VARCHAR(100),
+      "received_timestamp" BIGINT,
+      "webhook_status" VARCHAR(50) DEFAULT 'DELIVERED',
+      "created_at" BIGINT
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_sms_received_ts ON sms_messages("received_timestamp");`,
+    `CREATE INDEX IF NOT EXISTS idx_sms_sender ON sms_messages("sender");`,
+
+    // 17. sms_devices (Android gateway devices)
+    `CREATE TABLE IF NOT EXISTS sms_devices (
+      "device_id" VARCHAR(100) PRIMARY KEY,
+      "device_name" TEXT,
+      "battery_level" INT DEFAULT 100,
+      "is_charging" INT DEFAULT 0,
+      "sim_cards_json" TEXT DEFAULT '[]',
+      "webhook_url" TEXT DEFAULT '',
+      "sender_whitelist" TEXT DEFAULT '',
+      "is_online" INT DEFAULT 0,
+      "last_seen_at" BIGINT,
+      "created_at" BIGINT
+    );`
   ];
 
   for (const stmt of statements) {
