@@ -18,7 +18,6 @@ import UserPlansPage from '../pages/subscription/UserPlansPage'
 import ApiPage from '../pages/api/ApiPage'
 import SystemPage from '../pages/system/SystemPage'
 import SettingsPage from '../pages/admin/SettingsPage'
-import CampaignsPage from '../pages/campaigns/CampaignsPage'
 import TemplatesPage from '../pages/templates/TemplatesPage'
 import ContactsPage from '../pages/contacts/ContactsPage'
 import ServiceDashboardPage from '../pages/services/ServiceDashboardPage'
@@ -44,7 +43,6 @@ import PlanPricingPage from '../pages/plan/PlanPricingPage'
 // GST Verification Pages
 import GstDashboardPage from '../pages/gst/GstDashboardPage'
 import GstSearchPage from '../pages/gst/GstSearchPage'
-import GstFilingsPage from '../pages/gst/GstFilingsPage'
 import GstApiDocsPage from '../pages/gst/GstApiDocsPage'
 
 function ProtectedRoute({ children }) {
@@ -120,7 +118,7 @@ export default function AppRoutes() {
         <Route path="msg-report" element={<Navigate to="/report" replace />} />
 
         {/* Campaigns & Templates & Contacts */}
-        <Route path="campaigns" element={<CampaignsPage />} />
+        <Route path="campaigns" element={<Navigate to="/dashboard" replace />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="contacts" element={<ContactsPage />} />
 
@@ -158,7 +156,7 @@ export default function AppRoutes() {
         <Route path="gst" element={<Navigate to="/gst/dashboard" replace />} />
         <Route path="gst/dashboard" element={<GstDashboardPage />} />
         <Route path="gst/search" element={<GstSearchPage />} />
-        <Route path="gst/filings" element={<GstFilingsPage />} />
+        <Route path="gst/filings" element={<Navigate to="/gst/dashboard" replace />} />
         <Route path="gst/api-docs" element={<GstApiDocsPage />} />
 
         <Route path="services/gst" element={<Navigate to="/gst/dashboard" replace />} />

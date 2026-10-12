@@ -49,65 +49,6 @@ export default function GstDashboardPage() {
 
   return (
     <div className="content">
-      {/* Hero Section */}
-      <div className="hero" style={{ marginBottom: 24 }}>
-        <div>
-          <span className="eyebrow" style={{ color: '#7c3aed' }}>TAX & BUSINESS VERIFICATION</span>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-            <span>🏛️</span> GST Portal Verification
-          </h1>
-          <p style={{ maxWidth: 680, color: '#581c87' }}>
-            Instant Indian GSTIN Taxpayer Search, legal name verification, jurisdiction details, and GSTR-1 & GSTR-3B return filing history.
-          </p>
-        </div>
-        <div className="actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <Link to="/gst/search" className="btn primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span>🔍</span> Taxpayer Search
-          </Link>
-          <Link to="/gst/filings" className="btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderColor: '#ddd6fe', color: '#6d28d9' }}>
-            <span>📊</span> Return Filings
-          </Link>
-          <Link to="/gst/api-docs" className="btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderColor: '#ddd6fe', color: '#6d28d9' }}>
-            <span>🔑</span> Developer API
-          </Link>
-        </div>
-      </div>
-
-      {/* 4 Overview Stats Cards */}
-      <div className="grid4" style={{ marginBottom: 24 }}>
-        <div className="stat">
-          <small>Total Verifications</small>
-          <strong style={{ fontSize: 24, marginTop: 4, color: '#3b0764' }}>1,840+</strong>
-          <span style={{ color: '#7c3aed', background: 'rgba(139, 92, 246, 0.12)' }}>
-            Instant Lookup
-          </span>
-        </div>
-
-        <div className="stat">
-          <small>Taxpayer Status</small>
-          <strong style={{ fontSize: 24, marginTop: 4, color: '#16a765' }}>Active</strong>
-          <span style={{ color: '#16a765', background: 'rgba(22, 167, 101, 0.12)' }}>
-            Govt Sync
-          </span>
-        </div>
-
-        <div className="stat">
-          <small>Supported Returns</small>
-          <strong style={{ fontSize: 24, marginTop: 4, color: '#3b0764' }}>GSTR-1 & 3B</strong>
-          <span style={{ color: '#7c3aed', background: 'rgba(139, 92, 246, 0.12)' }}>
-            Filing History
-          </span>
-        </div>
-
-        <div className="stat">
-          <small>API Response Speed</small>
-          <strong style={{ fontSize: 24, marginTop: 4, color: '#3b0764' }}>&lt; 180 ms</strong>
-          <span style={{ color: '#7c3aed', background: 'rgba(139, 92, 246, 0.12)' }}>
-            Ultra Fast
-          </span>
-        </div>
-      </div>
-
       {/* Quick GSTIN Search Box */}
       <div className="card" style={{ marginBottom: 24, borderColor: '#ddd6fe', background: '#ffffff' }}>
         <div className="card-head" style={{ borderBottomColor: '#ede9fe' }}>

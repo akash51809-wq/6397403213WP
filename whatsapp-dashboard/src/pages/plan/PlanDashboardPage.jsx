@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanDashboardPage() {
   const { notify } = useAuth()
@@ -26,8 +27,7 @@ export default function PlanDashboardPage() {
   const loadStats = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/plans/user/stats')
-      const data = await res.json()
+      const data = await api('/api/plans/user/stats')
       if (data.success && data.stats) {
         setStats(data.stats)
       }
@@ -53,12 +53,10 @@ export default function PlanDashboardPage() {
     try {
       setLookupLoading(true)
       setLookupResult(null)
-      const res = await fetch('/api/lookup/operator', {
+      const data = await api('/api/lookup/operator', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: clean, userMobile: stats.mobile })
       })
-      const data = await res.json()
       if (data.success && data.data) {
         setLookupResult(data.data)
         if (data.data.remainingHits !== undefined) {
@@ -88,8 +86,7 @@ export default function PlanDashboardPage() {
     }
     try {
       setRegenerating(true)
-      const res = await fetch('/api/plans/user/regenerate-token', { method: 'POST' })
-      const data = await res.json()
+      const data = await api('/api/plans/user/regenerate-token', { method: 'POST' })
       if (data.success) {
         setStats(prev => ({ ...prev, apiToken: data.apiToken }))
         notify('Naya API Token kamyabi se generate ho gaya!')
@@ -105,23 +102,12 @@ export default function PlanDashboardPage() {
 
   return (
     <div className="content">
-      {/* Hero Header */}
+      {/* Hero Header without buttons */}
       <div className="hero">
         <div>
           <span className="eyebrow" style={{ color: '#ea580c' }}>TELECOM & RECHARGE ENGINE</span>
           <h1>Plan API Dashboard</h1>
           <p>High-speed Indian Telecom operator discovery, recharge plans, personalized R-Offers, and DTH verification API engine.</p>
-        </div>
-        <div className="actions">
-          <button type="button" className="btn" onClick={loadStats} title="Refresh data">
-            ↻ Refresh
-          </button>
-          <button type="button" className="btn" onClick={() => navigate('/plans/api-docs')}>
-            🔑 View API Docs
-          </button>
-          <button type="button" className="btn primary" onClick={() => navigate('/subscription?service=plan')}>
-            💎 Buy API Hits
-          </button>
         </div>
       </div>
 
@@ -133,14 +119,14 @@ export default function PlanDashboardPage() {
           <span>Plan Active · Ready</span>
         </div>
         <div className="stat">
+          <small>USED API HITS</small>
+          <strong>{stats.usedHits || 0}</strong>
+          <span>Consumed hits</span>
+        </div>
+        <div className="stat">
           <small>OPERATORS SUPPORTED</small>
           <strong>4 Mobile + 5 DTH</strong>
           <span>Airtel, Jio, VI, BSNL, Tata Play</span>
-        </div>
-        <div className="stat">
-          <small>SERIES ENGINE LATENCY</small>
-          <strong>&lt; 0.5 ms</strong>
-          <span>Ultra-Fast In-Memory</span>
         </div>
         <div className="stat">
           <small>CIRCLE COVERAGE</small>

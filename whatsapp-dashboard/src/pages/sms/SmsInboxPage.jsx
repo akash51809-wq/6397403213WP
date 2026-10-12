@@ -9,9 +9,9 @@ export default function SmsInboxPage() {
   const [selectedSim, setSelectedSim] = useState('')
   const [viewModalSms, setViewModalSms] = useState(null)
 
-  const loadMessages = async () => {
+  const loadMessages = async (isInitial = false) => {
     try {
-      setLoading(true)
+      if (isInitial) setLoading(true)
       let url = '/api/sms/messages?limit=100'
       if (filterSender.trim()) url += `&sender=${encodeURIComponent(filterSender.trim())}`
       const res = await fetch(url).then(r => r.json())
@@ -19,15 +19,15 @@ export default function SmsInboxPage() {
         setMessages(res.messages || [])
       }
     } catch (err) {
-      notify('Messages load error: ' + err.message)
+      if (isInitial) notify('Messages load error: ' + err.message)
     } finally {
-      setLoading(false)
+      if (isInitial) setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadMessages()
-    const timer = setInterval(loadMessages, 10000)
+    loadMessages(true)
+    const timer = setInterval(() => loadMessages(false), 3500)
     return () => clearInterval(timer)
   }, [filterSender])
 

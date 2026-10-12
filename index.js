@@ -2170,6 +2170,394 @@ app.get('/api/reports/messages', authRequired, async (req, res) => {
 });
 
 /* =========================================================
+   USER DASHBOARD LIVE STATS
+========================================================= */
+
+app.get('/api/dashboard/stats', authRequired, async (req, res) => {
+    try {
+        const user = req.user;
+        const userId = user.userId;
+        const isAdmin = user.role === 'admin' || String(userId).toUpperCase() === 'ADMIN';
+
+        // 1. Devices: live connected vs allowed
+        let connected = 0;
+        const { sessions } = require('./userSessions');
+        const userSession = sessions.get(userId);
+        if (userSession && userSession.status === 'connected' && userSession.socket) {
+            connected = 1;
+        } else if (isAdmin && global.__waAdminSocket && global.__waAdminSocket.user?.id) {
+            connected = 1;
+        }
+
+        let allowedDevices = 1;
+        try {
+            const features = await getUserPlanFeatures(user);
+            allowedDevices = features.deviceLimit || 1;
+        } catch {}
+
+        // 2. Messages Today: total sent count today from DB
+        const today = getTodayDateIST(); // YYYY-MM-DD
+        let todayCount = 0;
+        let scheduledCount = 0;
+        let savedContacts = 0;
+        let totalGroups = 0;
+
+        const { query: dbQuery } = require('./db');
+        try {
+            const todayRes = await dbQuery(
+                isAdmin 
+                    ? `SELECT COUNT(*) AS count FROM message_reports WHERE "date" LIKE $1`
+                    : `SELECT COUNT(*) AS count FROM message_reports WHERE "ownerUserId" = $1 AND "date" LIKE $2`,
+                isAdmin ? [`${today}%`] : [userId, `${today}%`]
+            );
+            todayCount = parseInt(todayRes.rows[0]?.count || 0, 10);
+        } catch (e) {
+            console.warn('[DashboardStats] todayCount error:', e.message);
+        }
+
+        // 3. Number of Groups: live from connected socket
+        let activeSocket = userSession?.socket;
+        if (isAdmin && (!activeSocket || !activeSocket.user?.id)) {
+            activeSocket = getActiveAdminSocket();
+        }
+        if (activeSocket && activeSocket.user?.id) {
+            try {
+                const groups = await Promise.race([
+                    activeSocket.groupFetchAllParticipating(),
+                    new Promise(resolve => setTimeout(() => resolve(null), 2500))
+                ]);
+                if (groups) {
+                    totalGroups = Object.keys(groups).length;
+                }
+            } catch {
+                if (activeSocket.chats) {
+                    totalGroups = Object.keys(activeSocket.chats).filter(k => k.endsWith('@g.us')).length;
+                }
+            }
+        }
+
+        // 4. Saved Contacts: count from contacts table in DB
+        try {
+            const cntRes = await dbQuery(
+                isAdmin
+                    ? `SELECT COUNT(*) AS count FROM contacts`
+                    : `SELECT COUNT(*) AS count FROM contacts WHERE "ownerUserId" = $1 OR "ownerUserId" IS NULL`,
+                isAdmin ? [] : [userId]
+            );
+            savedContacts = parseInt(cntRes.rows[0]?.count || 0, 10);
+        } catch (e) {
+            console.warn('[DashboardStats] savedContacts error:', e.message);
+        }
+
+        // 5. Scheduled Messages: live count from DB
+        try {
+            const schedRes = await dbQuery(
+                isAdmin
+                    ? `SELECT COUNT(*) AS count FROM scheduled_messages WHERE "status" = 'pending' AND "scheduledAt" >= NOW()`
+                    : `SELECT COUNT(*) AS count FROM scheduled_messages WHERE "ownerUserId" = $1 AND "status" = 'pending' AND "scheduledAt" >= NOW()`,
+                isAdmin ? [] : [userId]
+            );
+            scheduledCount = parseInt(schedRes.rows[0]?.count || 0, 10);
+        } catch (e) {
+            console.warn('[DashboardStats] scheduledCount error:', e.message);
+        }
+
+        // 6. 12-Month Activity: Jan-Dec for current year
+        const currentYear = new Date().getFullYear();
+        const monthlyActivity = new Array(12).fill(0);
+        try {
+            const monthlyRes = await dbQuery(
+                isAdmin
+                    ? `SELECT SUBSTRING("date" FROM 1 FOR 7) AS ym, COUNT(*) AS count 
+                       FROM message_reports 
+                       WHERE "date" LIKE $1 
+                       GROUP BY ym`
+                    : `SELECT SUBSTRING("date" FROM 1 FOR 7) AS ym, COUNT(*) AS count 
+                       FROM message_reports 
+                       WHERE "ownerUserId" = $1 AND "date" LIKE $2 
+                       GROUP BY ym`,
+                isAdmin ? [`${currentYear}-%`] : [userId, `${currentYear}-%`]
+            );
+            for (const row of (monthlyRes.rows || [])) {
+                if (row.ym) {
+                    const monthNum = parseInt(row.ym.split('-')[1], 10);
+                    if (monthNum >= 1 && monthNum <= 12) {
+                        monthlyActivity[monthNum - 1] = parseInt(row.count, 10);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[DashboardStats] monthlyActivity error:', e.message);
+        }
+
+        res.json({
+            success: true,
+            devices: {
+                connected,
+                allowed: allowedDevices
+            },
+            messagesToday: todayCount,
+            totalGroups,
+            savedContacts,
+            scheduledMessages: scheduledCount,
+            monthlyActivity
+        });
+    } catch (error) {
+        console.error('Dashboard stats fetch error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/* =========================================================
+   CONTACTS & CONTACT GROUPS APIS
+========================================================= */
+
+app.get('/api/contacts', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
+        const groupFilter = req.query.group;
+
+        let sql = isAdmin 
+            ? `SELECT * FROM contacts WHERE 1=1`
+            : `SELECT * FROM contacts WHERE ("ownerUserId" = $1 OR "ownerUserId" IS NULL)`;
+        const params = isAdmin ? [] : [userId];
+
+        if (groupFilter && groupFilter !== 'All') {
+            params.push(groupFilter);
+            sql += ` AND "group" = $${params.length}`;
+        }
+
+        sql += ` ORDER BY "updatedAt" DESC LIMIT 1000`;
+        const result = await dbQuery(sql, params);
+
+        res.json({
+            success: true,
+            contacts: result.rows.map(r => ({
+                id: r.id,
+                name: r.name || 'Unknown',
+                mobile: r.phone ? (r.phone.startsWith('+') ? r.phone : `+91 ${r.phone}`) : '',
+                cleanNumber: r.phone ? r.phone.replace(/\D/g, '').slice(-10) : '',
+                group: r.group || 'General',
+                type: r.type || 'Customer',
+                status: r.status || 'Active',
+                email: r.email || '',
+                addedDate: r.updatedAt ? new Date(r.updatedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+            }))
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.post('/api/contacts', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const { id, name, mobile, group, type, status, email } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, message: 'Contact name is required' });
+        }
+        const cleanPhone = String(mobile || '').replace(/\D/g, '').slice(-10);
+        if (!cleanPhone) {
+            return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required' });
+        }
+
+        const contactId = id || `cnt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const groupName = (group && String(group).trim()) || 'General';
+
+        await dbQuery(`
+            INSERT INTO contacts ("id", "name", "phone", "group", "ownerUserId", "type", "status", "email", "updatedAt")
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            ON CONFLICT ("id") DO UPDATE SET
+                "name" = EXCLUDED."name",
+                "phone" = EXCLUDED."phone",
+                "group" = EXCLUDED."group",
+                "type" = EXCLUDED."type",
+                "status" = EXCLUDED."status",
+                "email" = EXCLUDED."email",
+                "updatedAt" = NOW()
+        `, [contactId, name.trim(), cleanPhone, groupName, userId, type || 'Customer', status || 'Active', email || '']);
+
+        // Auto ensure group exists in contact_groups
+        await dbQuery(`
+            INSERT INTO contact_groups ("id", "ownerUserId", "name", "createdAt")
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT DO NOTHING
+        `, [`grp_${userId}_${groupName.toLowerCase().replace(/\s+/g, '_')}`, userId, groupName]).catch(() => {});
+
+        res.json({
+            success: true,
+            message: 'Contact saved successfully',
+            contact: {
+                id: contactId,
+                name: name.trim(),
+                mobile: `+91 ${cleanPhone}`,
+                cleanNumber: cleanPhone,
+                group: groupName,
+                type: type || 'Customer',
+                status: status || 'Active',
+                email: email || ''
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.delete('/api/contacts/:id', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
+        const contactId = req.params.id;
+
+        if (isAdmin) {
+            await dbQuery(`DELETE FROM contacts WHERE "id" = $1`, [contactId]);
+        } else {
+            await dbQuery(`DELETE FROM contacts WHERE "id" = $1 AND ("ownerUserId" = $2 OR "ownerUserId" IS NULL)`, [contactId, userId]);
+        }
+
+        res.json({ success: true, message: 'Contact deleted' });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get('/api/contact-groups', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
+
+        const sql = isAdmin
+            ? `SELECT "group", COUNT(*) as count FROM contacts WHERE "group" IS NOT NULL AND "group" != '' GROUP BY "group" ORDER BY "group" ASC`
+            : `SELECT "group", COUNT(*) as count FROM contacts WHERE ("ownerUserId" = $1 OR "ownerUserId" IS NULL) AND "group" IS NOT NULL AND "group" != '' GROUP BY "group" ORDER BY "group" ASC`;
+        const result = await dbQuery(sql, isAdmin ? [] : [userId]);
+
+        const groupsList = result.rows.map(r => ({
+            name: r.group,
+            count: parseInt(r.count || 0, 10)
+        }));
+
+        if (!groupsList.some(g => g.name.toLowerCase() === 'general')) {
+            groupsList.unshift({ name: 'General', count: 0 });
+        }
+
+        res.json({
+            success: true,
+            groups: groupsList
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.post('/api/contact-groups', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const { name } = req.body;
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, message: 'Group name is required' });
+        }
+        const groupName = name.trim();
+        const grpId = `grp_${userId}_${groupName.toLowerCase().replace(/\s+/g, '_')}`;
+
+        await dbQuery(`
+            INSERT INTO contact_groups ("id", "ownerUserId", "name", "createdAt")
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT DO NOTHING
+        `, [grpId, userId, groupName]);
+
+        res.json({ success: true, message: 'Contact group created', group: { name: groupName, count: 0 } });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.delete('/api/contact-groups/:name', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const groupName = req.params.name;
+
+        await dbQuery(`DELETE FROM contact_groups WHERE "ownerUserId" = $1 AND LOWER("name") = LOWER($2)`, [userId, groupName]);
+        await dbQuery(`UPDATE contacts SET "group" = 'General' WHERE "ownerUserId" = $1 AND LOWER("group") = LOWER($2)`, [userId, groupName]);
+
+        res.json({ success: true, message: 'Contact group deleted' });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+/* =========================================================
+   SCHEDULED MESSAGES APIS
+========================================================= */
+
+app.post('/api/user/schedule', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const { recipients, message, scheduledDate, scheduledTime, session, attachment } = req.body;
+
+        if (!recipients || !recipients.trim()) {
+            return res.status(400).json({ success: false, message: 'Recipients are required' });
+        }
+        if (!scheduledDate || !scheduledTime) {
+            return res.status(400).json({ success: false, message: 'Scheduled date and time are required' });
+        }
+
+        const scheduledAt = new Date(`${scheduledDate}T${scheduledTime}`);
+        if (isNaN(scheduledAt.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid schedule date or time format' });
+        }
+
+        const scheduleId = `sched_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        await dbQuery(`
+            INSERT INTO scheduled_messages ("id", "ownerUserId", "recipients", "message", "scheduledAt", "status", "session", "attachment", "createdAt")
+            VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, NOW())
+        `, [
+            scheduleId,
+            userId,
+            recipients.trim(),
+            message || '',
+            scheduledAt.toISOString(),
+            session || '',
+            attachment ? JSON.stringify(attachment) : null
+        ]);
+
+        res.json({
+            success: true,
+            message: 'Message scheduled successfully!',
+            scheduleId
+        });
+    } catch (e) {
+        console.error('[Schedule] Error saving schedule:', e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get('/api/user/schedule', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
+
+        const sql = isAdmin
+            ? `SELECT * FROM scheduled_messages ORDER BY "scheduledAt" DESC LIMIT 100`
+            : `SELECT * FROM scheduled_messages WHERE "ownerUserId" = $1 ORDER BY "scheduledAt" DESC LIMIT 100`;
+
+        const result = await dbQuery(sql, isAdmin ? [] : [userId]);
+        res.json({ success: true, schedules: result.rows });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+/* =========================================================
    WHATSAPP LIST
 ========================================================= */
 
@@ -3957,8 +4345,8 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
                         const savedFileName = `${rawMsg.key?.id || Date.now()}${ext}`;
                         await mediaStorage.saveMedia(savedFileName, buffer, { 
                             mimetype, 
-                            ownerUserId: targetOwnerId || null, 
-                            metadata: { jid: rawRemoteJid, from: fromNum } 
+                            ownerUserId: ownerUserId || null, 
+                            metadata: { jid: rawRemoteJid, from: fromNumber } 
                         });
                         mediaUrl = `/media/${savedFileName}`;
                     }
@@ -4004,6 +4392,7 @@ async function handleIncomingMessageFromSocket(m, context = {}) {
             const record = {
                 id: rawMsg.key?.id || ('inc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
                 date: new Date(rawMsg.messageTimestamp ? (rawMsg.messageTimestamp * 1000) : Date.now()).toISOString(),
+                timestamp: rawMsg.messageTimestamp ? (rawMsg.messageTimestamp * 1000) : Date.now(),
                 from: fromNumber,
                 fromMe: isFromMe,
                 pushName: pushName,

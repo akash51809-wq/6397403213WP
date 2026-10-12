@@ -321,6 +321,20 @@ function cleanupOldData(retentionHours = 48) {
   }
 }
 
+function getTotalSmsCount() {
+  const row = db.prepare('SELECT COUNT(*) as count FROM sms_messages').get();
+  return row ? Number(row.count) : 0;
+}
+
+function getTotalDeliveriesCount(status = null) {
+  if (status) {
+    const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries WHERE status = ?').get(status);
+    return row ? Number(row.count) : 0;
+  }
+  const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries').get();
+  return row ? Number(row.count) : 0;
+}
+
 module.exports = {
   db,
   getSetting,
@@ -335,11 +349,13 @@ module.exports = {
   saveIncomingSms,
   getSmsById,
   getSmsList,
+  getTotalSmsCount,
   createWebhookDelivery,
   updateWebhookDelivery,
   getDeliveryBySmsId,
   getDeliveryById,
   getPendingRetries,
   getRecentDeliveries,
+  getTotalDeliveriesCount,
   cleanupOldData
 };

@@ -90,19 +90,39 @@ export function ReportsPage() {
         }
       }
 
+function parseDateInput(val) {
+  if (!val) return null
+  const str = String(val).trim()
+  if (str.includes('-')) {
+    const p = str.split('-')
+    if (p[0].length === 2 && p[2]?.length === 4) {
+      return new Date(`${p[2]}-${p[1]}-${p[0]}`)
+    }
+  } else if (str.includes('/')) {
+    const p = str.split('/')
+    if (p[0].length === 2 && p[2]?.length === 4) {
+      return new Date(`${p[2]}-${p[1]}-${p[0]}`)
+    }
+  }
+  const d = new Date(str)
+  return isNaN(d.getTime()) ? null : d
+}
+
       // 1. From Date
       if (fromDate) {
         const rTime = new Date(r.date || r.createdAt || r.timestamp).getTime()
-        const fTime = new Date(fromDate).getTime()
-        if (!isNaN(rTime) && rTime < fTime) return false
+        const fDate = parseDateInput(fromDate)
+        if (fDate && !isNaN(rTime) && rTime < fDate.getTime()) return false
       }
 
       // 2. To Date
       if (toDate) {
         const rTime = new Date(r.date || r.createdAt || r.timestamp).getTime()
-        const tEnd = new Date(toDate)
-        tEnd.setHours(23, 59, 59, 999)
-        if (!isNaN(rTime) && rTime > tEnd.getTime()) return false
+        const tDate = parseDateInput(toDate)
+        if (tDate && !isNaN(rTime)) {
+          tDate.setHours(23, 59, 59, 999)
+          if (rTime > tDate.getTime()) return false
+        }
       }
 
       // 3. Msg Type
@@ -380,7 +400,7 @@ export function ReportsPage() {
                 className="input date-text"
                 id="fromDateText"
                 type="text"
-                placeholder="YYYY-MM-DD"
+                placeholder="DD-MM-YYYY"
                 value={fromDate}
                 onChange={e => setFromDate(e.target.value)}
               />
@@ -396,8 +416,13 @@ export function ReportsPage() {
                 className="native-date"
                 id="fromDate"
                 type="date"
-                value={fromDate}
-                onChange={e => setFromDate(e.target.value)}
+                value=""
+                onChange={e => {
+                  if (e.target.value) {
+                    const [y, m, d] = e.target.value.split('-')
+                    setFromDate(`${d}-${m}-${y}`)
+                  }
+                }}
                 tabIndex={-1}
               />
             </div>
@@ -411,7 +436,7 @@ export function ReportsPage() {
                 className="input date-text"
                 id="toDateText"
                 type="text"
-                placeholder="YYYY-MM-DD"
+                placeholder="DD-MM-YYYY"
                 value={toDate}
                 onChange={e => setToDate(e.target.value)}
               />
@@ -427,8 +452,13 @@ export function ReportsPage() {
                 className="native-date"
                 id="toDate"
                 type="date"
-                value={toDate}
-                onChange={e => setToDate(e.target.value)}
+                value=""
+                onChange={e => {
+                  if (e.target.value) {
+                    const [y, m, d] = e.target.value.split('-')
+                    setToDate(`${d}-${m}-${y}`)
+                  }
+                }}
                 tabIndex={-1}
               />
             </div>
@@ -480,7 +510,7 @@ export function ReportsPage() {
             <input
               className="input"
               inputMode="numeric"
-              placeholder="+91 98765 43210"
+              placeholder="Enter sender number"
               value={fromNumber}
               onChange={e => {
                 setFromNumber(e.target.value)
@@ -495,7 +525,7 @@ export function ReportsPage() {
             <input
               className="input"
               inputMode="numeric"
-              placeholder="+91 98123 45678"
+              placeholder="Enter recipient number"
               value={toNumber}
               onChange={e => {
                 setToNumber(e.target.value)

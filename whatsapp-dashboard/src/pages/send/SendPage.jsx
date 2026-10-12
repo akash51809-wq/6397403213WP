@@ -140,6 +140,35 @@ export function SendPage() {
   // Real-time number stats
   const numberStats = useMemo(() => parseNumbers(numbersText), [numbersText])
 
+  // Contact Groups for quick insertion
+  const [contactGroups, setContactGroups] = useState([])
+
+  useEffect(() => {
+    api('/api/contact-groups')
+      .then(d => { if (d && d.success) setContactGroups(d.groups || []) })
+      .catch(() => {})
+  }, [])
+
+  const handleSelectGroup = async (groupName) => {
+    if (!groupName) return
+    try {
+      const res = await api(`/api/contacts?group=${encodeURIComponent(groupName)}`)
+      if (res.success && res.contacts) {
+        const groupNumbers = res.contacts.map(c => c.cleanNumber).filter(Boolean)
+        if (groupNumbers.length === 0) {
+          if (notify) notify(`No valid mobile numbers in group "${groupName}".`, 'warning')
+          return
+        }
+        const existing = new Set(numberStats.unique)
+        groupNumbers.forEach(n => existing.add(n))
+        setNumbersText(Array.from(existing).join(', '))
+        if (notify) notify(`✓ Added ${groupNumbers.length} numbers from group "${groupName}"!`)
+      }
+    } catch (e) {
+      if (notify) notify('Failed to load group numbers: ' + e.message)
+    }
+  }
+
   // Live countdown calculation for Schedule Mode
   useEffect(() => {
     if (sendingMode !== 'schedule' || !scheduleDate || !scheduleTime) {
@@ -357,7 +386,29 @@ export function SendPage() {
         if (notify) notify('Please select both schedule date and time.')
         return
       }
-      if (notify) notify(`✓ Message scheduled for ${scheduleDate} at ${scheduleTime} for ${targets.length} recipients!`)
+      try {
+        const res = await api('/api/user/schedule', {
+          method: 'POST',
+          body: JSON.stringify({
+            recipients: targets.join(', '),
+            message: msgText.trim(),
+            scheduledDate: scheduleDate,
+            scheduledTime: scheduleTime,
+            session: selectedSession,
+            attachment: (!asVoice && attachment) ? { name: attachment.name, type: attachment.type, data: attachment.data } : null
+          })
+        })
+        if (res.success) {
+          if (notify) notify(`✓ Message scheduled for ${scheduleDate} at ${scheduleTime} for ${targets.length} recipients!`)
+          setNumbersText('')
+          setMsgText('')
+          setAttachment(null)
+        } else {
+          if (notify) notify('Schedule error: ' + (res.message || 'Failed'))
+        }
+      } catch (err) {
+        if (notify) notify('Schedule error: ' + err.message)
+      }
       return
     }
 
@@ -556,13 +607,44 @@ export function SendPage() {
                   >
                     ⧉<span>Unique</span>
                   </button>
+
+                  {contactGroups.length > 0 && (
+                    <select 
+                      className="round-tool" 
+                      style={{ 
+                        width: 'auto', 
+                        padding: '3px 8px', 
+                        fontSize: 11, 
+                        fontWeight: 700, 
+                        borderRadius: 16, 
+                        cursor: 'pointer', 
+                        background: 'rgba(22, 167, 101, 0.12)', 
+                        color: '#16a765', 
+                        border: '1px solid rgba(22, 167, 101, 0.35)',
+                        outline: 'none'
+                      }}
+                      defaultValue=""
+                      onChange={e => {
+                        handleSelectGroup(e.target.value)
+                        e.target.value = ''
+                      }}
+                      title="Insert numbers from Contact Group"
+                    >
+                      <option value="" disabled>👥 Add Group</option>
+                      {contactGroups.map(g => (
+                        <option key={g.name} value={g.name}>
+                          {g.name} ({g.count})
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
 
               <textarea 
                 className="textarea recipient-area" 
                 id="recipientNumbers"
-                placeholder="+91 98765 43210, +91 98123 45678"
+                placeholder="Enter 10-digit mobile numbers separated by commas (e.g. 9876543210, 9812345678)..."
                 value={numbersText}
                 onChange={e => setNumbersText(e.target.value)}
               ></textarea>

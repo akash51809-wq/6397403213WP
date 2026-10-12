@@ -114,7 +114,7 @@ async function startUserSession(userId) {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: true,
-        syncFullHistory: false
+        syncFullHistory: true
     });
 
     const sessionData = {

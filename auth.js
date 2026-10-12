@@ -79,7 +79,15 @@ function saveCompanySettingsFile(settings) {
   }
 }
 
-const cleanMobile = (value) => String(value || '').replace(/\D/g, '');
+const cleanMobile = (value) => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+};
 const randomDigits = (length) => {
   const max = 10 ** length;
   return String(crypto.randomInt(0, max)).padStart(length, '0');
@@ -787,6 +795,107 @@ router.post('/api/auth/signup/verify', otpLimiter, async (req, res) => {
   } catch (error) {
     console.error('Signup verify error:', error);
     res.status(500).json({ success: false, message: error.message || 'Account creation failed' });
+  }
+});
+
+/* =========================================================
+   FORGOT PASSWORD VIA WHATSAPP OTP
+========================================================= */
+
+router.post('/api/auth/forgot-password/request-otp', otpLimiter, async (req, res) => {
+  try {
+    const mobile = cleanMobile(req.body?.mobile);
+    if (!/^\d{10}$/.test(mobile)) {
+      return res.status(400).json({ success: false, message: '10 अंकों का पंजीकृत मोबाइल नंबर डालें।' });
+    }
+
+    const user = await User.findOne({
+      $or: [{ mobile }, { username: mobile }],
+      status: 'active'
+    });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'इस मोबाइल नंबर से कोई सक्रिय खाता नहीं मिला।' });
+    }
+
+    const latest = await Otp.findOne({ mobile }).sort({ createdAt: -1 });
+    if (latest?.lastSentAt && Date.now() - latest.lastSentAt.getTime() < 60000) {
+      return res.status(429).json({ success: false, message: 'OTP दोबारा भेजने से पहले 60 सेकंड प्रतीक्षा करें।' });
+    }
+
+    const sender = await waitForAdminWhatsAppSender(8000);
+    if (!sender) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Admin WhatsApp अभी connected नहीं है। कृपया कुछ देर बाद प्रयास करें।' 
+      });
+    }
+
+    const otp = randomDigits(Number(process.env.OTP_LENGTH || 6));
+    const expiresAt = new Date(Date.now() + Math.max(1, Number(process.env.OTP_EXPIRY_MINUTES || 5)) * 60000);
+    await Otp.deleteMany({ mobile });
+    await Otp.create({ mobile, otpHash: hashText(otp), expiresAt, lastSentAt: new Date() });
+
+    await sender(mobile, `*WA Control Center Password Reset* 🔐\n\nआपका OTP है: *${otp}*\nयह OTP ${process.env.OTP_EXPIRY_MINUTES || 5} मिनट तक valid है।\nयदि आपने यह अनुरोध नहीं किया था, तो कृपया इसे अनदेखा करें।`);
+    res.json({ success: true, message: 'OTP आपके WhatsApp नंबर पर भेज दिया गया है।' });
+  } catch (error) {
+    console.error('Forgot password OTP error:', error);
+    res.status(500).json({ success: false, message: error.message || 'OTP भेजने में समस्या हुई।' });
+  }
+});
+
+router.post('/api/auth/forgot-password/verify', otpLimiter, async (req, res) => {
+  try {
+    const mobile = cleanMobile(req.body?.mobile);
+    const otp = String(req.body?.otp || '').trim();
+    const newPassword = String(req.body?.newPassword || req.body?.password || '').trim();
+
+    if (!/^\d{10}$/.test(mobile) || !/^\d{6}$/.test(otp)) {
+      return res.status(400).json({ success: false, message: 'मोबाइल और 6 अंकों का OTP सही डालें।' });
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'नया पासवर्ड कम से कम 6 अक्षरों का होना चाहिए।' });
+    }
+
+    const record = await Otp.findOne({ mobile });
+    if (!record || record.expiresAt <= new Date() || record.verified) {
+      return res.status(400).json({ success: false, message: 'OTP expired या invalid है।' });
+    }
+    if (record.attempts >= 5) {
+      return res.status(429).json({ success: false, message: 'OTP attempts की सीमा समाप्त हो गई है।' });
+    }
+
+    record.attempts += 1;
+    if (hashText(otp) !== record.otpHash) {
+      await record.save();
+      return res.status(400).json({ success: false, message: 'OTP गलत है।' });
+    }
+    record.verified = true;
+    await record.save();
+
+    const user = await User.findOne({
+      $or: [{ mobile }, { username: mobile }],
+      status: 'active'
+    });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'उपयोगकर्ता खाता नहीं मिला।' });
+    }
+
+    user.passwordHash = await hashPassword(newPassword);
+    user.sessions = [];
+    user.updatedAt = new Date();
+    await user.save();
+
+    await Otp.deleteMany({ mobile });
+
+    const sender = getLiveAdminWhatsAppSender();
+    if (sender) {
+      sender(mobile, `*Password Reset Successful* ✅\n\nआपके WA Control Center खाते का पासवर्ड सफलतापूर्वक बदल दिया गया है। अब आप नए पासवर्ड से लॉगिन कर सकते हैं।`).catch(() => {});
+    }
+
+    res.json({ success: true, message: 'पासवर्ड सफलतापूर्वक बदल दिया गया है! अब नए पासवर्ड से लॉगिन करें।' });
+  } catch (error) {
+    console.error('Forgot password reset error:', error);
+    res.status(500).json({ success: false, message: error.message || 'पासवर्ड रीसेट करने में समस्या हुई।' });
   }
 });
 

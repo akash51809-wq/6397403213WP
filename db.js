@@ -333,8 +333,24 @@ async function initTables(pool) {
       "lid" VARCHAR(100),
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS "ownerUserId" VARCHAR(100);`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS "group" VARCHAR(100) DEFAULT 'General';`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS "email" TEXT DEFAULT '';`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS "type" VARCHAR(50) DEFAULT 'Customer';`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS "status" VARCHAR(50) DEFAULT 'Active';`,
     `CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts("phone");`,
     `CREATE INDEX IF NOT EXISTS idx_contacts_lid ON contacts("lid");`,
+    `CREATE INDEX IF NOT EXISTS idx_contacts_ownerUserId ON contacts("ownerUserId");`,
+    `CREATE INDEX IF NOT EXISTS idx_contacts_group ON contacts("group");`,
+
+    // 9b. contact_groups
+    `CREATE TABLE IF NOT EXISTS contact_groups (
+      "id" VARCHAR(100) PRIMARY KEY,
+      "ownerUserId" VARCHAR(100) NOT NULL,
+      "name" VARCHAR(100) NOT NULL,
+      "createdAt" TIMESTAMPTZ DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_contact_groups_owner ON contact_groups("ownerUserId");`,
 
     // 10. incoming_messages
     `CREATE TABLE IF NOT EXISTS incoming_messages (
@@ -407,7 +423,23 @@ async function initTables(pool) {
       "windowStart" BIGINT NOT NULL,
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
-    `CREATE INDEX IF NOT EXISTS idx_rate_limits_windowStart ON rate_limits("windowStart");`
+    `CREATE INDEX IF NOT EXISTS idx_rate_limits_windowStart ON rate_limits("windowStart");`,
+
+    // 15. scheduled_messages (WhatsApp message scheduler)
+    `CREATE TABLE IF NOT EXISTS scheduled_messages (
+      "id" VARCHAR(100) PRIMARY KEY,
+      "ownerUserId" VARCHAR(100) NOT NULL,
+      "recipients" TEXT NOT NULL,
+      "message" TEXT DEFAULT '',
+      "scheduledAt" TIMESTAMPTZ NOT NULL,
+      "status" VARCHAR(30) DEFAULT 'pending',
+      "session" VARCHAR(100) DEFAULT '',
+      "attachment" JSONB,
+      "sentAt" TIMESTAMPTZ,
+      "createdAt" TIMESTAMPTZ DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_messages("ownerUserId");`,
+    `CREATE INDEX IF NOT EXISTS idx_sched_time ON scheduled_messages("scheduledAt", "status");`
   ];
 
   for (const stmt of statements) {
@@ -1180,9 +1212,21 @@ const Contact = createModel('contacts', 'id', {
   notify: null,
   verifiedName: null,
   phone: null,
-  lid: null
+  lid: null,
+  group: 'General',
+  ownerUserId: null,
+  email: '',
+  type: 'Customer',
+  status: 'Active'
 }, [], [
-  'id', 'name', 'notify', 'verifiedName', 'phone', 'lid', 'updatedAt'
+  'id', 'name', 'notify', 'verifiedName', 'phone', 'lid', 'group', 'ownerUserId', 'email', 'type', 'status', 'updatedAt'
+]);
+
+const ContactGroup = createModel('contact_groups', 'id', {
+  name: 'General',
+  ownerUserId: ''
+}, [], [
+  'id', 'ownerUserId', 'name', 'createdAt'
 ]);
 
 const IncomingMessage = createModel('incoming_messages', 'id', {
@@ -1244,6 +1288,7 @@ module.exports = {
   SessionAuth,
   ApiSettings,
   Contact,
+  ContactGroup,
   IncomingMessage,
   MessageReport,
   AppSettings,

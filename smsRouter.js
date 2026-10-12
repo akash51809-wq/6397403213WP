@@ -71,9 +71,9 @@ function initSmsWebSocket(server) {
 
           // 2. Incoming SMS received by phone
           else if (event === 'incoming_sms') {
-            const sender = data.sender || 'Unknown';
-            const message = data.message || '';
-            const simSlot = data.simSlot !== undefined ? data.simSlot : 0;
+            const sender = data.sender || data.from || data.address || data.phoneNumber || data.mobile || 'Unknown';
+            const message = data.message || data.body || data.text || data.msg || '';
+            const simSlot = data.simSlot !== undefined ? data.simSlot : (data.slot !== undefined ? data.slot : 0);
             const timestamp = data.timestamp || Date.now();
 
             if (db.isDuplicateSms(sender, message, 60000)) {
@@ -157,13 +157,10 @@ function initSmsWebSocket(server) {
 router.get('/api/sms/status', (req, res) => {
   try {
     const devices = db.getAllDevices();
-    const recentSms = db.getSmsList({ limit: 100 });
-    const recentDeliveries = db.getRecentDeliveries({ limit: 100 });
-
-    const totalSms = recentSms.length;
-    const delivered = recentDeliveries.filter(d => d.status === 'DELIVERED').length;
-    const retrying = recentDeliveries.filter(d => d.status === 'RETRY_SCHEDULED').length;
-    const failed = recentDeliveries.filter(d => d.status === 'FAILED').length;
+    const totalSms = db.getTotalSmsCount ? db.getTotalSmsCount() : 0;
+    const delivered = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('DELIVERED') : 0;
+    const retrying = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('RETRY_SCHEDULED') : 0;
+    const failed = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('FAILED') : 0;
     const activeDevicesCount = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN).length || devices.filter(d => d.is_online).length;
 
     res.json({
@@ -322,7 +319,11 @@ router.get('/api/sms/webhook-deliveries', (req, res) => {
 // 9. INCOMING SMS ENDPOINT (CALLED BY ANDROID APP)
 router.post('/api/sms/incoming', async (req, res) => {
   try {
-    const { deviceId, payload, sender, message, simSlot, timestamp } = req.body;
+    const { deviceId, payload } = req.body;
+    const rawSender = req.body.sender || req.body.from || req.body.address || req.body.phoneNumber || req.body.mobile;
+    const rawMessage = req.body.message || req.body.body || req.body.text || req.body.msg;
+    const rawSlot = req.body.simSlot !== undefined ? req.body.simSlot : (req.body.slot !== undefined ? req.body.slot : 0);
+    const rawTs = req.body.timestamp || Date.now();
     let smsData = null;
 
     if (payload) {
@@ -332,8 +333,8 @@ router.post('/api/sms/incoming', async (req, res) => {
       } catch (e) {
         return res.status(400).json({ success: false, message: 'Invalid encrypted payload: ' + e.message });
       }
-    } else if (sender && message) {
-      smsData = { sender, message, simSlot, timestamp };
+    } else if (rawSender && rawMessage) {
+      smsData = { sender: String(rawSender), message: String(rawMessage), simSlot: rawSlot, timestamp: rawTs };
     } else {
       return res.status(400).json({ success: false, message: 'Missing sender or message payload' });
     }

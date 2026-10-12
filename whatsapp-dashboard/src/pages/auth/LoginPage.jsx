@@ -9,7 +9,7 @@ export function LoginPage({ initialMode }) {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Mode: 'login' | 'signup'
+  // Mode: 'login' | 'signup' | 'forgot'
   const isSignupPath = location.pathname === '/signup' || initialMode === 'signup'
   const [mode, setMode] = useState(isSignupPath ? 'signup' : 'login')
 
@@ -28,6 +28,14 @@ export function LoginPage({ initialMode }) {
   const [signupLoading, setSignupLoading] = useState(false)
   const [signupMsg, setSignupMsg] = useState({ text: '', type: '' }) // type: 'ok' | 'err'
 
+  // Forgot Password Form States (WhatsApp OTP Flow)
+  const [forgotMobile, setForgotMobile] = useState('')
+  const [forgotOtp, setForgotOtp] = useState('')
+  const [forgotNewPassword, setForgotNewPassword] = useState('')
+  const [forgotStep, setForgotStep] = useState(1) // 1: Mobile, 2: OTP + New Password, 3: Success
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotMsg, setForgotMsg] = useState({ text: '', type: '' })
+
   useEffect(() => {
     if (loadCompanySettings) {
       loadCompanySettings()
@@ -42,6 +50,66 @@ export function LoginPage({ initialMode }) {
       setMode('login')
     }
   }, [location.pathname])
+
+  // ── Handle Forgot Password: Step 1 (Request OTP) ──
+  const handleForgotRequestOtp = async (e) => {
+    e?.preventDefault()
+    const cleanMobile = forgotMobile.replace(/\D/g, '')
+    if (!/^\d{10}$/.test(cleanMobile)) {
+      return setForgotMsg({ text: 'कृपया 10 अंकों का मान्य मोबाइल नंबर दर्ज करें।', type: 'err' })
+    }
+    setForgotLoading(true)
+    setForgotMsg({ text: '', type: '' })
+    try {
+      const res = await fetch('/api/auth/forgot-password/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: cleanMobile })
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'OTP नहीं भेजा जा सका।')
+      }
+      setForgotStep(2)
+      setForgotMsg({ text: `OTP आपके WhatsApp नंबर (+91 ${cleanMobile}) पर भेज दिया गया है।`, type: 'ok' })
+    } catch (err) {
+      setForgotMsg({ text: err.message || 'OTP request failed.', type: 'err' })
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
+  // ── Handle Forgot Password: Step 2 (Verify OTP & Reset) ──
+  const handleForgotVerifyOtp = async (e) => {
+    e?.preventDefault()
+    const cleanMobile = forgotMobile.replace(/\D/g, '')
+    const cleanOtp = forgotOtp.replace(/\D/g, '')
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      return setForgotMsg({ text: 'कृपया 6 अंकों का OTP दर्ज करें।', type: 'err' })
+    }
+    if (!forgotNewPassword || forgotNewPassword.length < 4) {
+      return setForgotMsg({ text: 'नया पासवर्ड कम से कम 4 अक्षरों का होना चाहिए।', type: 'err' })
+    }
+    setForgotLoading(true)
+    setForgotMsg({ text: '', type: '' })
+    try {
+      const res = await fetch('/api/auth/forgot-password/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: cleanMobile, otp: cleanOtp, newPassword: forgotNewPassword })
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Verification failed.')
+      }
+      setForgotStep(3)
+      setForgotMsg({ text: 'पासवर्ड सफलतापूर्वक बदल दिया गया है!', type: 'ok' })
+    } catch (err) {
+      setForgotMsg({ text: err.message || 'Reset failed.', type: 'err' })
+    } finally {
+      setForgotLoading(false)
+    }
+  }
 
   // ── Handle Sign In ──
   const handleSignInSubmit = async (e) => {
@@ -237,7 +305,12 @@ export function LoginPage({ initialMode }) {
                   <span
                     className="auth-forgot-link"
                     onClick={() => {
-                      alert('Password recovery: Please contact the system administrator (admin) or check your registered WhatsApp credentials.')
+                      setMode('forgot')
+                      setForgotStep(1)
+                      setForgotMobile(username.replace(/\D/g, ''))
+                      setForgotOtp('')
+                      setForgotNewPassword('')
+                      setForgotMsg({ text: '', type: '' })
                     }}
                   >
                     Forgot Password?
@@ -254,7 +327,7 @@ export function LoginPage({ initialMode }) {
                 </button>
               </form>
             </div>
-          ) : (
+          ) : mode === 'signup' ? (
             /* ── MODE 2: SIGN UP ── */
             <div>
               <div className="auth-header">
@@ -372,6 +445,143 @@ export function LoginPage({ initialMode }) {
                       setSignupStep(1)
                       setSignupOtp('')
                       setSignupMobile('')
+                    }}
+                  >
+                    Proceed to Sign in →
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── MODE 3: FORGOT PASSWORD ── */
+            <div>
+              <div className="auth-header">
+                <h1 className="auth-title">Reset Password</h1>
+                <p className="auth-subtitle">
+                  Remember your password?{' '}
+                  <span
+                    className="auth-subtitle-link"
+                    onClick={() => {
+                      setMode('login')
+                      setForgotMsg({ text: '', type: '' })
+                    }}
+                  >
+                    Sign in
+                  </span>
+                </p>
+              </div>
+
+              {forgotMsg.text && (
+                <div className={`auth-alert ${forgotMsg.type === 'ok' ? 'auth-alert-success' : 'auth-alert-error'}`}>
+                  {forgotMsg.text}
+                </div>
+              )}
+
+              {/* Step 1: Mobile */}
+              {forgotStep === 1 && (
+                <form onSubmit={handleForgotRequestOtp}>
+                  <div className="auth-form-group">
+                    <label className="auth-label">Registered WhatsApp Number</label>
+                    <div className="auth-input-container">
+                      <span style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginRight: 8 }}>+91</span>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength="10"
+                        className="auth-input"
+                        placeholder="10-digit mobile number"
+                        value={forgotMobile}
+                        onChange={(e) => setForgotMobile(e.target.value.replace(/\D/g, ''))}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    className="auth-submit-btn"
+                    disabled={forgotLoading}
+                  >
+                    {forgotLoading ? 'Sending OTP...' : 'Send Reset OTP via WhatsApp'}
+                  </button>
+                </form>
+              )}
+
+              {/* Step 2: OTP + New Password */}
+              {forgotStep === 2 && (
+                <form onSubmit={handleForgotVerifyOtp}>
+                  <div className="auth-form-group">
+                    <label className="auth-label">6-Digit OTP</label>
+                    <div className="auth-input-container">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength="6"
+                        className="auth-input"
+                        placeholder="Enter 6-digit OTP"
+                        value={forgotOtp}
+                        onChange={(e) => setForgotOtp(e.target.value.replace(/\D/g, ''))}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="auth-form-group">
+                    <label className="auth-label">New Password</label>
+                    <div className="auth-input-container">
+                      <input
+                        type="password"
+                        className="auth-input"
+                        placeholder="Enter new password"
+                        value={forgotNewPassword}
+                        onChange={(e) => setForgotNewPassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="auth-submit-btn"
+                    disabled={forgotLoading}
+                  >
+                    {forgotLoading ? 'Resetting Password...' : 'Verify & Set New Password'}
+                  </button>
+                  <button
+                    type="button"
+                    className="auth-secondary-btn"
+                    onClick={() => {
+                      setForgotStep(1)
+                      setForgotOtp('')
+                      setForgotMsg({ text: '', type: '' })
+                    }}
+                  >
+                    ← Change Mobile Number
+                  </button>
+                </form>
+              )}
+
+              {/* Step 3: Success Screen */}
+              {forgotStep === 3 && (
+                <div>
+                  <div className="auth-success-card">
+                    <div className="auth-success-badge">✓</div>
+                    <h3 className="auth-success-title">Password Reset Complete!</h3>
+                    <p className="auth-success-desc">
+                      Your password for <strong className="auth-success-highlight">+91 {forgotMobile}</strong> has been updated successfully.
+                    </p>
+                    <span className="auth-success-tip">
+                      🔒 You can now login with your new password.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="auth-submit-btn"
+                    onClick={() => {
+                      setUsername(forgotMobile)
+                      setMode('login')
+                      setForgotStep(1)
+                      setForgotOtp('')
+                      setForgotNewPassword('')
+                      setForgotMobile('')
                     }}
                   >
                     Proceed to Sign in →

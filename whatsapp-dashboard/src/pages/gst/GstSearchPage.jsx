@@ -3,8 +3,8 @@ import { useSearchParams, Link } from 'react-router-dom'
 import { getToken } from '../../services/api'
 
 export default function GstSearchPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const initialGstin = searchParams.get('gstin') || '09AKPPG5665E1ZU'
+  const [searchParams] = useSearchParams()
+  const initialGstin = searchParams.get('gstin') || ''
 
   const [gstinInput, setGstinInput] = useState(initialGstin)
   const [loading, setLoading] = useState(false)
@@ -14,10 +14,10 @@ export default function GstSearchPage() {
   const [activeTab, setActiveTab] = useState('registration')
 
   useEffect(() => {
-    if (initialGstin) {
+    if (initialGstin && initialGstin.trim()) {
       executeSearch(initialGstin)
     }
-  }, [initialGstin])
+  }, [])
 
   const executeSearch = async (gstinToQuery) => {
     const clean = String(gstinToQuery || gstinInput).trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -41,7 +41,6 @@ export default function GstSearchPage() {
       const result = await res.json()
       if (result.success && result.data) {
         setData(result.data)
-        setSearchParams({ gstin: clean })
       } else {
         setError(result.message || 'Taxpayer details not found for this GSTIN.')
         setData(null)
@@ -125,34 +124,19 @@ export default function GstSearchPage() {
             </div>
           )}
 
-          {/* Quick Click Samples */}
-          <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: '#6d28d9', fontWeight: 600 }}>Sample GSTINs:</span>
-            {['09AKPPG5665E1ZU', '19MAJPS4713H1Z3', '27AAACR4849R1ZZ'].map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  setGstinInput(s)
-                  executeSearch(s)
-                }}
-                style={{
-                  background: '#f5f3ff',
-                  border: '1px solid #ddd6fe',
-                  color: '#6d28d9',
-                  padding: '3px 8px',
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          {/* Empty search guide */}
         </div>
       </div>
+
+      {!data && !loading && !error && (
+        <div className="card" style={{ padding: '48px 24px', textAlign: 'center', borderColor: '#e9d5ff', background: '#faf5ff', marginBottom: 24 }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>🏛️</div>
+          <h3 style={{ margin: '0 0 8px', color: '#581c87', fontSize: 18 }}>No Taxpayer Data Displayed</h3>
+          <p style={{ margin: 0, color: '#7c3aed', fontSize: 13, maxWidth: 500, marginInline: 'auto', lineHeight: 1.5 }}>
+            Please enter a 15-character GSTIN above and click <strong>Search GSTIN</strong> to fetch verified business registration details, constitution, and filing status.
+          </p>
+        </div>
+      )}
 
       {/* Taxpayer Details Card */}
       {data && (

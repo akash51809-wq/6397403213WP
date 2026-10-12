@@ -116,127 +116,238 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
+    <div 
+      className="modal-overlay" 
+      onClick={onClose} 
+      style={{ 
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16
+      }}
+    >
       <div 
         className="modal-content-card" 
         onClick={e => e.stopPropagation()} 
-        style={{ maxWidth: 580, width: '92%', borderRadius: 18, maxHeight: '92vh', overflowY: 'auto' }}
+        style={{ 
+          maxWidth: 540, 
+          width: '100%', 
+          borderRadius: 20, 
+          background: '#ffffff',
+          boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
+          border: '1px solid #e2e8f0',
+          maxHeight: '92vh', 
+          overflowY: 'auto' 
+        }}
       >
         {/* Modal Header */}
-        <div className="modal-header d-flex align-items-center justify-content-between" style={{ padding: '18px 24px', borderBottom: '1px solid var(--zd-border, #eef2f6)' }}>
+        <div 
+          style={{ 
+            padding: '20px 24px 16px', 
+            borderBottom: '1px solid #f1f5f9',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}
+        >
           <div>
-            <h5 className="modal-title font-weight-bold m-0" style={{ fontSize: 18, color: 'inherit' }}>
-              💳 Subscribe to {plan.name} Plan
-            </h5>
-            <small className="text-muted">Choose your preferred payment method to activate this subscription.</small>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <span style={{ fontSize: 18 }}>💳</span>
+              <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                Activate {plan.name} Plan
+              </h3>
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, color: '#64748b' }}>
+              Select your payment method to activate subscription instantly.
+            </p>
           </div>
           <button 
             type="button" 
             onClick={onClose}
-            style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#8a98ac', lineHeight: 1 }}
+            style={{ 
+              background: '#f1f5f9', 
+              border: 'none', 
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              fontSize: 18, 
+              cursor: 'pointer', 
+              color: '#64748b', 
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 1,
+              transition: 'all 0.15s ease'
+            }}
           >
-            ×
+            ✕
           </button>
         </div>
 
-        <div className="modal-body" style={{ padding: '20px 24px' }}>
-          {/* Selected Plan Summary Card */}
-          <div className="card p-3 mb-3" style={{ borderRadius: 12, background: 'var(--zd-border-subtle, rgba(0,0,0,0.02))', border: '1px solid var(--zd-border, #eef2f6)' }}>
-            <div className="d-flex align-items-center justify-content-between mb-2">
+        <div style={{ padding: '20px 24px' }}>
+          {/* Selected Plan Summary Banner */}
+          <div 
+            style={{ 
+              borderRadius: 14, 
+              background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', 
+              border: '1px solid #e2e8f0',
+              padding: '16px 18px',
+              marginBottom: 18
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <div>
-                <span className="badge badge-primary-light" style={{ fontSize: 11, padding: '3px 8px', marginBottom: 4, display: 'inline-block' }}>
-                  {plan.service ? `${plan.service.toUpperCase()} PLAN` : 'SELECTED PLAN'}
+                <span 
+                  style={{ 
+                    fontSize: 10.5, 
+                    fontWeight: 800, 
+                    textTransform: 'uppercase', 
+                    letterSpacing: '0.05em',
+                    padding: '3px 8px', 
+                    borderRadius: 6,
+                    background: '#e0e7ff',
+                    color: '#4338ca',
+                    display: 'inline-block',
+                    marginBottom: 4
+                  }}
+                >
+                  {plan.service ? `${plan.service.toUpperCase()} SERVICE` : 'SUBSCRIPTION'}
                 </span>
-                <h4 className="m-0 font-weight-bold" style={{ fontSize: 18, color: 'inherit' }}>{plan.name}</h4>
+                <h4 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#0f172a' }}>
+                  {plan.name}
+                </h4>
               </div>
-              <div className="text-right">
-                <span style={{ fontSize: 22, fontWeight: 900, color: '#10b981' }}>₹{plan.price}</span>
-                <small className="text-muted d-block" style={{ fontSize: 11 }}>/ {plan.validity || `${plan.validityDays} Days`}</small>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 24, fontWeight: 900, color: '#10b981', lineHeight: 1 }}>
+                  ₹{plan.price}
+                </div>
+                <small style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                  {plan.isUnlimitedValidity ? 'Lifetime Validity' : `/ ${plan.validity || `${plan.validityDays} Days`}`}
+                </small>
               </div>
             </div>
-            <div className="d-flex flex-wrap gap-2 text-muted" style={{ gap: 12, fontSize: 12, borderTop: '1px solid var(--zd-border, rgba(0,0,0,0.05))', paddingTop: 8 }}>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', fontSize: 12, color: '#475569', borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
               {plan.dailyLimit && <div>✓ <strong>Limit:</strong> {plan.dailyLimit}</div>}
               {plan.hits && <div>✓ <strong>Hits:</strong> {Number(plan.hits).toLocaleString()}</div>}
-              {plan.deviceLimit && <div>✓ <strong>Access:</strong> {plan.deviceLimit}</div>}
+              {plan.deviceLimit && <div>✓ <strong>Devices:</strong> {plan.deviceLimit}</div>}
               {plan.apiAccess && <div>✓ <strong>API Access</strong></div>}
               {plan.incomingAllowed && <div>✓ <strong>Incoming SMS</strong></div>}
               {plan.outgoingAllowed && <div>✓ <strong>Outgoing SMS</strong></div>}
             </div>
           </div>
 
-          {/* Payment Method Selector Tabs */}
-          <div className="d-flex gap-2 mb-3" style={{ gap: 8 }}>
+          {/* Payment Method Selector Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
             <button
               type="button"
               onClick={() => setPaymentMode('wallet')}
               style={{
-                flex: 1,
-                padding: '10px 14px',
-                borderRadius: 10,
+                padding: '12px 14px',
+                borderRadius: 12,
                 border: paymentMode === 'wallet' ? '2px solid #10b981' : '1px solid #e2e8f0',
-                background: paymentMode === 'wallet' ? '#ecfdf5' : '#f8fafc',
-                color: paymentMode === 'wallet' ? '#065f46' : '#475569',
-                fontWeight: 700,
-                fontSize: 13,
+                background: paymentMode === 'wallet' ? '#f0fdf4' : '#ffffff',
+                color: paymentMode === 'wallet' ? '#065f46' : '#334155',
                 cursor: 'pointer',
-                textAlign: 'center',
-                transition: 'all 0.2s'
+                textAlign: 'left',
+                boxShadow: paymentMode === 'wallet' ? '0 4px 12px rgba(16,185,129,0.15)' : 'none',
+                transition: 'all 0.18s ease'
               }}
             >
-              <div style={{ fontSize: 16 }}>👛 Wallet Balance</div>
-              <small style={{ fontSize: 11, fontWeight: 600, color: hasEnoughWalletBalance ? '#059669' : '#dc2626' }}>
-                Balance: ₹{currentBalance.toFixed(2)} {hasEnoughWalletBalance ? '(Instant)' : '(Insufficient)'}
-              </small>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 14, fontWeight: 800 }}>👛 Wallet Pay</span>
+                <span 
+                  style={{ 
+                    fontSize: 10, 
+                    fontWeight: 800, 
+                    padding: '2px 6px', 
+                    borderRadius: 999, 
+                    background: hasEnoughWalletBalance ? '#10b981' : '#f59e0b',
+                    color: '#ffffff'
+                  }}
+                >
+                  {hasEnoughWalletBalance ? 'Instant' : 'Low Bal'}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>
+                Bal: <strong>₹{currentBalance.toFixed(2)}</strong>
+              </div>
             </button>
 
             <button
               type="button"
               onClick={() => setPaymentMode('bank')}
               style={{
-                flex: 1,
-                padding: '10px 14px',
-                borderRadius: 10,
+                padding: '12px 14px',
+                borderRadius: 12,
                 border: paymentMode === 'bank' ? '2px solid #0284c7' : '1px solid #e2e8f0',
-                background: paymentMode === 'bank' ? '#f0f9ff' : '#f8fafc',
-                color: paymentMode === 'bank' ? '#0369a1' : '#475569',
-                fontWeight: 700,
-                fontSize: 13,
+                background: paymentMode === 'bank' ? '#f0f9ff' : '#ffffff',
+                color: paymentMode === 'bank' ? '#0369a1' : '#334155',
                 cursor: 'pointer',
-                textAlign: 'center',
-                transition: 'all 0.2s'
+                textAlign: 'left',
+                boxShadow: paymentMode === 'bank' ? '0 4px 12px rgba(2,132,199,0.15)' : 'none',
+                transition: 'all 0.18s ease'
               }}
             >
-              <div style={{ fontSize: 16 }}>🏦 Bank / UPI Transfer</div>
-              <small style={{ fontSize: 11, fontWeight: 500, color: '#64748b' }}>
-                Submit UTR / Payment slip
-              </small>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 14, fontWeight: 800 }}>🏦 Bank / UPI</span>
+                <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 6px', borderRadius: 999, background: '#e0f2fe', color: '#0369a1' }}>
+                  Manual
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>
+                Submit UTR slip
+              </div>
             </button>
           </div>
 
           {/* MODE 1: INSTANT WALLET PAYMENT */}
           {paymentMode === 'wallet' && (
-            <div className="card p-3 mb-2" style={{ borderRadius: 12, border: '1px solid #10b98140', background: '#f0fdf4' }}>
-              <div className="d-flex align-items-center justify-content-between mb-3">
+            <div 
+              style={{ 
+                borderRadius: 14, 
+                border: '1px solid #bbf7d0', 
+                background: '#f0fdf4', 
+                padding: '16px 18px',
+                marginBottom: 8
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                 <div>
                   <strong style={{ fontSize: 14, color: '#065f46' }}>Instant Wallet Payment</strong>
                   <div style={{ fontSize: 12, color: '#047857' }}>
-                    No admin approval needed. Plan activates immediately!
+                    Plan activates immediately without waiting for admin approval.
                   </div>
                 </div>
                 <span style={{ fontSize: 24 }}>⚡</span>
               </div>
 
-              <div style={{ background: '#fff', borderRadius: 8, padding: 12, border: '1px solid #d1fae5', marginBottom: 14 }}>
-                <div className="d-flex justify-content-between mb-1" style={{ fontSize: 13 }}>
-                  <span className="text-muted">Plan Amount:</span>
-                  <strong>₹{planPrice}</strong>
+              <div 
+                style={{ 
+                  background: '#ffffff', 
+                  borderRadius: 10, 
+                  padding: '12px 14px', 
+                  border: '1px solid #d1fae5', 
+                  marginBottom: 16 
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }}>
+                  <span style={{ color: '#64748b' }}>Plan Price:</span>
+                  <strong style={{ color: '#0f172a' }}>₹{planPrice}</strong>
                 </div>
-                <div className="d-flex justify-content-between mb-1" style={{ fontSize: 13 }}>
-                  <span className="text-muted">Current Wallet Balance:</span>
-                  <strong style={{ color: hasEnoughWalletBalance ? '#059669' : '#dc2626' }}>₹{currentBalance.toFixed(2)}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }}>
+                  <span style={{ color: '#64748b' }}>Your Wallet Balance:</span>
+                  <strong style={{ color: hasEnoughWalletBalance ? '#059669' : '#dc2626' }}>
+                    ₹{currentBalance.toFixed(2)}
+                  </strong>
                 </div>
-                <div className="d-flex justify-content-between pt-1" style={{ fontSize: 13, borderTop: '1px dashed #e2e8f0' }}>
-                  <span className="text-muted">Balance After Purchase:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, fontSize: 13, borderTop: '1px dashed #cbd5e1' }}>
+                  <span style={{ color: '#64748b' }}>Balance After Purchase:</span>
                   <strong style={{ color: hasEnoughWalletBalance ? '#059669' : '#dc2626' }}>
                     ₹{hasEnoughWalletBalance ? (currentBalance - planPrice).toFixed(2) : '0.00'}
                   </strong>
@@ -246,28 +357,67 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
               {hasEnoughWalletBalance ? (
                 <button
                   type="button"
-                  className="btn btn-success w-100 py-2"
                   disabled={submitting}
                   onClick={handleWalletPay}
-                  style={{ borderRadius: 8, fontWeight: 700, fontSize: 14, background: '#10b981', borderColor: '#10b981' }}
+                  style={{ 
+                    width: '100%',
+                    padding: '12px 18px',
+                    borderRadius: 10, 
+                    fontWeight: 800, 
+                    fontSize: 14, 
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(16,185,129,0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    transition: 'all 0.18s ease'
+                  }}
                 >
                   {submitting ? '⏳ Activating Plan...' : `⚡ Pay ₹${planPrice} & Activate Plan Instantly`}
                 </button>
               ) : (
                 <div>
-                  <div className="alert alert-warning p-2 mb-2" style={{ fontSize: 12 }}>
-                    ⚠️ आपका वॉलेट बैलेंस कम है (कमी: <strong>₹{(planPrice - currentBalance).toFixed(2)}</strong>)। पहले वॉलेट में फंड जोड़ें या बैंक/UPI से भुगतान करें।
+                  <div 
+                    style={{ 
+                      background: '#fffbeb', 
+                      border: '1px solid #fde68a', 
+                      borderRadius: 10, 
+                      padding: '10px 14px', 
+                      marginBottom: 12, 
+                      fontSize: 12.5, 
+                      color: '#92400e',
+                      lineHeight: 1.4
+                    }}
+                  >
+                    ⚠️ Insufficient wallet balance (Short by <strong>₹{(planPrice - currentBalance).toFixed(2)}</strong>). Top-up your wallet first or pay via Bank / UPI transfer.
                   </div>
                   <button
                     type="button"
-                    className="btn btn-outline-success w-100"
                     onClick={() => {
                       onClose()
                       if (onOpenAddFunds) onOpenAddFunds()
                     }}
-                    style={{ borderRadius: 8, fontWeight: 700, fontSize: 13 }}
+                    style={{ 
+                      width: '100%',
+                      padding: '10px 16px',
+                      borderRadius: 10, 
+                      fontWeight: 800, 
+                      fontSize: 13,
+                      background: '#ffffff',
+                      color: '#059669',
+                      border: '2px solid #10b981',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6
+                    }}
                   >
-                    + Add Funds to Wallet (वॉलेट में फंड जोड़ें)
+                    <span>➕</span> Add Funds to Wallet (वॉलेट में फंड जोड़ें)
                   </button>
                 </div>
               )}
@@ -278,35 +428,47 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
           {paymentMode === 'bank' && (
             <form onSubmit={handleSubmitBankTransfer}>
               {/* Admin Bank & UPI Instructions Box */}
-              <div className="alert alert-info mb-3" style={{ borderRadius: 12, padding: '10px 14px', fontSize: 12, lineHeight: 1.5 }}>
-                <strong style={{ display: 'block', fontSize: 13, marginBottom: 2 }}>🏦 Transfer To Account:</strong>
-                <div>Bank / Company: <strong>{companySettings?.companyName || 'Easy Recharge Solution'}</strong></div>
-                <div>UPI ID: <strong style={{ color: '#0284c7' }}>{companySettings?.contactWhatsApp ? `${companySettings.contactWhatsApp.replace(/\D/g, '')}@upi` : 'ersolution@upi'}</strong></div>
-                <small className="text-muted d-block mt-1">Pay ₹{planPrice} and enter your transaction UTR reference below:</small>
+              <div 
+                style={{ 
+                  borderRadius: 12, 
+                  padding: '12px 14px', 
+                  fontSize: 12.5, 
+                  lineHeight: 1.5,
+                  background: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  color: '#0369a1',
+                  marginBottom: 14
+                }}
+              >
+                <strong style={{ display: 'block', fontSize: 13, marginBottom: 4, color: '#0c4a6e' }}>
+                  🏦 Bank &amp; UPI Account Details:
+                </strong>
+                <div>Company: <strong>{companySettings?.companyName || 'Easy Recharge Solution'}</strong></div>
+                <div>UPI ID: <strong style={{ color: '#0284c7', fontFamily: 'monospace' }}>{companySettings?.contactWhatsApp ? `${companySettings.contactWhatsApp.replace(/\D/g, '')}@upi` : 'ersolution@upi'}</strong></div>
+                <small style={{ color: '#0284c7', display: 'block', marginTop: 4 }}>
+                  Transfer ₹{planPrice} and submit your UTR / transaction ID below:
+                </small>
               </div>
 
               {/* Form Fields: Amount & Payment Date */}
-              <div className="row g-3 mb-3">
-                <div className="col-sm-6">
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                    Payment Amount (राशि ₹) *
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#334155' }}>
+                    Payment Amount (₹) *
                   </label>
-                  <div className="input-group">
-                    <span className="input-group-text" style={{ borderRadius: '8px 0 0 8px', fontWeight: 700 }}>₹</span>
-                    <input 
-                      type="number" 
-                      className="form-control" 
-                      value={amount}
-                      onChange={e => setAmount(e.target.value)}
-                      min="1"
-                      required
-                      style={{ height: 40, borderRadius: '0 8px 8px 0' }}
-                    />
-                  </div>
+                  <input 
+                    type="number" 
+                    className="form-control" 
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    min="1"
+                    required
+                    style={{ height: 40, borderRadius: 8, fontSize: 13, padding: '0 10px', border: '1px solid #cbd5e1', width: '100%' }}
+                  />
                 </div>
-                <div className="col-sm-6">
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                    Payment Date (तारीख) *
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#334155' }}>
+                    Payment Date *
                   </label>
                   <input 
                     type="date" 
@@ -314,14 +476,14 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
                     value={paymentDate}
                     onChange={e => setPaymentDate(e.target.value)}
                     required
-                    style={{ height: 40, borderRadius: 8 }}
+                    style={{ height: 40, borderRadius: 8, fontSize: 13, padding: '0 10px', border: '1px solid #cbd5e1', width: '100%' }}
                   />
                 </div>
               </div>
 
               {/* Bank Details & UTR */}
-              <div className="form-group mb-3">
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#334155' }}>
                   Bank / UPI / UTR Transaction ID *
                 </label>
                 <textarea 
@@ -329,38 +491,36 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
                   rows="2"
                   value={bankDetails}
                   onChange={e => setBankDetails(e.target.value)}
-                  placeholder="e.g. Paid via GPay. UTR: 328491823901, Sender: HDFC"
+                  placeholder="e.g. Paid via PhonePe. UTR: 328491823901, Sender: HDFC"
                   required
-                  style={{ borderRadius: 8, padding: '8px 12px', fontSize: 12 }}
+                  style={{ borderRadius: 8, padding: '8px 12px', fontSize: 12.5, border: '1px solid #cbd5e1', width: '100%' }}
                 />
               </div>
 
               {/* Screenshot Upload (Optional) */}
-              <div className="form-group mb-3">
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                  Payment Screenshot (स्क्रीनशॉट - वैकल्पिक)
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6, color: '#334155' }}>
+                  Payment Screenshot (Optional)
                 </label>
                 <input 
                   type="file" 
                   ref={fileInputRef}
                   accept="image/*"
                   onChange={handleFileChange}
-                  className="form-control"
-                  style={{ height: 38, borderRadius: 8, padding: '5px 12px' }}
+                  style={{ height: 38, borderRadius: 8, padding: '6px 10px', fontSize: 12, border: '1px solid #cbd5e1', width: '100%' }}
                 />
 
                 {screenshotPreview && (
-                  <div className="mt-2 position-relative d-inline-block">
+                  <div style={{ marginTop: 8, position: 'relative', display: 'inline-block' }}>
                     <img 
                       src={screenshotPreview} 
                       alt="Receipt Preview" 
-                      style={{ maxHeight: 90, borderRadius: 8, border: '1px solid #d0d7de', display: 'block' }}
+                      style={{ maxHeight: 80, borderRadius: 8, border: '1px solid #cbd5e1', display: 'block' }}
                     />
                     <button 
                       type="button" 
                       onClick={removeScreenshot}
-                      className="btn btn-sm btn-danger"
-                      style={{ position: 'absolute', top: 4, right: 4, borderRadius: '50%', width: 22, height: 22, padding: 0, lineHeight: 1 }}
+                      style={{ position: 'absolute', top: -6, right: -6, borderRadius: '50%', width: 22, height: 22, background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', lineHeight: 1 }}
                       title="Remove Image"
                     >
                       ×
@@ -369,20 +529,28 @@ export function PaymentDetailsModal({ plan, walletBalance = 0, onClose, onSucces
                 )}
               </div>
 
-              <div className="d-flex justify-content-end gap-2 pt-2" style={{ borderTop: '1px solid #eef2f6', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
                 <button 
                   type="button" 
-                  className="btn btn-outline-secondary" 
                   onClick={onClose}
-                  style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 600 }}
+                  style={{ borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', color: '#475569' }}
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
-                  className="btn btn-primary"
                   disabled={submitting}
-                  style={{ borderRadius: 8, padding: '7px 20px', fontWeight: 700 }}
+                  style={{ 
+                    borderRadius: 8, 
+                    padding: '8px 20px', 
+                    fontWeight: 700, 
+                    fontSize: 13, 
+                    border: 'none', 
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', 
+                    color: '#ffffff', 
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(2,132,199,0.3)'
+                  }}
                 >
                   {submitting ? '⏳ Submitting...' : 'Submit Payment Request'}
                 </button>

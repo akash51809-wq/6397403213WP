@@ -352,8 +352,8 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
         }
         .pricing-cards-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-          gap: 18px;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 300px));
+          gap: 16px;
           width: 100%;
         }
         .user-plans-page .nav-action-btn {
@@ -362,6 +362,10 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
         }
         .user-plans-page .nav-action-btn:hover {
           transform: translateY(-1px);
+        }
+        .buy-plan-btn:hover {
+          transform: translateY(-2px);
+          filter: brightness(1.08);
         }
       `}</style>
 
@@ -377,7 +381,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                 Choose the best package for your business across WhatsApp, SMS, Plan API, and GST services.
               </p>
             </div>
-            <div className="d-flex align-items-center" style={{ gap: 10 }}>
+            <div className="d-flex align-items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
               <button 
                 type="button" 
                 className="nav-action-btn"
@@ -386,7 +390,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   borderRadius: 10, 
                   padding: '8px 16px', 
                   fontWeight: 700, 
-                  fontSize: 13,
+                  fontSize: 13, 
                   border: activeTab === 'plans' ? '1px solid #16a765' : '1px solid #cbd5e1',
                   background: activeTab === 'plans' ? '#16a765' : '#ffffff',
                   color: activeTab === 'plans' ? '#ffffff' : '#334155',
@@ -411,7 +415,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   boxShadow: activeTab === 'requests' ? '0 3px 10px rgba(22,167,101,0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
                 }}
               >
-                📋 My Orders / Daybook
+                📋 My Orders
                 {pendingCount > 0 && (
                   <span style={{ 
                     marginLeft: 6, 
@@ -426,72 +430,25 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   </span>
                 )}
               </button>
-            </div>
-          </div>
-
-          {/* USER WALLET BALANCE BANNER */}
-          <div 
-            className="card shadow-sm p-3 mb-3 d-flex flex-wrap align-items-center justify-content-between"
-            style={{ 
-              borderRadius: 14, 
-              background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
-              border: '1px solid #a7f3d0',
-              gap: 14
-            }}
-          >
-            <div className="d-flex align-items-center gap-3">
-              <span 
-                style={{ 
-                  width: 48, 
-                  height: 48, 
-                  borderRadius: 12, 
-                  background: '#10b981', 
-                  color: '#fff', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  fontSize: 24,
-                  boxShadow: '0 4px 10px rgba(16,185,129,0.3)'
-                }}
-              >
-                👛
-              </span>
-              <div>
-                <small style={{ fontSize: 11, fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  YOUR USER WALLET BALANCE
-                </small>
-                <div className="d-flex align-items-baseline gap-2">
-                  <h2 style={{ fontSize: 26, fontWeight: 900, color: '#065f46', margin: 0 }}>
-                    ₹{walletBalance.toFixed(2)}
-                  </h2>
-                  <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>
-                    (Instant Plan Purchase &amp; GST Hits)
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="d-flex align-items-center gap-2">
               <button
                 type="button"
+                className="nav-action-btn"
                 onClick={() => setShowAddFunds(true)}
                 style={{
-                  background: '#10b981',
-                  color: '#ffffff',
-                  border: 'none',
                   borderRadius: 10,
-                  padding: '9px 18px',
+                  padding: '8px 16px',
                   fontWeight: 800,
                   fontSize: 13,
-                  cursor: 'pointer',
+                  border: '1px solid #10b981',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: '#ffffff',
+                  boxShadow: '0 3px 10px rgba(16,185,129,0.25)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
-                  boxShadow: '0 4px 12px rgba(16,185,129,0.3)',
-                  transition: 'all 0.18s'
+                  gap: 6
                 }}
               >
-                <span>➕</span> Add Funds / Top-up Wallet
+                <span>➕</span> Add Funds
               </button>
             </div>
           </div>
@@ -617,13 +574,13 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     <div
                       style={{
                         position: 'absolute',
-                        top: 12,
-                        right: 14,
+                        top: 10,
+                        right: 12,
                         background: isPopular ? activeServiceConfig.color : '#f1f5f9',
                         color: isPopular ? '#ffffff' : '#475569',
-                        fontSize: 10.5,
+                        fontSize: 10,
                         fontWeight: 800,
-                        padding: '3px 10px',
+                        padding: '2px 8px',
                         borderRadius: 999,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em'
@@ -633,16 +590,16 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     </div>
                   )}
 
-                  <div style={{ padding: '20px 20px 14px', flexGrow: 1 }}>
+                  <div style={{ padding: '16px 16px 10px', flexGrow: 1 }}>
                     {/* Card Header: Service Icon + Plan Name */}
-                    <div className="d-flex align-items-center" style={{ gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 18 }}>{activeServiceConfig.icon}</span>
-                      <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    <div className="d-flex align-items-center" style={{ gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 16 }}>{activeServiceConfig.icon}</span>
+                      <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: '#0f172a' }}>
                         {plan.name}
                       </h3>
                     </div>
 
-                    <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 16px', minHeight: 34, lineHeight: 1.4 }}>
+                    <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px', minHeight: 28, lineHeight: 1.35 }}>
                       {plan.description || `${activeServiceConfig.label} Subscription Plan`}
                     </p>
 
@@ -650,49 +607,49 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     <div
                       style={{
                         background: activeServiceConfig.softBg,
-                        border: `1px solid ${activeServiceConfig.color}30`,
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        marginBottom: 16,
+                        border: `1px solid ${activeServiceConfig.color}25`,
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        marginBottom: 12,
                         display: 'flex',
                         alignItems: 'baseline',
                         justifyContent: 'space-between'
                       }}
                     >
                       <div>
-                        <span style={{ fontSize: 24, fontWeight: 900, color: activeServiceConfig.color }}>
+                        <span style={{ fontSize: 22, fontWeight: 900, color: activeServiceConfig.color }}>
                           ₹{selectedService === 'gst' ? (plan.pricePerHit ?? plan.price ?? 1) : plan.price}
                         </span>
-                        <span style={{ fontSize: 12, color: '#64748b', marginLeft: 5, fontWeight: 600 }}>
+                        <span style={{ fontSize: 11.5, color: '#64748b', marginLeft: 4, fontWeight: 600 }}>
                           {selectedService === 'gst' 
                             ? '/ Per Hit' 
-                            : (plan.isUnlimitedValidity ? '/ Unlimited Validity' : `/ ${plan.validity || `${plan.validityDays} Days`}`)}
+                            : (plan.isUnlimitedValidity ? '/ Lifetime' : `/ ${plan.validity || `${plan.validityDays} Days`}`)}
                         </span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: activeServiceConfig.color }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: activeServiceConfig.color }}>
                         Active Support
                       </span>
                     </div>
 
                     {/* Features List */}
-                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 10 }}>
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 10 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', marginBottom: 8 }}>
                         Included Features:
                       </div>
-                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12.5, lineHeight: 1.45 }}>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.4 }}>
                         {features.map((f, fIdx) => (
-                          <li key={fIdx} className="d-flex align-items-center mb-2" style={{ gap: 8 }}>
+                          <li key={fIdx} className="d-flex align-items-center" style={{ gap: 6, marginBottom: 5 }}>
                             <span
                               style={{
-                                width: 17,
-                                height: 17,
+                                width: 15,
+                                height: 15,
                                 borderRadius: '50%',
                                 background: `${activeServiceConfig.color}18`,
                                 color: activeServiceConfig.color,
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                justifyCenter: 'center',
-                                fontSize: 10,
+                                justifyContent: 'center',
+                                fontSize: 9.5,
                                 fontWeight: 900,
                                 flexShrink: 0
                               }}
@@ -707,20 +664,20 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   </div>
 
                   {/* Card Action Button (Footer) */}
-                  <div style={{ padding: '0 20px 20px', background: 'transparent' }}>
+                  <div style={{ padding: '0 16px 16px', background: 'transparent' }}>
                     {isCurrent ? (
                       <button
                         type="button"
                         disabled
                         style={{
                           width: '100%',
-                          height: 40,
-                          borderRadius: 10,
+                          height: 38,
+                          borderRadius: 8,
                           border: '1px solid #86efac',
                           background: '#f0fdf4',
                           color: '#15803d',
                           fontWeight: 800,
-                          fontSize: 13,
+                          fontSize: 12.5,
                           cursor: 'default'
                         }}
                       >
@@ -730,21 +687,26 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                       <button
                         type="button"
                         onClick={() => handleOpenPurchase({ ...plan, service: selectedService })}
+                        className="buy-plan-btn"
                         style={{
                           width: '100%',
-                          height: 40,
-                          borderRadius: 10,
+                          height: 38,
+                          borderRadius: 8,
                           border: 'none',
-                          background: activeServiceConfig.color,
+                          background: `linear-gradient(135deg, ${activeServiceConfig.color}, ${activeServiceConfig.color}dd)`,
                           color: '#ffffff',
                           fontWeight: 800,
                           fontSize: 13,
                           cursor: 'pointer',
-                          boxShadow: `0 4px 14px ${activeServiceConfig.color}35`,
-                          transition: 'all 0.18s ease'
+                          boxShadow: `0 3px 12px ${activeServiceConfig.color}35`,
+                          transition: 'all 0.18s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6
                         }}
                       >
-                        Buy {plan.name}
+                        <span>⚡</span> Buy {plan.name}
                       </button>
                     )}
                   </div>

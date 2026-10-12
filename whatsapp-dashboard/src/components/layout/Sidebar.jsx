@@ -228,42 +228,6 @@ export function Sidebar() {
             </NavLink>
 
             <NavLink 
-              to="/plans/browse" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Browse Plans"
-            >
-              <span>📋</span><b>Browse Plans</b>
-            </NavLink>
-
-            <NavLink 
-              to="/plans/roffer" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Customer R-Offer"
-            >
-              <span>🎁</span><b>R-Offer (Offers)</b>
-            </NavLink>
-
-            <NavLink 
-              to="/plans/dth" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="DTH Customer Info"
-            >
-              <span>📺</span><b>DTH Info</b>
-            </NavLink>
-
-            <NavLink 
-              to="/plans/recharge-status" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Last Recharge Status"
-            >
-              <span>⚡</span><b>Last Recharge</b>
-            </NavLink>
-
-            <NavLink 
               to="/plans/api-docs" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
@@ -271,19 +235,10 @@ export function Sidebar() {
             >
               <span>🔑</span><b>API Documents</b>
             </NavLink>
-
-            <NavLink 
-              to="/subscription?service=plan" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Buy API Hits"
-            >
-              <span>💎</span><b>Buy Hits</b>
-            </NavLink>
           </>
         ) : isGstActive ? (
           /* =========================================================
-             GST PORTAL NAVIGATION (4 FOCUSED USER MENUS)
+             GST PORTAL NAVIGATION (3 FOCUSED USER MENUS)
              ========================================================= */
           <>
             <NavLink 
@@ -305,15 +260,6 @@ export function Sidebar() {
             </NavLink>
 
             <NavLink 
-              to="/gst/filings" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Return Filings"
-            >
-              <span>📊</span><b>Return Filings</b>
-            </NavLink>
-
-            <NavLink 
               to="/gst/api-docs" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
@@ -324,7 +270,7 @@ export function Sidebar() {
           </>
         ) : (
           /* =========================================================
-             WHATSAPP & ADMIN NAVIGATION (100% UNTOUCHED ORIGINAL)
+             WHATSAPP & ADMIN NAVIGATION
              ========================================================= */
           <>
             <NavLink 
@@ -399,15 +345,6 @@ export function Sidebar() {
             </NavLink>
 
             <NavLink 
-              to="/campaigns" 
-              className={({ isActive }) => (isActive ? 'active' : '')} 
-              onClick={closeMobile}
-              data-title="Campaigns"
-            >
-              <span>◇</span><b>Campaigns</b>
-            </NavLink>
-
-            <NavLink 
               to="/templates" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
@@ -478,73 +415,6 @@ export function Sidebar() {
           </>
         )}
       </nav>
-
-      {/* Sidebar Live Status */}
-      {isSmsActive ? (
-        <div className="sidebar-status" data-title={smsStats?.activeDevicesCount > 0 ? "SMS Gateway Online" : "SMS Gateway Ready"}>
-          <span 
-            className="dot dot-sms" 
-            style={{ 
-              backgroundColor: smsStats?.activeDevicesCount > 0 ? '#0ea5e9' : '#38bdf8',
-              boxShadow: '0 0 10px rgba(14,165,233,.75)'
-            }}
-          ></span>
-          <div>
-            <strong>{smsStats?.activeDevicesCount > 0 ? 'Gateway Online' : 'Gateway Ready'}</strong>
-            <small>
-              {smsStats?.activeDevicesCount > 0 ? `${smsStats.activeDevicesCount} Device Active` : 'Scan QR to Pair'}
-            </small>
-          </div>
-        </div>
-      ) : isPlanApiActive ? (
-        <div className="sidebar-status" data-title="Plan API Active">
-          <span 
-            className="dot dot-plan" 
-            style={{ 
-              backgroundColor: '#f97316',
-              boxShadow: '0 0 10px rgba(249,115,22,.75)'
-            }}
-          ></span>
-          <div>
-            <strong style={{ color: '#431407' }}>Plan API Active</strong>
-            <small style={{ color: '#c2410c' }}>
-              {planStats?.remainingHits !== undefined ? `${planStats.remainingHits} Hits Remaining` : '100 Hits Free'}
-            </small>
-          </div>
-        </div>
-      ) : isGstActive ? (
-        <div className="sidebar-status" data-title="GST Verification Portal">
-          <span 
-            className="dot dot-gst" 
-            style={{ 
-              backgroundColor: '#8b5cf6',
-              boxShadow: '0 0 10px rgba(139,92,246,.75)'
-            }}
-          ></span>
-          <div>
-            <strong style={{ color: '#3b0764' }}>GST Portal Active</strong>
-            <small style={{ color: '#6d28d9' }}>
-              Portal Sync Verified
-            </small>
-          </div>
-        </div>
-      ) : (
-        <div className="sidebar-status" data-title={isConnected ? 'WhatsApp Online' : 'WhatsApp Offline'}>
-          <span 
-            className="dot" 
-            style={{ 
-              backgroundColor: isConnected ? '#16a765' : '#e85b63',
-              boxShadow: isConnected ? '0 0 10px rgba(22,167,101,.7)' : '0 0 10px rgba(232,91,99,.7)'
-            }}
-          ></span>
-          <div>
-            <strong>{isConnected ? 'WhatsApp Online' : 'WhatsApp Offline'}</strong>
-            <small>
-              {status?.number ? `+${status.number}` : (isConnected ? 'All systems operational' : 'Not connected')}
-            </small>
-          </div>
-        </div>
-      )}
     </aside>
   )
 }

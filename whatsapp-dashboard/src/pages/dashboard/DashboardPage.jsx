@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 import '../../styles/dashboard.css'
 
 export function DashboardPage() {
@@ -15,11 +16,33 @@ export function DashboardPage() {
   } = useAuth()
 
   const navigate = useNavigate()
-  const [timeframe, setTimeframe] = useState('this-month')
+  const [dashStats, setDashStats] = useState({
+    devices: { connected: 0, allowed: 1 },
+    messagesToday: 0,
+    totalGroups: 0,
+    savedContacts: 0,
+    scheduledMessages: 0,
+    monthlyActivity: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  })
 
   useEffect(() => {
     if (loadReports) loadReports()
   }, [loadReports])
+
+  useEffect(() => {
+    let mounted = true
+    const fetchDashStats = async () => {
+      try {
+        const data = await api('/api/dashboard/stats')
+        if (mounted && data.success) {
+          setDashStats(data)
+        }
+      } catch (e) {}
+    }
+    fetchDashStats()
+    const timer = setInterval(fetchDashStats, 10000)
+    return () => { mounted = false; clearInterval(timer) }
+  }, [])
 
   // Dynamic greeting based on time of day
   const getGreeting = () => {
@@ -197,131 +220,99 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* 2. Actions Filter Row */}
-      <div className="actions" style={{ marginBottom: 10 }}>
-        <button 
-          type="button" 
-          className="btn" 
-          onClick={() => setTimeframe(t => t === 'this-month' ? 'today' : 'this-month')}
-        >
-          ▣ {timeframe === 'this-month' ? 'This Month' : 'Today'}
-        </button>
-      </div>
-
-      {/* 3. 5 3D Stat Cards */}
-      <div className="grid4">
+      {/* 2. 5 3D Stat Cards (Live, Read from Database, No Links) */}
+      <div className="grid4" style={{ marginTop: 10 }}>
         {/* Stat 1: Devices */}
         <article 
           className="stat stat-green" 
-          onClick={() => navigate('/device')} 
-          style={{ cursor: 'pointer' }}
-          title="Click to manage WhatsApp devices"
+          style={{ cursor: 'default' }}
+          title="Connected WhatsApp Devices"
         >
           <div className="stat-decoration deco-ring"></div>
           <div className="stat-icon stat-device">
             <span className="mini-device"></span>
           </div>
           <small>Devices</small>
-          <strong>{isConnected ? '1' : '0'} / {planInfo?.allowedDevices || 4}</strong>
-          <span>{isConnected ? 'Connected' : 'Scan Required'}</span>
+          <strong>{dashStats.devices?.connected ?? (isConnected ? 1 : 0)} / {dashStats.devices?.allowed ?? (planInfo?.allowedDevices || 1)}</strong>
+          <span>{(dashStats.devices?.connected > 0 || isConnected) ? 'Connected' : 'Scan Required'}</span>
         </article>
 
         {/* Stat 2: Messages Today */}
-        <article className="stat stat-orange">
+        <article className="stat stat-orange" style={{ cursor: 'default' }} title="Messages Processed Today">
           <div className="stat-decoration deco-orb orange"></div>
           <div className="stat-icon stat-message">
             <span className="mini-message">✓</span>
           </div>
           <small>Messages Today</small>
-          <strong>{stats?.today || stats?.sentToday || '3,248'}</strong>
-          <span>↗ 12.45%</span>
+          <strong>{(dashStats.messagesToday || 0).toLocaleString('en-IN')}</strong>
+          <span>Live Today</span>
         </article>
 
-        {/* Stat 3: Messages Sent */}
-        <article className="stat stat-blue">
+        {/* Stat 3: WhatsApp Groups */}
+        <article className="stat stat-blue" style={{ cursor: 'default' }} title="Total WhatsApp Groups Across Active Sessions">
           <div className="stat-decoration deco-cube blue"></div>
           <div className="stat-icon stat-send">
-            <span className="mini-plane">➤</span>
+            <span className="mini-plane">▦</span>
           </div>
-          <small>Messages Sent</small>
-          <strong>{stats?.sent || '3,124'}</strong>
-          <span>↗ 18.62%</span>
+          <small>WhatsApp Groups</small>
+          <strong>{(dashStats.totalGroups || 0).toLocaleString('en-IN')}</strong>
+          <span>Active Sessions</span>
         </article>
 
-        {/* Stat 4: Delivered */}
-        <article className="stat stat-pink">
+        {/* Stat 4: Saved Contacts */}
+        <article className="stat stat-pink" style={{ cursor: 'default' }} title="Total Saved Contacts In Address Book">
           <div className="stat-decoration deco-bubble pink"></div>
           <div className="stat-icon stat-delivered">
-            <span className="mini-check">✓</span>
+            <span className="mini-check">♙</span>
           </div>
-          <small>Delivered</small>
-          <strong>{stats?.delivered || '2,986'}</strong>
-          <span>↗ 15.35%</span>
+          <small>Saved Contacts</small>
+          <strong>{(dashStats.savedContacts || 0).toLocaleString('en-IN')}</strong>
+          <span>Contacts Book</span>
         </article>
 
-        {/* Stat 5: Active Numbers */}
-        <article 
-          className="stat stat-yellow"
-          onClick={() => navigate('/device')} 
-          style={{ cursor: 'pointer' }}
-          title="Click to view connected numbers"
-        >
+        {/* Stat 5: Scheduled Messages */}
+        <article className="stat stat-yellow" style={{ cursor: 'default' }} title="Scheduled Messages Due In Queue">
           <div className="stat-decoration deco-star yellow">✦</div>
           <div className="stat-icon stat-users">
             <span className="mini-users">
               <i></i><i></i><i></i>
             </span>
           </div>
-          <small>Active Numbers</small>
-          <strong style={{ fontSize: status?.number ? 16 : 22, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {status?.number ? `+${status.number}` : (isConnected ? '1 Number' : '0')}
-          </strong>
-          <span>↗ 8.45%</span>
+          <small>Scheduled Messages</small>
+          <strong>{(dashStats.scheduledMessages || 0).toLocaleString('en-IN')}</strong>
+          <span>{dashStats.scheduledMessages > 0 ? 'Due Pending' : 'No Dues'}</span>
         </article>
       </div>
 
-      {/* 4. Dash Grid: Message Activity Chart + Smart Shortcuts */}
+      {/* 3. Dash Grid: Message Activity 12-Month Chart + Smart Shortcuts */}
       <div className="dash-grid">
         {/* Message Activity Chart */}
         <article className="card">
           <div className="card-head">
             <div>
               <h3>Message Activity</h3>
-              <p>Incoming and outgoing messages</p>
+              <p>Monthly overview across all 12 months (Database Live)</p>
             </div>
-            <select 
-              className="select compact" 
-              value={timeframe} 
-              onChange={e => setTimeframe(e.target.value)}
-              style={{ width: 'auto', minWidth: 120 }}
-            >
-              <option value="this-month">This Month</option>
-              <option value="last-month">Last Month</option>
-            </select>
           </div>
           <div className="chart-area">
-            <div className="bars">
-              <i style={{ height: '55%' }} title="Day 01: 55%"></i>
-              <i style={{ height: '72%' }} title="Day 03: 72%"></i>
-              <i style={{ height: '48%' }} title="Day 06: 48%"></i>
-              <i style={{ height: '82%' }} title="Day 09: 82%"></i>
-              <i style={{ height: '64%' }} title="Day 12: 64%"></i>
-              <i style={{ height: '90%' }} title="Day 15: 90%"></i>
-              <i style={{ height: '70%' }} title="Day 18: 70%"></i>
-              <i style={{ height: '96%' }} title="Day 21: 96%"></i>
-              <i style={{ height: '68%' }} title="Day 24: 68%"></i>
-              <i style={{ height: '84%' }} title="Day 26: 84%"></i>
-              <i style={{ height: '58%' }} title="Day 28: 58%"></i>
-              <i style={{ height: '92%' }} title="Day 30: 92%"></i>
+            <div className="bars" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 6, alignItems: 'flex-end', height: 160 }}>
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((monthName, idx) => {
+                const count = (dashStats.monthlyActivity && dashStats.monthlyActivity[idx]) || 0
+                const maxVal = Math.max(...(dashStats.monthlyActivity || [10]), 10)
+                const percent = Math.max(8, Math.round((count / maxVal) * 100))
+                return (
+                  <i 
+                    key={monthName} 
+                    style={{ height: `${percent}%`, transition: 'height 0.4s ease' }} 
+                    title={`${monthName}: ${count} Messages`}
+                  ></i>
+                )
+              })}
             </div>
-            <div className="chart-labels">
-              <span>01</span>
-              <span>05</span>
-              <span>10</span>
-              <span>15</span>
-              <span>20</span>
-              <span>25</span>
-              <span>30</span>
+            <div className="chart-labels" style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', textAlign: 'center', marginTop: 8 }}>
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map(monthName => (
+                <span key={monthName} style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{monthName}</span>
+              ))}
             </div>
           </div>
         </article>
@@ -387,18 +378,18 @@ export function DashboardPage() {
               <span className="shortcut-visual visual-ai">
                 <i>✦</i>
               </span>
-              <b>AI Assistant</b>
+              <b>API Docs</b>
             </div>
 
             <div 
               className="shortcut" 
-              onClick={() => navigate('/campaigns')} 
+              onClick={() => navigate('/incoming')} 
               style={{ cursor: 'pointer' }}
             >
-              <span className="shortcut-visual visual-campaign">
-                <i>◇</i>
+              <span className="shortcut-visual visual-campaign" style={{ background: 'rgba(234, 88, 12, 0.15)', color: '#ea580c' }}>
+                <i>▤</i>
               </span>
-              <b>Campaigns</b>
+              <b>Inbox</b>
             </div>
           </div>
         </article>
