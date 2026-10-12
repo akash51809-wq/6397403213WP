@@ -147,6 +147,13 @@ async function initTables(pool) {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "email" TEXT DEFAULT '';`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "dailyMessageCount" INTEGER DEFAULT 0;`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS "dailyCountDate" VARCHAR(10) DEFAULT '';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "walletBalance" NUMERIC DEFAULT 0;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "smsPlan" VARCHAR(100) DEFAULT '';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "smsPlanExpiresAt" TIMESTAMPTZ;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "planApiPlan" VARCHAR(100) DEFAULT '';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "planApiExpiresAt" TIMESTAMPTZ;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "gstPlan" VARCHAR(100) DEFAULT '';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS "gstPlanExpiresAt" TIMESTAMPTZ;`,
     `CREATE INDEX IF NOT EXISTS idx_users_username ON users("username");`,
     `CREATE INDEX IF NOT EXISTS idx_users_email ON users("email");`,
     `CREATE INDEX IF NOT EXISTS idx_users_mobile ON users("mobile");`,
@@ -206,6 +213,12 @@ async function initTables(pool) {
       "createdAt" TIMESTAMPTZ DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "service" VARCHAR(30) DEFAULT 'whatsapp';`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "incomingAllowed" BOOLEAN DEFAULT TRUE;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "outgoingAllowed" BOOLEAN DEFAULT TRUE;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "hits" BIGINT DEFAULT 10000;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "isUnlimitedValidity" BOOLEAN DEFAULT FALSE;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS "pricePerHit" NUMERIC DEFAULT 1.0;`,
 
     // 5. plan_purchase_requests
     `CREATE TABLE IF NOT EXISTS plan_purchase_requests (
@@ -226,6 +239,8 @@ async function initTables(pool) {
       "createdAt" TIMESTAMPTZ DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
+    `ALTER TABLE plan_purchase_requests ADD COLUMN IF NOT EXISTS "service" VARCHAR(30) DEFAULT 'whatsapp';`,
+    `ALTER TABLE plan_purchase_requests ADD COLUMN IF NOT EXISTS "requestType" VARCHAR(30) DEFAULT 'plan';`,
     `CREATE INDEX IF NOT EXISTS idx_ppr_userId ON plan_purchase_requests("userId");`,
     `CREATE INDEX IF NOT EXISTS idx_ppr_status ON plan_purchase_requests("status");`,
 
@@ -1032,6 +1047,10 @@ const User = createModel('users', 'userId', {
   email: '',
   role: 'user',
   plan: 'Standard',
+  walletBalance: 0,
+  smsPlan: '',
+  planApiPlan: '',
+  gstPlan: '',
   status: 'active',
   apiTokenHash: null,
   apiTokenPrefix: null,
@@ -1040,7 +1059,8 @@ const User = createModel('users', 'userId', {
   autoSendImage: { enabled: false, imageUrl: '', fileName: '' }
 }, ['sessions', 'autoSendImage'], [
   'userId', 'username', 'name', 'email', 'mobile', 'passwordHash', 'apiToken', 'apiTokenHash', 'apiTokenPrefix', 'apiTokenLast4', 'role',
-  'plan', 'planExpiresAt', 'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
+  'plan', 'planExpiresAt', 'walletBalance', 'smsPlan', 'smsPlanExpiresAt', 'planApiPlan', 'planApiExpiresAt', 'gstPlan', 'gstPlanExpiresAt',
+  'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
 ]);
 
 const Otp = createModel('otps', 'id', {
@@ -1058,6 +1078,7 @@ const WhatsAppSession = createModel('whatsapp_sessions', 'sessionId', {
 ]);
 
 const Plan = createModel('plans', 'planId', {
+  service: 'whatsapp',
   currency: 'INR',
   description: '',
   dailyLimit: '500/Day',
@@ -1070,22 +1091,30 @@ const Plan = createModel('plans', 'planId', {
   groupOption: false,
   scheduleMsg: false,
   ipSecurity: false,
+  incomingAllowed: true,
+  outgoingAllowed: true,
+  hits: 10000,
+  isUnlimitedValidity: false,
+  pricePerHit: 1.0,
   headerColor: '#705ec8',
   badgeText: '',
   active: true,
   sortOrder: 0
 }, [], [
-  'planId', 'name', 'price', 'currency', 'description', 'dailyLimit', 'validity',
+  'planId', 'service', 'name', 'price', 'currency', 'description', 'dailyLimit', 'validity',
   'validityDays', 'deviceLimit', 'apiAccess', 'webAccess', 'bulkMsg', 'groupOption',
-  'scheduleMsg', 'ipSecurity', 'headerColor', 'badgeText', 'active', 'sortOrder', 'createdAt', 'updatedAt'
+  'scheduleMsg', 'ipSecurity', 'incomingAllowed', 'outgoingAllowed', 'hits', 'isUnlimitedValidity',
+  'pricePerHit', 'headerColor', 'badgeText', 'active', 'sortOrder', 'createdAt', 'updatedAt'
 ]);
 
 const PlanPurchaseRequest = createModel('plan_purchase_requests', 'requestId', {
+  service: 'whatsapp',
+  requestType: 'plan',
   status: 'pending',
   adminNotes: '',
   screenshot: ''
 }, [], [
-  'requestId', 'userId', 'userName', 'userMobile', 'planId', 'planName', 'amount',
+  'requestId', 'userId', 'userName', 'userMobile', 'service', 'requestType', 'planId', 'planName', 'amount',
   'paymentDate', 'bankDetails', 'screenshot', 'status', 'adminNotes', 'approvedAt',
   'rejectedAt', 'createdAt', 'updatedAt'
 ]);

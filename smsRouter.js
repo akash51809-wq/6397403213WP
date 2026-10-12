@@ -3,6 +3,7 @@ const QRCode = require('qrcode');
 const os = require('os');
 const WebSocket = require('ws');
 const router = express.Router();
+const { authRequired, User, Plan } = require('./auth');
 
 const db = require('./utils/smsDb');
 const { encryptPayload, decryptPayload, formatISTDate } = require('./utils/smsCrypto');
@@ -362,11 +363,31 @@ router.post('/api/sms/incoming', async (req, res) => {
 });
 
 // 10. SEND SMS OUTBOX
-router.post('/api/sms/send', (req, res) => {
+router.post('/api/sms/send', authRequired, async (req, res) => {
   try {
     const { recipient, message, simSlot = 0, deviceId } = req.body;
     if (!recipient || !message) {
       return res.status(400).json({ success: false, message: 'Mobile number aur message body zaroori hai.' });
+    }
+
+    const user = req.user;
+    if (user && user.role !== 'admin' && String(user.userId).toUpperCase() !== 'ADMIN') {
+      if (!user.smsPlan || (user.smsPlanExpiresAt && new Date(user.smsPlanExpiresAt).getTime() < Date.now())) {
+        return res.status(403).json({
+          success: false,
+          message: 'आपका SMS प्लान सक्रिय नहीं है या समाप्त हो चुका है। कृपया SMS प्लान सब्सक्राइब करें।'
+        });
+      }
+      const planDoc = await Plan.findOne({
+        service: 'sms',
+        $or: [{ name: new RegExp(`^${user.smsPlan}$`, 'i') }, { planId: String(user.smsPlan).toLowerCase() }]
+      });
+      if (planDoc && planDoc.outgoingAllowed === false) {
+        return res.status(403).json({
+          success: false,
+          message: 'Outgoing SMS आपके वर्तमान प्लान में अनुमत नहीं है (Invalid Plan: Outgoing SMS not allowed)। कृपया प्लान अपग्रेड करें।'
+        });
+      }
     }
 
     const messageId = 'msg_' + Date.now();

@@ -139,23 +139,25 @@ export function AuthProvider({ children }) {
   const [planInfo, setPlanInfo] = useState(null)
 
   const loadPlanInfo = useCallback(async () => {
-    if (!login || isAdmin) return
+    if (!login) return
     try {
       const res = await api('/api/user/plan-status')
       if (res && res.success && res.plan) {
         setPlanInfo(res.plan)
+        const wb = Number(res.walletBalance ?? res.plan.walletBalance ?? 0)
         setCurrentUser(prev => {
           const updated = { 
             ...prev, 
             plan: res.plan.planName, 
-            planExpiresAt: res.plan.expiresAt 
+            planExpiresAt: res.plan.expiresAt,
+            walletBalance: wb
           }
           setSavedUser(updated)
           return updated
         })
       }
     } catch {}
-  }, [login, isAdmin])
+  }, [login])
 
   useEffect(() => {
     if (login && !isAdmin) {

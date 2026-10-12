@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import PaymentDetailsModal from '../../components/modals/PaymentDetailsModal'
+import AddFundsModal from '../../components/modals/AddFundsModal'
 
 const SERVICES = [
   {
@@ -44,6 +45,7 @@ const DEFAULT_PLANS = {
       planId: 'plan_startup',
       name: 'Startup',
       price: '99',
+      service: 'whatsapp',
       validity: '30 Days',
       dailyLimit: '500/Day',
       deviceLimit: '1 Free + 1 Add-on',
@@ -61,6 +63,7 @@ const DEFAULT_PLANS = {
       planId: 'plan_business',
       name: 'Business',
       price: '149',
+      service: 'whatsapp',
       validity: '30 Days',
       dailyLimit: '1,000/Day',
       deviceLimit: '1 Free + 2 Add-ons',
@@ -80,6 +83,7 @@ const DEFAULT_PLANS = {
       planId: 'plan_enterprise',
       name: 'Enterprise',
       price: '199',
+      service: 'whatsapp',
       validity: '30 Days',
       dailyLimit: '2,000/Day',
       deviceLimit: '1 Free + 4 Add-ons',
@@ -98,171 +102,101 @@ const DEFAULT_PLANS = {
   sms: [
     {
       planId: 'plan_sms_starter',
-      name: 'Starter SMS',
-      price: '99',
+      name: 'SMS Starter',
+      price: '199',
+      service: 'sms',
       validity: '30 Days',
-      dailyLimit: '1,000 SMS / Day',
-      deviceLimit: '1 Android Device',
-      badgeText: 'Basic',
-      description: 'Turn your Android phone into an SMS gateway for OTP and single alerts.',
+      incomingAllowed: true,
+      outgoingAllowed: true,
+      badgeText: 'Starter',
+      description: 'Connect Android phones as gateway to receive SMS and route to webhooks.',
       features: [
-        '1,000 SMS / Day Quota',
-        '1 Android Mobile Linked',
-        'Dual SIM Routing Support',
-        'Instant HTTP / REST API',
-        'Delivery Status Tracking',
+        'Incoming SMS Routing to Webhook',
+        'Outgoing SMS Outbox Allowed',
+        'Multi-SIM Slot Support',
+        'Fast Real-Time Delivery',
         'Validity: 30 Days'
       ]
     },
     {
-      planId: 'plan_sms_business',
-      name: 'Business Gateway',
-      price: '199',
-      validity: '30 Days',
-      dailyLimit: '5,000 SMS / Day',
-      deviceLimit: '3 Android Devices',
-      badgeText: '⭐ Most Popular',
-      isPopular: true,
-      description: 'High-speed SMS dispatch for e-commerce, OTP verification and stores.',
-      features: [
-        '5,000 SMS / Day Quota',
-        '3 Android Devices Linked',
-        'Multi-SIM Load Balancing',
-        'Real-time Webhook Forwarding',
-        'Auto Retry on Network Failure',
-        'Priority Delivery Dispatch'
-      ]
-    },
-    {
-      planId: 'plan_sms_enterprise',
-      name: 'Enterprise Fleet',
+      planId: 'plan_sms_pro',
+      name: 'SMS Business Pro',
       price: '399',
+      service: 'sms',
       validity: '30 Days',
-      dailyLimit: '25,000 SMS / Day',
-      deviceLimit: '10 Android Devices',
-      badgeText: 'Bulk Scale',
-      description: 'High capacity multi-device SMS cluster for large customer notification campaigns.',
+      incomingAllowed: true,
+      outgoingAllowed: true,
+      badgeText: '⭐ Popular',
+      isPopular: true,
+      description: 'Full two-way SMS gateway for high-throughput OTPs, alerts and notifications.',
       features: [
-        '25,000 SMS / Day Quota',
-        'Up to 10 Android Devices Linked',
-        'Unlimited SIM Auto-Routing',
-        'Sub-second Gateway Dispatch',
-        'Dedicated Webhook Endpoint',
-        '99.9% High Uptime SLA'
+        'High Throughput Two-Way SMS',
+        'Incoming SMS Webhook Dispatches',
+        'Outgoing Broadcast Outbox Allowed',
+        'Detailed Delivery Reports',
+        'Validity: 30 Days'
       ]
     }
   ],
   plan: [
     {
-      planId: 'plan_api_lite',
-      name: 'Developer Lite',
-      price: '149',
+      planId: 'plan_api_basic',
+      name: 'Plan API Basic',
+      price: '499',
+      service: 'plan',
+      hits: 10000,
       validity: '30 Days',
-      dailyLimit: '10,000 Hits / Month',
-      deviceLimit: 'Unlimited IP Access',
-      badgeText: 'Lite',
-      description: 'Ideal for developers testing recharge APIs and mobile tariff queries.',
+      apiAccess: true,
+      badgeText: '10K Hits',
+      description: 'Mobile and DTH operator recharge plans, R-offer check & series lookup.',
       features: [
-        '10,000 API Hits / Month',
-        'Jio, Airtel, Vi & BSNL Plans',
-        'All India Telecom Circles',
-        'Standard R-Offer Queries',
-        'Clean JSON REST Endpoints',
+        '10,000 Hits Quota',
+        'Operator & Circle Lookup',
+        'Live Mobile Tariff & Plans',
+        'R-Offers & DTH Customer Info',
+        'REST API Secret Token Access',
         'Validity: 30 Days'
       ]
     },
     {
-      planId: 'plan_api_pro',
-      name: 'Business Pro',
-      price: '299',
-      validity: '30 Days',
-      dailyLimit: '100,000 Hits / Month',
-      deviceLimit: 'High Concurrency',
-      badgeText: '⚡ Recommended',
+      planId: 'plan_api_unlimited',
+      name: 'Plan API Unlimited Lifetime',
+      price: '999',
+      service: 'plan',
+      hits: 50000,
+      isUnlimitedValidity: true,
+      validity: 'Unlimited',
+      apiAccess: true,
+      badgeText: '⭐ Lifetime',
       isPopular: true,
-      description: 'Production plan data engine for recharge portals, mobile apps and fintech.',
+      description: '50,000 API Hits with lifetime unlimited validity. Never expires until used.',
       features: [
-        '100,000 API Hits / Month',
-        'Mobile + DTH Operators Data',
-        'Live Special R-Offer Engine',
-        'Sub-150ms Response SLA',
-        'Real-time Scraping & Cache Sync',
+        '50,000 API Hits',
+        'Unlimited Lifetime Validity',
+        'Full REST API & Endpoints',
+        'High-Speed Scraper Engine',
         'Instant Token Regeneration'
-      ]
-    },
-    {
-      planId: 'plan_api_enterprise',
-      name: 'Enterprise Scale',
-      price: '599',
-      validity: '30 Days',
-      dailyLimit: '1,000,000 Hits / Month',
-      deviceLimit: 'Dedicated Cluster',
-      badgeText: 'High Volume',
-      description: 'Full-throttle high volume access for large telecom recharge networks.',
-      features: [
-        '1,000,000 API Hits / Month',
-        'Complete Mobile, DTH & Datacard',
-        'Deep Live Scraper Engine',
-        '99.99% High Availability SLA',
-        'Dedicated High-Speed Queue',
-        'Priority Technical Support'
       ]
     }
   ],
   gst: [
     {
-      planId: 'plan_gst_basic',
-      name: 'Basic GST Check',
-      price: '149',
-      validity: '30 Days',
-      dailyLimit: '500 Lookups / Month',
-      deviceLimit: 'Single User Access',
-      badgeText: 'Starter',
-      description: 'Verify taxpayer registration, trade name and active GST status.',
-      features: [
-        '500 GSTIN Verifications',
-        'Legal Name & Trade Name Check',
-        'Active / Inactive Status Check',
-        'Last 3 Months Filing Status',
-        'Center & State Jurisdiction',
-        'Validity: 30 Days'
-      ]
-    },
-    {
-      planId: 'plan_gst_pro',
-      name: 'Pro Taxpayer Suite',
-      price: '349',
-      validity: '30 Days',
-      dailyLimit: '3,000 Lookups / Month',
-      deviceLimit: 'Multi-User Access',
-      badgeText: '⭐ Most Popular',
+      planId: 'plan_gst_hit',
+      name: 'GST Pay-Per-Hit',
+      price: '1.0',
+      pricePerHit: 1.0,
+      service: 'gst',
+      validity: 'Pay-per-hit',
+      badgeText: 'Pay As You Go',
       isPopular: true,
-      description: 'Complete 2-year filing audit, Aadhaar auth and e-invoice status verification.',
+      description: 'Pay ₹1.0 per lookup deducted directly from your user wallet balance.',
       features: [
-        '3,000 GSTIN Verifications',
-        'Full Legal Profile & Address',
-        'GSTR-1 & 3B 2-Year History Table',
-        'Aadhaar Authentication Status',
-        'e-Invoice Enabled Status Check',
-        'Instant Print & PDF Export'
-      ]
-    },
-    {
-      planId: 'plan_gst_corporate',
-      name: 'Corporate Bulk GST',
-      price: '749',
-      validity: '30 Days',
-      dailyLimit: '15,000 Lookups / Month',
-      deviceLimit: 'API + Web Portal',
-      badgeText: 'Corporate',
-      description: 'High volume GST compliance engine with batch verification and REST API.',
-      features: [
-        '15,000 GSTIN Lookups / Month',
-        'Live Official Portal Scraper Engine',
-        'Complete GSTR-1, 3B, 9 & 9C Tracking',
-        'Batch GSTIN Verification Mode',
-        'Clean JSON REST API Access',
-        'Priority 24/7 Processing Queue'
+        '₹1.00 Charged Per Search Hit',
+        'Deducted directly from Wallet',
+        'Full Legal & Trade Name Profile',
+        '2-Year GSTR-1 & 3B Filing History',
+        'Aadhaar & e-Invoice Verification',
+        'Instant Search History Access'
       ]
     }
   ]
@@ -275,11 +209,16 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
 
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(false)
+  const [walletBalance, setWalletBalance] = useState(Number(currentUser?.walletBalance || 0))
   const [currentPlan, setCurrentPlan] = useState(currentUser?.plan || 'Standard')
+  const [smsPlan, setSmsPlan] = useState(currentUser?.smsPlan || '')
+  const [planApiPlan, setPlanApiPlan] = useState(currentUser?.planApiPlan || '')
+  const [gstPlan, setGstPlan] = useState(currentUser?.gstPlan || '')
   const [myRequests, setMyRequests] = useState([])
   const [activeTab, setActiveTab] = useState('plans')
   const [selectedService, setSelectedService] = useState('whatsapp')
   const [selectedPlan, setSelectedPlan] = useState(null)
+  const [showAddFunds, setShowAddFunds] = useState(false)
 
   const fetchPlansData = useCallback(async () => {
     setLoading(true)
@@ -288,6 +227,10 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
       if (d.success) {
         setPlans(d.plans || [])
         if (d.currentPlan) setCurrentPlan(d.currentPlan)
+        if (d.walletBalance !== undefined) setWalletBalance(Number(d.walletBalance))
+        if (d.smsPlan !== undefined) setSmsPlan(d.smsPlan || '')
+        if (d.planApiPlan !== undefined) setPlanApiPlan(d.planApiPlan || '')
+        if (d.gstPlan !== undefined) setGstPlan(d.gstPlan || '')
         if (d.myRequests) setMyRequests(d.myRequests)
       }
     } catch (e) {
@@ -332,16 +275,47 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
       return p.features
     }
     const f = []
-    if (p.dailyLimit) f.push(`Daily Quota: ${p.dailyLimit}`)
-    if (p.validity) f.push(`Validity: ${p.validity}`)
-    if (p.deviceLimit) f.push(`Device Limit: ${p.deviceLimit}`)
-    if (p.apiAccess) f.push('REST API & Webhook Access')
-    if (p.webAccess) f.push('Web Dashboard Access Included')
-    if (p.bulkMsg) f.push('Bulk Message Campaigns')
-    if (p.groupOption) f.push('Group Messaging Option')
-    if (p.scheduleMsg) f.push('Scheduled Queue Sending')
-    if (p.ipSecurity) f.push('IP Whitelist Security')
+    const s = (p.service || selectedService).toLowerCase()
+    if (s === 'whatsapp') {
+      if (p.dailyLimit) f.push(`Daily Quota: ${p.dailyLimit}`)
+      if (p.validity) f.push(`Validity: ${p.validity}`)
+      if (p.deviceLimit) f.push(`Device Limit: ${p.deviceLimit}`)
+      if (p.apiAccess) f.push('REST API & Webhook Access')
+      if (p.webAccess !== false) f.push('Web Dashboard Access Included')
+      if (p.bulkMsg) f.push('Bulk Message Campaigns')
+      if (p.groupOption) f.push('Group Messaging Option')
+      if (p.scheduleMsg) f.push('Scheduled Queue Sending')
+      if (p.ipSecurity) f.push('IP Whitelist Security')
+    } else if (s === 'sms') {
+      if (p.validity) f.push(`Validity: ${p.validity}`)
+      if (p.incomingAllowed !== false) f.push('Incoming SMS Routing Allowed')
+      if (p.outgoingAllowed !== false) f.push('Outgoing SMS Sending Allowed')
+      f.push('Multi-Device Android Gateway Support')
+      f.push('Real-time Webhook Dispatches')
+    } else if (s === 'plan') {
+      if (p.hits) f.push(`Hits Quota: ${Number(p.hits).toLocaleString()} Hits`)
+      if (p.isUnlimitedValidity) f.push('Unlimited Lifetime Validity')
+      else if (p.validity) f.push(`Validity: ${p.validity}`)
+      if (p.apiAccess) f.push('REST API Secret Token Access')
+      f.push('Mobile, DTH & R-Offer Endpoints')
+      f.push('High-Speed Scraper Engine')
+    } else if (s === 'gst') {
+      f.push(`₹${p.pricePerHit ?? p.price ?? 1.0} per Search Hit`)
+      f.push('Deducted directly from Wallet Balance')
+      f.push('Full Legal & Trade Name Profile')
+      f.push('GSTR-1 & 3B Return History Table')
+      f.push('Aadhaar & e-Invoice Verification')
+    }
     return f.length > 0 ? f : ['All Core Features Included', 'Standard Support SLA']
+  }
+
+  // Active plan for selected service
+  const getActivePlanNameForService = () => {
+    if (selectedService === 'whatsapp') return currentPlan || 'Demo Plan'
+    if (selectedService === 'sms') return smsPlan || 'No Active Plan'
+    if (selectedService === 'plan') return planApiPlan || 'No Active Plan'
+    if (selectedService === 'gst') return gstPlan || 'Pay-Per-Hit Active'
+    return 'Active'
   }
 
   return (
@@ -385,7 +359,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
           <div className="d-flex flex-wrap align-items-center justify-content-between mb-3" style={{ gap: 12 }}>
             <div>
               <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 4px 0' }}>
-                💎 Subscription Plans &amp; Pricing
+                💎 Subscription Plans &amp; Wallet
               </h1>
               <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
                 Choose the best package for your business across WhatsApp, SMS, Plan API, and GST services.
@@ -425,7 +399,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   boxShadow: activeTab === 'requests' ? '0 3px 10px rgba(22,167,101,0.25)' : '0 1px 3px rgba(0,0,0,0.04)'
                 }}
               >
-                📋 My Purchase Requests
+                📋 My Orders / Daybook
                 {pendingCount > 0 && (
                   <span style={{ 
                     marginLeft: 6, 
@@ -439,6 +413,73 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     {pendingCount}
                   </span>
                 )}
+              </button>
+            </div>
+          </div>
+
+          {/* USER WALLET BALANCE BANNER */}
+          <div 
+            className="card shadow-sm p-3 mb-3 d-flex flex-wrap align-items-center justify-content-between"
+            style={{ 
+              borderRadius: 14, 
+              background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+              border: '1px solid #a7f3d0',
+              gap: 14
+            }}
+          >
+            <div className="d-flex align-items-center gap-3">
+              <span 
+                style={{ 
+                  width: 48, 
+                  height: 48, 
+                  borderRadius: 12, 
+                  background: '#10b981', 
+                  color: '#fff', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: 24,
+                  boxShadow: '0 4px 10px rgba(16,185,129,0.3)'
+                }}
+              >
+                👛
+              </span>
+              <div>
+                <small style={{ fontSize: 11, fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  YOUR USER WALLET BALANCE
+                </small>
+                <div className="d-flex align-items-baseline gap-2">
+                  <h2 style={{ fontSize: 26, fontWeight: 900, color: '#065f46', margin: 0 }}>
+                    ₹{walletBalance.toFixed(2)}
+                  </h2>
+                  <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>
+                    (Instant Plan Purchase &amp; GST Hits)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddFunds(true)}
+                style={{
+                  background: '#10b981',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '9px 18px',
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow: '0 4px 12px rgba(16,185,129,0.3)',
+                  transition: 'all 0.18s'
+                }}
+              >
+                <span>➕</span> Add Funds / Top-up Wallet
               </button>
             </div>
           </div>
@@ -486,7 +527,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
             })}
           </div>
 
-          {/* ACTIVE SERVICE STATUS BANNER (NO REFRESH BUTTON, PURE CLEAN CONTRAST) */}
+          {/* ACTIVE SERVICE STATUS BANNER */}
           <div 
             style={{ 
               borderRadius: 12, 
@@ -518,9 +559,9 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
               </div>
               <div style={{ flexGrow: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
-                  {activeServiceConfig.label} Service • Current Plan:{' '}
+                  {activeServiceConfig.label} Service • Current Active Plan:{' '}
                   <span style={{ color: activeServiceConfig.color, fontWeight: 800 }}>
-                    {currentPlan}
+                    {getActivePlanNameForService()}
                   </span>
                 </div>
                 <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 2 }}>
@@ -533,7 +574,8 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
           {/* COMPACT PRICING CARDS GRID */}
           <div className="pricing-cards-grid mb-4">
             {displayedPlans.map((plan, idx) => {
-              const isCurrent = currentPlan?.toLowerCase() === plan.name?.toLowerCase()
+              const activePlanName = getActivePlanNameForService().toLowerCase()
+              const isCurrent = activePlanName.includes(plan.name?.toLowerCase()) || (plan.name && activePlanName === plan.name.toLowerCase())
               const isPopular = plan.isPopular || plan.badgeText?.toLowerCase().includes('popular') || plan.badgeText?.toLowerCase().includes('recommended')
               const features = getPlanFeatures(plan)
 
@@ -604,10 +646,12 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     >
                       <div>
                         <span style={{ fontSize: 24, fontWeight: 900, color: activeServiceConfig.color }}>
-                          ₹{plan.price}
+                          ₹{selectedService === 'gst' ? (plan.pricePerHit ?? plan.price ?? 1) : plan.price}
                         </span>
                         <span style={{ fontSize: 12, color: '#64748b', marginLeft: 5, fontWeight: 600 }}>
-                          / {plan.validity || '30 Days'}
+                          {selectedService === 'gst' 
+                            ? '/ Per Hit' 
+                            : (plan.isUnlimitedValidity ? '/ Unlimited Validity' : `/ ${plan.validity || `${plan.validityDays} Days`}`)}
                         </span>
                       </div>
                       <span style={{ fontSize: 11, fontWeight: 700, color: activeServiceConfig.color }}>
@@ -632,7 +676,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                                 color: activeServiceConfig.color,
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                justifyContent: 'center',
+                                justifyCenter: 'center',
                                 fontSize: 10,
                                 fontWeight: 900,
                                 flexShrink: 0
@@ -670,7 +714,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                     ) : (
                       <button
                         type="button"
-                        onClick={() => handleOpenPurchase(plan)}
+                        onClick={() => handleOpenPurchase({ ...plan, service: selectedService })}
                         style={{
                           width: '100%',
                           height: 40,
@@ -695,15 +739,17 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
           </div>
         </>
       ) : (
-        /* MY PURCHASE REQUESTS TAB (NO REFRESH BUTTON, HIGH CONTRAST) */
+        /* MY PURCHASE REQUESTS TAB */
         <div style={{ borderRadius: 14, background: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)', overflow: 'hidden' }}>
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
-            <h5 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: '0 0 2px 0' }}>
-              📋 My Subscription Purchase History
-            </h5>
-            <small style={{ color: '#64748b', fontSize: 12 }}>
-              Track all your submitted plan purchase payments and activation statuses.
-            </small>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'between' }}>
+            <div>
+              <h5 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: '0 0 2px 0' }}>
+                📋 My Orders &amp; Daybook History
+              </h5>
+              <small style={{ color: '#64748b', fontSize: 12 }}>
+                Track all your plan subscriptions, wallet top-ups, and payment statuses.
+              </small>
+            </div>
           </div>
 
           <div style={{ padding: 0 }}>
@@ -712,7 +758,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                 <div style={{ fontSize: 32, marginBottom: 10 }}>💳</div>
                 <h4 style={{ color: '#0f172a', fontSize: 17, fontWeight: 700 }}>आपने अभी तक कोई पेमेंट रिक्वेस्ट नहीं भेजी है</h4>
                 <p style={{ color: '#64748b', fontSize: 13, marginBottom: 16 }}>
-                  You haven't submitted any plan purchase requests yet.
+                  You haven't submitted any plan purchase or wallet top-up requests yet.
                 </p>
                 <button 
                   type="button" 
@@ -737,7 +783,8 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                       <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Request ID</th>
-                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Plan Name</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Service</th>
+                      <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Requested Plan / Item</th>
                       <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Amount</th>
                       <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Payment Date</th>
                       <th style={{ fontWeight: 800, color: '#475569', fontSize: 12, padding: '12px 16px' }}>Bank / Txn Details</th>
@@ -753,6 +800,16 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                           <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#64748b' }}>
                             {req.requestId}
                           </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          {(() => {
+                            const s = String(req.service || (req.requestType === 'wallet_topup' ? 'wallet' : 'whatsapp')).toLowerCase()
+                            if (s === 'sms') return <span className="badge" style={{ background: 'rgba(2, 132, 199, 0.12)', color: '#0284c7', border: '1px solid rgba(2, 132, 199, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>📱 SMS</span>
+                            if (s === 'plan') return <span className="badge" style={{ background: 'rgba(234, 88, 12, 0.12)', color: '#ea580c', border: '1px solid rgba(234, 88, 12, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>⚡ Plan API</span>
+                            if (s === 'gst') return <span className="badge" style={{ background: 'rgba(124, 58, 237, 0.12)', color: '#7c3aed', border: '1px solid rgba(124, 58, 237, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>🏛️ GST</span>
+                            if (s === 'wallet' || req.requestType === 'wallet_topup') return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>👛 Wallet Top-up</span>
+                            return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>💬 WhatsApp</span>
+                          })()}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
                           <strong style={{ fontSize: 13.5, color: '#0f172a' }}>{req.planName}</strong>
@@ -803,12 +860,29 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
         </div>
       )}
 
-      {/* PAYMENT DETAILS POPUP MODAL (When user clicks Buy Plan) */}
+      {/* PAYMENT DETAILS POPUP MODAL */}
       {selectedPlan && (
         <PaymentDetailsModal 
           plan={selectedPlan}
+          walletBalance={walletBalance}
           onClose={() => setSelectedPlan(null)}
           onSuccess={handlePurchaseSuccess}
+          notify={notify}
+          onOpenAddFunds={() => {
+            setSelectedPlan(null)
+            setShowAddFunds(true)
+          }}
+        />
+      )}
+
+      {/* ADD FUNDS / TOP-UP WALLET MODAL */}
+      {showAddFunds && (
+        <AddFundsModal
+          onClose={() => setShowAddFunds(false)}
+          onSuccess={() => {
+            fetchPlansData()
+            setActiveTab('requests')
+          }}
           notify={notify}
         />
       )}

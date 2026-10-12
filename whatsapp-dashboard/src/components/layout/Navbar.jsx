@@ -187,6 +187,32 @@ export function Navbar() {
           )}
         </div>
 
+        {/* User Wallet Balance Pill */}
+        <button
+          type="button"
+          className="wallet-pill-btn"
+          title="User Wallet Balance (Click to Top-up / Manage Plans)"
+          onClick={() => navigate('/subscription')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            color: '#10b981',
+            borderRadius: 20,
+            padding: '6px 14px',
+            fontWeight: 700,
+            fontSize: 13,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}
+        >
+          <span style={{ fontSize: 15 }}>👛</span>
+          <span>₹{(Number(currentUser?.walletBalance || 0)).toFixed(2)}</span>
+        </button>
+
         {/* User Profile Card (Shows Mobile / Username & Plan) - Click opens /subscription */}
         <div 
           className="user" 

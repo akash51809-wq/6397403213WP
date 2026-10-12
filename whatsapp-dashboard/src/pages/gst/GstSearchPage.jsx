@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
+import { getToken } from '../../services/api'
 
 export default function GstSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -28,9 +29,13 @@ export default function GstSearchPage() {
     setLoading(true)
     setError('')
     try {
+      const token = getToken()
       const res = await fetch('/api/gst/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ gstin: clean })
       })
       const result = await res.json()

@@ -1819,6 +1819,12 @@ router.post('/api/user/send', sendLimiter, authRequired, async (req, res) => {
         message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
       });
     }
+    if (features.webAccess === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Web messaging आपके वर्तमान प्लान में अनुमत नहीं है। कृपया प्लान अपग्रेड करें।'
+      });
+    }
     if (isGroup && !features.groupOption) {
       return res.status(403).json({
         success: false,
@@ -2174,9 +2180,160 @@ router.get('/api/auth/me', authRequired, async (req, res) => {
       mobile: user.mobile || null, 
       role: user.role,
       plan: user.plan || 'Demo Plan',
-      planExpiresAt: user.planExpiresAt || null
+      planExpiresAt: user.planExpiresAt || null,
+      walletBalance: Number(user.walletBalance || 0),
+      smsPlan: user.smsPlan || '',
+      smsPlanExpiresAt: user.smsPlanExpiresAt || null,
+      planApiPlan: user.planApiPlan || '',
+      planApiExpiresAt: user.planApiExpiresAt || null,
+      gstPlan: user.gstPlan || '',
+      gstPlanExpiresAt: user.gstPlanExpiresAt || null
     } 
   });
+});
+
+// User Wallet API Endpoints
+router.get('/api/user/wallet', authRequired, async (req, res) => {
+  try {
+    const user = await User.findOne({ userId: req.user.userId });
+    res.json({
+      success: true,
+      walletBalance: Number(user?.walletBalance || 0)
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Submit Wallet Top-up Payment Request
+router.post('/api/wallet/topup-request', authRequired, async (req, res) => {
+  try {
+    const { amount, paymentDate, bankDetails, screenshot, notes } = req.body;
+    if (!amount || Number(amount) <= 0 || !bankDetails) {
+      return res.status(400).json({ success: false, message: 'कृपया वैध राशि (Amount) और Payment / Bank Details भरें।' });
+    }
+
+    let finalScreenshot = (typeof screenshot === 'string' ? screenshot.trim() : '');
+    if (finalScreenshot && finalScreenshot.startsWith('data:')) {
+      const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+      const validation = validateAndProcessMediaUpload(finalScreenshot, {
+        claimedFileName: 'wallet_topup.jpg',
+        prefix: `wallet_${req.user.userId}`
+      });
+      if (validation.valid && validation.mimeType?.startsWith('image/')) {
+        await mediaStorage.saveMedia(validation.safeFilename, validation.buffer, {
+          mimetype: validation.mimeType,
+          ownerUserId: req.user?.userId,
+          metadata: { type: 'wallet_topup' }
+        });
+        finalScreenshot = `/media/${validation.safeFilename}`;
+      }
+    }
+
+    const requestId = 'WAL' + randomDigits(7);
+    const topupReq = await PlanPurchaseRequest.create({
+      requestId,
+      userId: req.user.userId,
+      userName: req.user.name || req.user.username || 'User',
+      userMobile: req.user.mobile || req.user.username || '',
+      service: 'wallet',
+      requestType: 'wallet_topup',
+      planId: 'wallet_topup',
+      planName: 'Wallet Top-up',
+      amount: Number(amount),
+      paymentDate: paymentDate || new Date().toISOString().slice(0, 10),
+      bankDetails: String(bankDetails).trim(),
+      screenshot: finalScreenshot,
+      adminNotes: notes || '',
+      status: 'pending'
+    });
+
+    res.json({
+      success: true,
+      message: 'वॉलेट टॉप-अप रिक्वेस्ट सफलतापूर्वक सबमिट हो गई है! एडमिन द्वारा सत्यापन के बाद फंड आपके वॉलेट में जोड़ दिया जाएगा।',
+      request: topupReq
+    });
+  } catch (error) {
+    console.error('Wallet topup request error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Purchase Plan Directly via Wallet Balance (Instant Activation)
+router.post('/api/plans/purchase-wallet', authRequired, async (req, res) => {
+  try {
+    const { planId, service: reqService } = req.body;
+    if (!planId) return res.status(400).json({ success: false, message: 'Plan ID आवश्यक है।' });
+
+    const plan = await Plan.findOne({ planId });
+    if (!plan) return res.status(404).json({ success: false, message: 'चुना हुआ Plan उपलब्ध नहीं है।' });
+
+    const user = await User.findOne({ userId: req.user.userId });
+    if (!user) return res.status(404).json({ success: false, message: 'User नहीं मिला।' });
+
+    const price = Number(plan.price);
+    const curBalance = Number(user.walletBalance || 0);
+    if (curBalance < price) {
+      return res.status(400).json({
+        success: false,
+        message: `अपर्याप्त वॉलेट बैलेंस! प्लान की कीमत ₹${price} है और आपका वर्तमान वॉलेट बैलेंस ₹${curBalance} है। कृपया पहले वॉलेट में फंड जोड़ें।`
+      });
+    }
+
+    // Deduct balance
+    user.walletBalance = curBalance - price;
+
+    const validityDays = Number(plan.validityDays) || 30;
+    const expiresDate = new Date();
+    expiresDate.setDate(expiresDate.getDate() + validityDays);
+
+    const srv = plan.service || reqService || 'whatsapp';
+    if (srv === 'whatsapp') {
+      user.plan = plan.name;
+      user.planExpiresAt = expiresDate;
+    } else if (srv === 'sms') {
+      user.smsPlan = plan.name;
+      user.smsPlanExpiresAt = expiresDate;
+    } else if (srv === 'plan') {
+      user.planApiPlan = plan.name;
+      user.planApiExpiresAt = expiresDate;
+    } else if (srv === 'gst') {
+      user.gstPlan = plan.name;
+      user.gstPlanExpiresAt = expiresDate;
+    }
+
+    user.updatedAt = new Date();
+    await user.save();
+
+    // Create automatically approved purchase request in daybook
+    const requestId = 'REQ' + randomDigits(7);
+    await PlanPurchaseRequest.create({
+      requestId,
+      userId: user.userId,
+      userName: user.name || user.username || 'User',
+      userMobile: user.mobile || user.username || '',
+      service: srv,
+      requestType: 'plan',
+      planId: plan.planId,
+      planName: plan.name,
+      amount: price,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      bankDetails: `Paid instantly via Wallet Balance (Remaining: ₹${user.walletBalance})`,
+      status: 'approved',
+      adminNotes: 'Instant activation via user wallet',
+      approvedAt: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: `प्लान '${plan.name}' सफलतापूर्वक एक्टिवेट हो गया है! आपके वॉलेट से ₹${price} काट लिए गए हैं।`,
+      walletBalance: user.walletBalance,
+      plan: plan.name
+    });
+  } catch (error) {
+    console.error('Wallet plan purchase error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 router.get('/api/user/plan-status', authRequired, async (req, res) => {
@@ -2253,8 +2410,10 @@ router.get('/api/user/plan-status', authRequired, async (req, res) => {
         apiAccess: planDoc ? planDoc.apiAccess : true,
         webAccess: planDoc ? planDoc.webAccess !== false : true,
         bulkMsg: planDoc ? planDoc.bulkMsg : true,
-        groupOption: planDoc ? planDoc.groupOption : false
-      }
+        groupOption: planDoc ? planDoc.groupOption : false,
+        walletBalance: Number(user.walletBalance || 0)
+      },
+      walletBalance: Number(user.walletBalance || 0)
     });
   } catch (error) {
     console.error('Fetch user plan-status error:', error);
@@ -2309,6 +2468,13 @@ router.get('/api/plans', authRequired, async (req, res) => {
       success: true,
       plans,
       currentPlan: req.user.plan || 'Standard',
+      walletBalance: Number(req.user.walletBalance || 0),
+      smsPlan: req.user.smsPlan || null,
+      smsPlanExpiresAt: req.user.smsPlanExpiresAt || null,
+      planApiPlan: req.user.planApiPlan || null,
+      planApiExpiresAt: req.user.planApiExpiresAt || null,
+      gstPlan: req.user.gstPlan || null,
+      gstPlanExpiresAt: req.user.gstPlanExpiresAt || null,
       myRequests: userRequests
     });
   } catch (error) {
@@ -2332,9 +2498,11 @@ router.get('/api/admin/plans', authRequired, adminRequired, async (req, res) => 
 router.post('/api/admin/plans', authRequired, adminRequired, async (req, res) => {
   try {
     const {
+      service = 'whatsapp',
       name, price, currency, description, dailyLimit, validity, validityDays,
       deviceLimit, apiAccess, webAccess, bulkMsg, groupOption, scheduleMsg,
-      ipSecurity, headerColor, badgeText, active, sortOrder
+      ipSecurity, incomingAllowed, outgoingAllowed, hits, isUnlimitedValidity, pricePerHit,
+      headerColor, badgeText, active, sortOrder
     } = req.body;
 
     if (!name || price === undefined || price === null) {
@@ -2344,6 +2512,7 @@ router.post('/api/admin/plans', authRequired, adminRequired, async (req, res) =>
     const planId = 'plan_' + randomDigits(6);
     const plan = await Plan.create({
       planId,
+      service: String(service || 'whatsapp').toLowerCase(),
       name: String(name).trim(),
       price: Number(price),
       currency: currency || 'INR',
@@ -2358,6 +2527,11 @@ router.post('/api/admin/plans', authRequired, adminRequired, async (req, res) =>
       groupOption: Boolean(groupOption),
       scheduleMsg: Boolean(scheduleMsg),
       ipSecurity: Boolean(ipSecurity),
+      incomingAllowed: incomingAllowed !== undefined ? Boolean(incomingAllowed) : true,
+      outgoingAllowed: outgoingAllowed !== undefined ? Boolean(outgoingAllowed) : true,
+      hits: Number(hits) || 0,
+      isUnlimitedValidity: Boolean(isUnlimitedValidity),
+      pricePerHit: Number(pricePerHit) || 1.0,
       headerColor: headerColor || '#705ec8',
       badgeText: badgeText || '',
       active: active !== undefined ? Boolean(active) : true,
@@ -2378,17 +2552,18 @@ router.put('/api/admin/plans/:planId', authRequired, adminRequired, async (req, 
     if (!plan) return res.status(404).json({ success: false, message: 'Plan नहीं मिला।' });
 
     const fields = [
-      'name', 'price', 'currency', 'description', 'dailyLimit', 'validity',
+      'service', 'name', 'price', 'currency', 'description', 'dailyLimit', 'validity',
       'validityDays', 'deviceLimit', 'apiAccess', 'webAccess', 'bulkMsg',
-      'groupOption', 'scheduleMsg', 'ipSecurity', 'headerColor', 'badgeText',
+      'groupOption', 'scheduleMsg', 'ipSecurity', 'incomingAllowed', 'outgoingAllowed',
+      'hits', 'isUnlimitedValidity', 'pricePerHit', 'headerColor', 'badgeText',
       'active', 'sortOrder'
     ];
 
     for (const f of fields) {
       if (req.body[f] !== undefined) {
-        if (f === 'price' || f === 'validityDays' || f === 'sortOrder') {
+        if (f === 'price' || f === 'validityDays' || f === 'sortOrder' || f === 'hits' || f === 'pricePerHit') {
           plan[f] = Number(req.body[f]);
-        } else if (typeof plan[f] === 'boolean') {
+        } else if (f === 'apiAccess' || f === 'webAccess' || f === 'bulkMsg' || f === 'groupOption' || f === 'scheduleMsg' || f === 'ipSecurity' || f === 'incomingAllowed' || f === 'outgoingAllowed' || f === 'isUnlimitedValidity' || f === 'active') {
           plan[f] = Boolean(req.body[f]);
         } else {
           plan[f] = req.body[f];
@@ -2420,7 +2595,7 @@ router.delete('/api/admin/plans/:planId', authRequired, adminRequired, async (re
 // 6. User: Submit plan purchase request
 router.post('/api/plans/purchase', authRequired, async (req, res) => {
   try {
-    const { planId, amount, paymentDate, bankDetails, screenshot, notes } = req.body;
+    const { planId, service: reqService, amount, paymentDate, bankDetails, screenshot, notes } = req.body;
     if (!planId || !bankDetails) {
       return res.status(400).json({ success: false, message: 'Plan और Payment / Bank Details भरना आवश्यक है।' });
     }
@@ -2446,12 +2621,15 @@ router.post('/api/plans/purchase', authRequired, async (req, res) => {
       finalScreenshot = `/media/${validation.safeFilename}`;
     }
 
+    const targetService = plan.service || reqService || 'whatsapp';
     const requestId = 'REQ' + randomDigits(7);
     const purchaseReq = await PlanPurchaseRequest.create({
       requestId,
       userId: req.user.userId,
       userName: req.user.name || req.user.username || 'User',
       userMobile: req.user.mobile || req.user.username || '',
+      service: targetService,
+      requestType: 'plan',
       planId: plan.planId,
       planName: plan.name,
       amount: Number(amount) || plan.price,
@@ -2523,18 +2701,53 @@ router.post('/api/admin/plan-requests/:requestId/approve', authRequired, adminRe
     const user = await User.findOne({ userId: request.userId });
     if (!user) return res.status(404).json({ success: false, message: 'User नहीं मिला।' });
 
-    // Update user plan & validity
-    user.plan = request.planName;
+    // Handle Wallet Top-up requests
+    if (request.requestType === 'wallet_topup' || request.service === 'wallet') {
+      user.walletBalance = Number(user.walletBalance || 0) + Number(request.amount || 0);
+      user.updatedAt = new Date();
+      await user.save();
+
+      request.status = 'approved';
+      request.approvedAt = new Date();
+      if (req.body.notes) request.adminNotes = req.body.notes;
+      await request.save();
+
+      return res.json({
+        success: true,
+        message: `User ${user.name || user.userId} (${user.mobile || user.username}) के वॉलेट में ₹${request.amount} जोड़ दिए गए हैं! नया बैलेंस: ₹${user.walletBalance}`
+      });
+    }
+
+    // Normal plan activation for specific service
     const planDoc = await Plan.findOne({ 
       $or: [
         { planId: request.planId }, 
         { name: new RegExp(`^${request.planName}$`, 'i') }
       ] 
     });
+
+    const targetService = request.service || planDoc?.service || 'whatsapp';
     const validityDays = planDoc?.validityDays || 30;
     const expiresDate = new Date();
     expiresDate.setDate(expiresDate.getDate() + validityDays);
-    user.planExpiresAt = expiresDate;
+
+    if (targetService === 'whatsapp') {
+      user.plan = request.planName;
+      user.planExpiresAt = expiresDate;
+    } else if (targetService === 'sms') {
+      user.smsPlan = request.planName;
+      user.smsPlanExpiresAt = expiresDate;
+    } else if (targetService === 'plan') {
+      user.planApiPlan = request.planName;
+      user.planApiExpiresAt = planDoc?.isUnlimitedValidity ? null : expiresDate;
+    } else if (targetService === 'gst') {
+      user.gstPlan = request.planName;
+      user.gstPlanExpiresAt = expiresDate;
+    } else {
+      user.plan = request.planName;
+      user.planExpiresAt = expiresDate;
+    }
+
     user.updatedAt = new Date();
     await user.save();
 
@@ -2548,21 +2761,22 @@ router.post('/api/admin/plan-requests/:requestId/approve', authRequired, adminRe
     if (user.email) {
       sendNotificationEmail(user.email, {
         type: 'plan_approved',
-        title: `Plan Activated: ${request.planName}`,
+        title: `Plan Activated: ${request.planName} (${targetService.toUpperCase()})`,
         details: {
           userName: user.name || user.username,
+          service: targetService,
           planName: request.planName,
           amount: request.amount || 0,
           dailyLimit: planDoc?.dailyLimit || 'Active',
-          validity: planDoc?.validity || `${validityDays} Days`,
-          planExpiresAt: expiresDate
+          validity: planDoc?.isUnlimitedValidity ? 'Unlimited' : (planDoc?.validity || `${validityDays} Days`),
+          planExpiresAt: planDoc?.isUnlimitedValidity ? 'Unlimited' : expiresDate
         }
       }).catch(err => console.warn('[EmailNotification] Plan approved email send warning:', err.message));
     }
 
     res.json({
       success: true,
-      message: `User ${user.name || user.userId} (${user.mobile || user.username}) का प्लान '${request.planName}' एक्टिवेट कर दिया गया है!`
+      message: `User ${user.name || user.userId} (${user.mobile || user.username}) का ${targetService.toUpperCase()} प्लान '${request.planName}' एक्टिवेट कर दिया गया है!`
     });
   } catch (error) {
     console.error('Admin approve plan request error:', error);

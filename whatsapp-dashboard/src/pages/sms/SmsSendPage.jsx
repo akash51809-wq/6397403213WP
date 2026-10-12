@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { getToken } from '../../services/api'
 
 export default function SmsSendPage() {
   const { notify } = useAuth()
@@ -41,9 +42,13 @@ export default function SmsSendPage() {
 
     try {
       setSending(true)
+      const token = getToken()
       const res = await fetch('/api/sms/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           recipient: recipient.trim(),
           message: message.trim(),

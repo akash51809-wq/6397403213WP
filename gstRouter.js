@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const { authRequired, User, Plan } = require('./auth');
 
 // State Code to State Name mapping (Indian GST standard)
 const GST_STATE_MAP = {
@@ -357,7 +358,7 @@ router.get('/api/gst/meta', (req, res) => {
 });
 
 // 2. Taxpayer Lookup
-router.post('/api/gst/search', async (req, res) => {
+router.post('/api/gst/search', authRequired, async (req, res) => {
   try {
     const rawGstin = req.body.gstin || req.body.gstNumber || req.query.gstin;
     if (!rawGstin) {
@@ -373,6 +374,43 @@ router.post('/api/gst/search', async (req, res) => {
         success: false,
         message: 'अमान्य GSTIN प्रारूप! GSTIN 15 अक्षरों/संख्याओं का होना चाहिए (उदा: 09AKPPG5665E1ZU)।'
       });
+    }
+
+    const user = req.user;
+    const isAdmin = user && (user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN');
+
+    let pricePerHit = 1.0;
+    if (!isAdmin) {
+      // Find active GST plan or default pricePerHit
+      let planDoc = null;
+      if (user.gstPlan) {
+        planDoc = await Plan.findOne({ service: 'gst', name: new RegExp(`^${user.gstPlan}$`, 'i'), active: true });
+      }
+      if (!planDoc) {
+        planDoc = await Plan.findOne({ service: 'gst', active: true }).sort({ sortOrder: 1, pricePerHit: 1 });
+      }
+
+      if (planDoc && (planDoc.pricePerHit !== undefined && planDoc.pricePerHit !== null)) {
+        pricePerHit = Number(planDoc.pricePerHit);
+      } else if (planDoc && planDoc.price !== undefined) {
+        pricePerHit = Number(planDoc.price);
+      }
+
+      const curBalance = Number(user.walletBalance || 0);
+      if (curBalance < pricePerHit) {
+        return res.status(402).json({
+          success: false,
+          code: 'INSUFFICIENT_BALANCE',
+          message: `अपर्याप्त वॉलेट बैलेंस! GST सर्च के लिए ₹${pricePerHit} प्रति हिट आवश्यक है। आपका वर्तमान वॉलेट बैलेंस ₹${curBalance} है। कृपया वॉलेट में फंड जोड़ें।`,
+          requiredAmount: pricePerHit,
+          walletBalance: curBalance
+        });
+      }
+
+      // Deduct from wallet
+      user.walletBalance = Math.max(0, curBalance - pricePerHit);
+      user.updatedAt = new Date();
+      await user.save();
     }
 
     const profile = buildTaxpayerProfile(cleanGstin);
@@ -394,6 +432,8 @@ router.post('/api/gst/search', async (req, res) => {
     res.json({
       success: true,
       data: profile,
+      charged: isAdmin ? 0 : pricePerHit,
+      walletBalance: isAdmin ? 999999 : user.walletBalance,
       timestamp: new Date().toISOString()
     });
   } catch (err) {

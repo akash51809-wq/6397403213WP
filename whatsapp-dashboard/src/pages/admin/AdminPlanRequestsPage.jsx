@@ -37,17 +37,20 @@ export default function AdminPlanRequestsPage({ notify: propNotify }) {
   }, [fetchRequests])
 
   const handleApprove = async (req) => {
-    const confirmMsg = `क्या आप User ${req.userName} (${req.userMobile || req.userId}) का प्लान '${req.planName}' तुरंत एक्टिवेट करना चाहते हैं?`
+    const isWallet = req.requestType === 'wallet_topup' || req.service === 'wallet'
+    const confirmMsg = isWallet
+      ? `क्या आप User ${req.userName} (${req.userMobile || req.userId}) के वॉलेट में ₹${req.amount} तुरंत जोड़ना चाहते हैं?`
+      : `क्या आप User ${req.userName} (${req.userMobile || req.userId}) का ${req.service ? req.service.toUpperCase() : ''} प्लान '${req.planName}' तुरंत एक्टिवेट करना चाहते हैं?`
     if (!window.confirm(confirmMsg)) return
 
     setActionLoading(req.requestId)
     try {
       const d = await api(`/api/admin/plan-requests/${req.requestId}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ notes: 'Approved by admin' })
+        body: JSON.stringify({ notes: isWallet ? 'Wallet funds approved by admin' : 'Plan approved by admin' })
       })
       if (d.success) {
-        notify(d.message || 'प्लान सफलतापूर्वक एक्टिवेट कर दिया गया!')
+        notify(d.message || (isWallet ? 'वॉलेट फंड सफलतापूर्वक जोड़ दिया गया!' : 'प्लान सफलतापूर्वक एक्टिवेट कर दिया गया!'))
         fetchRequests()
       }
     } catch (e) {
@@ -273,6 +276,7 @@ export default function AdminPlanRequestsPage({ notify: propNotify }) {
                   <tr style={{ background: 'var(--zd-card-bg, #f8fafc)', borderBottom: '1px solid var(--zd-border, #eef2f6)' }}>
                     <th style={{ fontWeight: 700 }}>Request ID</th>
                     <th style={{ fontWeight: 700 }}>User Details</th>
+                    <th style={{ fontWeight: 700 }}>Service</th>
                     <th style={{ fontWeight: 700 }}>Requested Plan</th>
                     <th style={{ fontWeight: 700 }}>Amount</th>
                     <th style={{ fontWeight: 700 }}>Payment Info</th>
@@ -302,6 +306,24 @@ export default function AdminPlanRequestsPage({ notify: propNotify }) {
                             ID: {req.userId}
                           </small>
                         </div>
+                      </td>
+                      <td>
+                        {(() => {
+                          const s = String(req.service || (req.requestType === 'wallet_topup' ? 'wallet' : 'whatsapp')).toLowerCase()
+                          if (s === 'sms') {
+                            return <span className="badge" style={{ background: 'rgba(2, 132, 199, 0.12)', color: '#0284c7', border: '1px solid rgba(2, 132, 199, 0.3)', padding: '4px 9px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>📱 SMS</span>
+                          }
+                          if (s === 'plan') {
+                            return <span className="badge" style={{ background: 'rgba(234, 88, 12, 0.12)', color: '#ea580c', border: '1px solid rgba(234, 88, 12, 0.3)', padding: '4px 9px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>⚡ Plan API</span>
+                          }
+                          if (s === 'gst') {
+                            return <span className="badge" style={{ background: 'rgba(124, 58, 237, 0.12)', color: '#7c3aed', border: '1px solid rgba(124, 58, 237, 0.3)', padding: '4px 9px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>🏛️ GST</span>
+                          }
+                          if (s === 'wallet' || req.requestType === 'wallet_topup') {
+                            return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '4px 9px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>👛 Wallet Top-up</span>
+                          }
+                          return <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '4px 9px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>💬 WhatsApp</span>
+                        })()}
                       </td>
                       <td>
                         <span className="badge badge-primary-light" style={{ fontSize: 12, padding: '4px 10px', fontWeight: 700 }}>
