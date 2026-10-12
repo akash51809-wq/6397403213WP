@@ -16,7 +16,7 @@ const pageMeta = {
   '/templates': { title: 'Templates', eyebrow: 'MESSAGE LIBRARY' },
   '/contacts': { title: 'Contacts', eyebrow: 'CONTACT MANAGEMENT' },
   '/plans': { title: 'Plans', eyebrow: 'PLANS' },
-  '/subscription': { title: 'Plans', eyebrow: 'PLANS' },
+  '/subscription': { title: 'Subscription & Plans', eyebrow: 'SUBSCRIPTION & WALLET' },
   '/api': { title: 'API Docs', eyebrow: 'DEVELOPER' },
   '/api-docs': { title: 'API Docs', eyebrow: 'DEVELOPER' },
   '/settings': { title: 'Settings', eyebrow: 'SETTINGS' },

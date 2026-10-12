@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import PaymentDetailsModal from '../../components/modals/PaymentDetailsModal'
@@ -216,9 +217,20 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
   const [gstPlan, setGstPlan] = useState(currentUser?.gstPlan || '')
   const [myRequests, setMyRequests] = useState([])
   const [activeTab, setActiveTab] = useState('plans')
-  const [selectedService, setSelectedService] = useState('whatsapp')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selectedService, setSelectedService] = useState(() => {
+    const s = searchParams.get('service')?.toLowerCase()
+    return s && ['whatsapp', 'sms', 'plan', 'gst'].includes(s) ? s : 'whatsapp'
+  })
   const [selectedPlan, setSelectedPlan] = useState(null)
   const [showAddFunds, setShowAddFunds] = useState(false)
+
+  useEffect(() => {
+    const s = searchParams.get('service')?.toLowerCase()
+    if (s && ['whatsapp', 'sms', 'plan', 'gst'].includes(s) && s !== selectedService) {
+      setSelectedService(s)
+    }
+  }, [searchParams, selectedService])
 
   const fetchPlansData = useCallback(async () => {
     setLoading(true)
@@ -501,7 +513,10 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                 <button
                   key={srv.id}
                   type="button"
-                  onClick={() => setSelectedService(srv.id)}
+                  onClick={() => {
+                    setSelectedService(srv.id)
+                    setSearchParams({ service: srv.id })
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',

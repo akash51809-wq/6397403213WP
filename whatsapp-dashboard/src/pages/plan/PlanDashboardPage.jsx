@@ -119,7 +119,7 @@ export default function PlanDashboardPage() {
           <button type="button" className="btn" onClick={() => navigate('/plans/api-docs')}>
             🔑 View API Docs
           </button>
-          <button type="button" className="btn primary" onClick={() => navigate('/plans/pricing')}>
+          <button type="button" className="btn primary" onClick={() => navigate('/subscription?service=plan')}>
             💎 Buy API Hits
           </button>
         </div>

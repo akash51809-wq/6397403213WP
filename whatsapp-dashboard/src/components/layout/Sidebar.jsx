@@ -273,7 +273,7 @@ export function Sidebar() {
             </NavLink>
 
             <NavLink 
-              to="/plans/pricing" 
+              to="/subscription?service=plan" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
               data-title="Buy API Hits"

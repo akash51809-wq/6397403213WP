@@ -178,7 +178,7 @@ export default function PlanApiDocsPage() {
           <button type="button" className="btn" onClick={() => navigate('/plans/dashboard')}>
             ⌂ Dashboard
           </button>
-          <button type="button" className="btn primary" onClick={() => navigate('/plans/pricing')}>
+          <button type="button" className="btn primary" onClick={() => navigate('/subscription?service=plan')}>
             💎 Buy API Hits
           </button>
         </div>
