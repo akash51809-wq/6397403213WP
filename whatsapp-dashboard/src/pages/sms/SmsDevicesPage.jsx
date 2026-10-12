@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext'
 export default function SmsDevicesPage() {
   const { notify } = useAuth()
   const [qrCode, setQrCode] = useState('')
+  const [qrLoading, setQrLoading] = useState(true)
+  const [qrError, setQrError] = useState('')
   const [serverUrl, setServerUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [devices, setDevices] = useState([])
@@ -15,14 +17,21 @@ export default function SmsDevicesPage() {
 
   const loadQr = async () => {
     try {
+      setQrLoading(true)
+      setQrError('')
       const res = await fetch('/api/sms/qr').then(r => r.json())
-      if (res.success) {
+      if (res && res.success) {
         setQrCode(res.qrCode)
         setServerUrl(res.serverUrl)
         setApiKey(res.apiKey)
+      } else {
+        setQrError(res?.message || 'QR कोड लोड करने में त्रुटि आई।')
       }
     } catch (e) {
       console.error('QR fetch error:', e)
+      setQrError(e.message || 'नेटवर्क त्रुटि: QR लोड नहीं हुआ')
+    } finally {
+      setQrLoading(false)
     }
   }
 
@@ -112,6 +121,25 @@ export default function SmsDevicesPage() {
             {qrCode ? (
               <div style={{ display: 'inline-block', padding: 12, background: '#fff', borderRadius: 16, border: '2px solid rgba(2,132,199,0.2)', boxShadow: '0 8px 24px rgba(2,132,199,0.12)' }}>
                 <img src={qrCode} alt="SMS Pairing QR" style={{ width: 220, height: 220, display: 'block' }} />
+              </div>
+            ) : qrLoading ? (
+              <div style={{ padding: '40px 20px', color: '#0284c7' }}>
+                <div className="spinner-border text-primary mb-2" role="status" style={{ width: 28, height: 28 }}></div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>Pairing QR Code तैयार हो रहा है...</div>
+              </div>
+            ) : qrError ? (
+              <div style={{ padding: '24px 16px', background: '#fef2f2', borderRadius: 12, border: '1px solid #fecaca' }}>
+                <div style={{ fontSize: 26, marginBottom: 6 }}>⚠️</div>
+                <div style={{ fontWeight: 800, fontSize: 13.5, color: '#991b1b', marginBottom: 4 }}>QR Code लोड नहीं हो सका</div>
+                <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 12 }}>{qrError}</div>
+                <button 
+                  type="button" 
+                  className="btn btn-sm btn-primary" 
+                  onClick={loadQr}
+                  style={{ borderRadius: 8, padding: '6px 14px', fontWeight: 700, fontSize: 12 }}
+                >
+                  ⟳ पुनः प्रयास करें (Retry)
+                </button>
               </div>
             ) : (
               <div style={{ padding: 40, color: '#64748b' }}>QR Code loading...</div>

@@ -183,7 +183,12 @@ router.get('/api/sms/status', (req, res) => {
 // 2. GET PAIRING QR CODE
 router.get('/api/sms/qr', async (req, res) => {
   try {
-    const apiKey = db.getSetting('api_key', 'ers_key_8899');
+    let apiKey = 'ers_key_8899';
+    try {
+      apiKey = db.getSetting('api_key', 'ers_key_8899') || 'ers_key_8899';
+    } catch (dbErr) {
+      console.warn('[SMS Gateway] getSetting notice for QR:', dbErr.message);
+    }
     const port = process.env.PORT || 10000;
     const resolvedLocalIp = getLocalIp();
 

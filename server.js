@@ -417,7 +417,8 @@ async function startServer() {
 
     console.log('PostgreSQL Connected Successfully');
     try {
-      const { syncFromPostgres } = require('./utils/smsDb');
+      const { initSchema, syncFromPostgres } = require('./utils/smsDb');
+      if (typeof initSchema === 'function') initSchema();
       if (typeof syncFromPostgres === 'function') {
         await syncFromPostgres();
       }
