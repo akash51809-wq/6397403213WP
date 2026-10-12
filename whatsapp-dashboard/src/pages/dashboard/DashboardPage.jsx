@@ -109,7 +109,15 @@ export function DashboardPage() {
     <div className="content dashboard-page">
       
       {/* 1. Hero Banner */}
-      <section className="dashboard-hero">
+      <section 
+        className="dashboard-hero"
+        style={{
+          height: 'auto',
+          minHeight: 'auto',
+          padding: '12px 20px',
+          marginBottom: '10px'
+        }}
+      >
         <div className="hero-copy">
           <span className="eyebrow">WHATSAPP AUTOMATION</span>
           <h1>
@@ -190,7 +198,7 @@ export function DashboardPage() {
       )}
 
       {/* 2. Actions Filter Row */}
-      <div className="actions" style={{ marginBottom: 16 }}>
+      <div className="actions" style={{ marginBottom: 10 }}>
         <button 
           type="button" 
           className="btn" 
