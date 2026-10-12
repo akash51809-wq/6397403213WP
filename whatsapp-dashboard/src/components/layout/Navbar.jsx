@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
@@ -26,8 +26,28 @@ const pageMeta = {
   '/admin/user-management': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
   '/users': { title: 'User Management', eyebrow: 'SUPER ADMIN' },
   '/admin/plans': { title: 'Plan Management', eyebrow: 'SUPER ADMIN' },
-  '/payment/daybook': { title: 'Purchase Requests', eyebrow: 'SUPER ADMIN' }
+  '/payment/daybook': { title: 'Purchase Requests', eyebrow: 'SUPER ADMIN' },
+  '/sms': { title: 'SMS Dashboard', eyebrow: 'MOBILE SMS GATEWAY' },
+  '/sms/dashboard': { title: 'SMS Dashboard', eyebrow: 'MOBILE SMS GATEWAY' },
+  '/sms/devices': { title: 'Connected Devices', eyebrow: 'ANDROID GATEWAY' },
+  '/sms/send': { title: 'Send SMS', eyebrow: 'OUTBOX & CAMPAIGN' },
+  '/sms/inbox': { title: 'SMS Inbox', eyebrow: 'INCOMING MESSAGES' },
+  '/sms/webhook': { title: 'Webhook Settings', eyebrow: 'API INTEGRATION' },
+  '/sms/reports': { title: 'Delivery Reports', eyebrow: 'DELIVERY LOGS' },
+  '/services/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
+  '/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
+  '/services/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
+  '/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
+  '/services/gst-api': { title: 'GST API', eyebrow: 'TAX & VERIFICATION' },
+  '/gst-api': { title: 'GST API', eyebrow: 'TAX & VERIFICATION' }
 }
+
+const servicesList = [
+  { id: 'whatsapp', name: 'WhatsApp', path: '/dashboard', icon: '💬', badge: 'Active', desc: 'WhatsApp Automation' },
+  { id: 'mobile-sms', name: 'Mobile SMS', path: '/sms/dashboard', icon: '📱', badge: 'New', desc: 'SMS & OTP Service' },
+  { id: 'plan-api', name: 'Plan API', path: '/services/plan-api', icon: '⚡', badge: 'New', desc: 'Recharge & Plans' },
+  { id: 'gst-api', name: 'GST API', path: '/services/gst-api', icon: '🏛️', badge: 'New', desc: 'GST Verification' }
+]
 
 export function Navbar() {
   const {
@@ -47,9 +67,37 @@ export function Navbar() {
   const navigate = useNavigate()
   const meta = pageMeta[location.pathname] || { title: 'Dashboard', eyebrow: 'WHATSAPP AUTOMATION' }
 
-  const username = currentUser?.name || currentUser?.username || 'Prince Goyal'
-  const initials = username.replace(/[^a-zA-Z]/g, '').slice(0, 2).toUpperCase() || 'PG'
-  const roleLabel = isAdmin ? 'Super Admin' : (planInfo?.planName || 'Standard User')
+  const [serviceMenuOpen, setServiceMenuOpen] = useState(false)
+  const serviceMenuRef = useRef(null)
+
+  const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
+
+  // Determine active service from current route
+  let activeService = servicesList[0] // Default WhatsApp
+  if (isSmsActive) {
+    activeService = servicesList[1]
+  } else if (location.pathname.includes('plan-api')) {
+    activeService = servicesList[2]
+  } else if (location.pathname.includes('gst-api')) {
+    activeService = servicesList[3]
+  }
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (serviceMenuRef.current && !serviceMenuRef.current.contains(event.target)) {
+        setServiceMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const username = currentUser?.name || currentUser?.username || (isAdmin ? 'Admin' : 'User')
+  const displayMobile = currentUser?.mobile || currentUser?.username || username
+  const roleLabel = isAdmin ? 'Super Admin' : (currentUser?.plan || 'Standard Plan')
+  const displayPlan = planInfo?.planName || currentUser?.plan || roleLabel
+  const initials = (currentUser?.name || currentUser?.username || (isAdmin ? 'AD' : 'WA')).replace(/[^a-zA-Z]/g, '').slice(0, 2).toUpperCase() || (isAdmin ? 'AD' : 'WA')
 
   return (
     <header className="topbar">
@@ -69,33 +117,64 @@ export function Navbar() {
       </div>
 
       <div className="top-actions">
-        <button 
-          type="button"
-          className="icon-btn" 
-          title="Search"
-          aria-label="Search"
-          onClick={() => notify('Search shortcut ready')}
-        >
-          ⌕
-        </button>
+        {/* Service Switcher Dropdown (WhatsApp, Mobile SMS, Plan API, GST API) */}
+        <div className="service-dropdown-wrapper" ref={serviceMenuRef}>
+          <button
+            type="button"
+            className={`service-select-btn ${isSmsActive ? 'service-sms-btn' : ''}`}
+            onClick={() => setServiceMenuOpen(!serviceMenuOpen)}
+            title="Switch Service"
+            aria-expanded={serviceMenuOpen}
+            aria-haspopup="true"
+          >
+            <span className="service-btn-icon">{activeService.icon}</span>
+            <div className="service-btn-text">
+              <small>ACTIVE SERVICE</small>
+              <strong>{activeService.name}</strong>
+            </div>
+            <span className={`service-chevron ${serviceMenuOpen ? 'open' : ''}`}>▾</span>
+          </button>
 
-        <button 
-          type="button"
-          className="icon-btn" 
-          title="Status & Notifications"
-          aria-label="Status & Notifications"
-          onClick={() => {
-            loadStatus()
-            loadQr()
-            notify('System status updated')
-          }}
-        >
-          ♧
-        </button>
+          {serviceMenuOpen && (
+            <div className="service-dropdown-menu">
+              <div className="service-dropdown-header">
+                <span>SELECT SERVICE</span>
+                <small>4 Services</small>
+              </div>
+              <div className="service-dropdown-list">
+                {servicesList.map(item => {
+                  const isSelected = activeService.id === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`service-menu-item ${isSelected ? 'active' : ''}`}
+                      onClick={() => {
+                        setServiceMenuOpen(false)
+                        navigate(item.path)
+                      }}
+                    >
+                      <span className="service-item-icon">{item.icon}</span>
+                      <div className="service-item-info">
+                        <div className="service-item-name">
+                          <strong>{item.name}</strong>
+                          <span className={`service-tag ${item.badge.toLowerCase()}`}>{item.badge}</span>
+                        </div>
+                        <small>{item.desc}</small>
+                      </div>
+                      {isSelected && <span className="service-check">✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
+        {/* User Profile Card (Shows Mobile / Username & Plan) */}
         <div 
           className="user" 
-          title={`Logged in as ${username}${currentUser?.email ? ` (${currentUser.email})` : ''} - Click to edit profile & email`}
+          title={`Logged in as ${username}${currentUser?.mobile ? ` (${currentUser.mobile})` : ''} - Plan: ${displayPlan}`}
           onClick={() => navigate(isAdmin ? '/admin/settings' : '/settings')}
           style={{ cursor: 'pointer' }}
         >
@@ -110,11 +189,12 @@ export function Navbar() {
             <span className="avatar">{initials}</span>
           )}
           <div>
-            <strong>{username}</strong>
-            <small>{currentUser?.email || roleLabel}</small>
+            <strong>{displayMobile}</strong>
+            <small>{displayPlan}</small>
           </div>
         </div>
 
+        {/* Logout Button */}
         <button 
           type="button"
           className="icon-btn" 

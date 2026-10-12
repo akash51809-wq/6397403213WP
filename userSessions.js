@@ -1,5 +1,5 @@
-const { default: makeWASocket, DisconnectReason } = require('@whiskeysockets/baileys');
-const { usePgAuthState } = require('./pgAuthState');
+const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
+const { usePgAuthState, clearSessionCache } = require('./pgAuthState');
 const { WhatsAppSession } = require('./auth');
 
 const QRCode = require('qrcode');
@@ -104,10 +104,12 @@ async function startUserSession(userId) {
 
     console.log(`[UserSession] Starting session for ${isAdminSlot ? 'Admin slot' : 'user'} ${userId}`);
 
+    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1043857760] }));
     const socket = makeWASocket({
+        version,
         auth: state,
         printQRInTerminal: false,
-        browser: ['Chrome (Windows)', 'Desktop', '10.0'],
+        browser: Browsers.ubuntu('Chrome'),
         keepAliveIntervalMs: 25000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
@@ -216,6 +218,7 @@ async function startUserSession(userId) {
             } else {
                 if (isLoggedOut) {
                     try {
+                        clearSessionCache(sessionId);
                         const SessionAuth = require('./models/SessionAuth');
                         const prefix = String(userId).startsWith('admin_') ? `^${userId}_` : `^user-${userId}_`;
                         SessionAuth.deleteMany({ id: { $regex: prefix } }).catch(() => {});
@@ -270,7 +273,15 @@ async function startUserSession(userId) {
         }
     });
 
-    socket.ev.on('creds.update', saveCreds);
+    socket.ev.on('creds.update', async () => {
+        console.log(`[UserSession ${userId}] creds.update received, committing to database...`);
+        try {
+            await saveCreds();
+            console.log(`[UserSession ${userId}] Credentials saved successfully.`);
+        } catch (err) {
+            console.error(`[UserSession ${userId}] saveCreds error:`, err.message);
+        }
+    });
 
     // ── History sync (fires on first connect when syncFullHistory:true) ──
     socket.ev.on('messaging-history.set', async ({ messages: histMsgs, contacts }) => {
@@ -419,6 +430,8 @@ async function stopUserSession(userId) {
     }
 
     try {
+        const sId = String(userId).startsWith('admin_') ? userId : `user-${userId}`;
+        clearSessionCache(sId);
         const SessionAuth = require('./models/SessionAuth');
         const prefix = String(userId).startsWith('admin_') ? `^${userId}_` : `^user-${userId}_`;
         await SessionAuth.deleteMany({ id: { $regex: prefix } });

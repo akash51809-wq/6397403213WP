@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const SessionAuth = require('./models/SessionAuth');
 const { initAuthCreds } = require('@whiskeysockets/baileys');
+const { query } = require('./db');
 
 const BufferJSON = {
   replacer: (k, v) => (Buffer.isBuffer(v) ? { type: 'Buffer', data: v.toString('base64') } : v),
@@ -151,17 +152,44 @@ function isEncryptedPayload(payload) {
   return Boolean(payload && typeof payload === 'object' && payload.encrypted === true && payload.iv && payload.tag && payload.data);
 }
 
+const sessionCaches = new Map();
+
+function getSessionCache(sessionId) {
+  if (!sessionCaches.has(sessionId)) {
+    sessionCaches.set(sessionId, new Map());
+  }
+  return sessionCaches.get(sessionId);
+}
+
+function clearSessionCache(sessionId) {
+  if (sessionId) {
+    sessionCaches.delete(sessionId);
+  } else {
+    sessionCaches.clear();
+  }
+}
+
 async function usePgAuthState(sessionId) {
+  const normalizedSessionId = String(sessionId || '').trim();
+  const isInvalidAdminUserSession = /^user-admin$/i.test(normalizedSessionId);
+  if (isInvalidAdminUserSession) {
+    const msg = `FATAL: Invalid Admin user session detected (sessionId='${sessionId}'). Admin must use canonical sessionId='admin'. Rejecting to prevent initAuthCreds() or credential pollution.`;
+    console.error(`[SessionAuth] ${msg}`);
+    throw new Error(msg);
+  }
+
+  const sessionCache = getSessionCache(normalizedSessionId);
+
   const writeData = async (data, file) => {
     try {
-      const key = `${sessionId}_${file}`;
+      const key = `${normalizedSessionId}_${file}`;
+      sessionCache.set(key, data);
       const jsonString = JSON.stringify(data, BufferJSON.replacer);
-      // Encrypt sensitive WhatsApp credentials before saving to PostgreSQL
       const encryptedRecord = encryptPayload(jsonString);
-      await SessionAuth.findOneAndUpdate(
-        { id: key },
-        { data: encryptedRecord },
-        { upsert: true }
+      await query(
+        `INSERT INTO session_auth ("id", "data") VALUES ($1, $2)
+         ON CONFLICT ("id") DO UPDATE SET "data" = EXCLUDED."data"`,
+        [key, JSON.stringify(encryptedRecord)]
       );
     } catch (e) {
       console.error(`[SessionAuth] Error writing ${file}:`, e.message);
@@ -170,39 +198,37 @@ async function usePgAuthState(sessionId) {
 
   const readData = async (file) => {
     try {
-      const key = `${sessionId}_${file}`;
-      const result = await SessionAuth.findOne({ id: key });
-      if (!result || !result.data) return null;
-
-      // Handle encrypted payload
-      if (result.data.encrypted === true) {
-        const decryptedJson = decryptPayload(result.data);
+      const key = `${normalizedSessionId}_${file}`;
+      if (sessionCache.has(key)) {
+        return sessionCache.get(key);
+      }
+      const res = await query(
+        `SELECT "data" FROM session_auth WHERE "id" = $1 LIMIT 1`,
+        [key]
+      );
+      if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
+        return null;
+      }
+      const rawData = res.rows[0].data;
+      let parsed = null;
+      if (rawData.encrypted === true) {
+        const decryptedJson = decryptPayload(rawData);
         if (!decryptedJson) {
           throw new Error(`Failed to decrypt ${key} with any candidate key`);
         }
-        return JSON.parse(decryptedJson, BufferJSON.reviver);
+        parsed = JSON.parse(decryptedJson, BufferJSON.reviver);
+      } else {
+        const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+        parsed = JSON.parse(jsonString, BufferJSON.reviver);
+        try {
+          const encryptedRecord = encryptPayload(jsonString);
+          await query(
+            `UPDATE session_auth SET "data" = $1 WHERE "id" = $2`,
+            [JSON.stringify(encryptedRecord), key]
+          );
+        } catch (migErr) {}
       }
-
-      // If unencrypted record encountered:
-      const jsonString = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-      const parsed = JSON.parse(jsonString, BufferJSON.reviver);
-
-      // In production, do NOT silently accept unencrypted credentials!
-      // Immediately migrate & encrypt the record into the database!
-      try {
-        const encryptedRecord = encryptPayload(jsonString);
-        await SessionAuth.updateOne(
-          { id: key },
-          { $set: { data: encryptedRecord } }
-        );
-        console.warn(`[SessionAuth Security Audit] Auto-migrated and encrypted unencrypted credential '${key}'.`);
-      } catch (migErr) {
-        if (process.env.NODE_ENV === 'production') {
-          console.error(`[SessionAuth Security] Failed to securely migrate unencrypted credential '${key}':`, migErr.message);
-          throw new Error(`Insecure WhatsApp credential format rejected in production for ${key}`);
-        }
-      }
-
+      sessionCache.set(key, parsed);
       return parsed;
     } catch (error) {
       if (file === 'creds.json') {
@@ -214,63 +240,26 @@ async function usePgAuthState(sessionId) {
 
   const removeData = async (file) => {
     try {
-      const key = `${sessionId}_${file}`;
-      await SessionAuth.deleteOne({ id: key });
+      const key = `${normalizedSessionId}_${file}`;
+      sessionCache.delete(key);
+      await query(`DELETE FROM session_auth WHERE "id" = $1`, [key]);
     } catch (error) {}
   };
 
-  const normalizedSessionId = String(sessionId || '').trim();
-  const isInvalidAdminUserSession = /^user-admin$/i.test(normalizedSessionId);
-  if (isInvalidAdminUserSession) {
-    const msg = `FATAL: Invalid Admin user session detected (sessionId='${sessionId}'). Admin must use canonical sessionId='admin'. Rejecting to prevent initAuthCreds() or credential pollution.`;
-    console.error(`[SessionAuth] ${msg}`);
-    throw new Error(msg);
-  }
+  const credsKey = `${normalizedSessionId}_creds.json`;
 
-  const isAdmin = (sessionId === 'admin');
-  const credsKey = `${sessionId}_creds.json`;
-
-  // Verify whether SessionAuth contains existing credentials for this session
-  let hasExistingCreds = false;
-  try {
-    hasExistingCreds = Boolean(await SessionAuth.exists({ id: credsKey }));
-  } catch (err) {
-    if (isAdmin) hasExistingCreds = true; // Err on the side of safety for Admin
-  }
-
-  // Read creds with bounded retry logic
-  const retryDelays = [250, 500, 1000, 2000, 4000];
+  // Read creds from database or initialize fresh
   let creds = null;
-  let lastReadError = null;
-
-  for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-    try {
-      creds = await readData('creds.json');
-      if (creds && (creds.me || !hasExistingCreds)) {
-        break;
-      }
-      if (creds && isAdmin && creds.me) {
-        break;
-      }
-      if (!hasExistingCreds && !isAdmin) {
-        break;
-      }
-    } catch (err) {
-      lastReadError = err;
-      console.warn(`[SessionAuth] Attempt ${attempt + 1}/${retryDelays.length + 1} read ${credsKey} failed:`, err.message);
-    }
-
-    if (attempt < retryDelays.length && (hasExistingCreds || isAdmin)) {
-      const delay = retryDelays[attempt];
-      await new Promise((res) => setTimeout(res, delay));
-    }
+  try {
+    creds = await readData('creds.json');
+  } catch (err) {
+    console.warn(`[SessionAuth] Notice: error reading ${credsKey}:`, err.message);
   }
 
-  if (!creds || !creds.me) {
-    if (hasExistingCreds && isAdmin) {
-      console.warn(`[SessionAuth] Existing Admin WhatsApp credentials (${credsKey}) incomplete or invalid. Initializing fresh credentials for QR pairing.`);
-    }
+  if (!creds) {
+    console.log(`[SessionAuth] Initializing fresh credentials for session: ${normalizedSessionId}`);
     creds = initAuthCreds();
+    await writeData(creds, 'creds.json');
   }
 
   return {
@@ -279,28 +268,104 @@ async function usePgAuthState(sessionId) {
       keys: {
         get: async (type, ids) => {
           const data = {};
-          await Promise.all(
-            ids.map(async (id) => {
+          if (!Array.isArray(ids) || ids.length === 0) return data;
+
+          const missingIds = [];
+          for (const id of ids) {
+            const key = `${normalizedSessionId}_${type}-${id}.json`;
+            if (sessionCache.has(key)) {
+              data[id] = sessionCache.get(key);
+            } else {
+              missingIds.push(id);
+            }
+          }
+
+          if (missingIds.length === 0) return data;
+
+          try {
+            const fullKeys = missingIds.map(id => `${normalizedSessionId}_${type}-${id}.json`);
+            const res = await query(
+              `SELECT "id", "data" FROM session_auth WHERE "id" = ANY($1)`,
+              [fullKeys]
+            );
+            const resultMap = new Map();
+            for (const row of (res.rows || [])) {
               try {
-                let value = await readData(`${type}-${id}.json`);
-                data[id] = value;
+                let parsed = null;
+                if (row.data && row.data.encrypted === true) {
+                  const dec = decryptPayload(row.data);
+                  if (dec) parsed = JSON.parse(dec, BufferJSON.reviver);
+                } else if (row.data) {
+                  const str = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
+                  parsed = JSON.parse(str, BufferJSON.reviver);
+                }
+                resultMap.set(row.id, parsed);
+                sessionCache.set(row.id, parsed);
               } catch (e) {
-                data[id] = null;
+                resultMap.set(row.id, null);
               }
-            })
-          );
+            }
+            for (const id of missingIds) {
+              const key = `${normalizedSessionId}_${type}-${id}.json`;
+              const val = resultMap.has(key) ? resultMap.get(key) : null;
+              data[id] = val;
+              if (val === null) sessionCache.set(key, null);
+            }
+          } catch (batchErr) {
+            console.error(`[SessionAuth] Batch get error for ${type}:`, batchErr.message);
+            for (const id of missingIds) {
+              data[id] = null;
+            }
+          }
+
           return data;
         },
         set: async (data) => {
-          const tasks = [];
+          const writes = [];
+          const deletes = [];
+
           for (const category of Object.keys(data)) {
             for (const id of Object.keys(data[category])) {
               const value = data[category][id];
-              const file = `${category}-${id}.json`;
-              tasks.push(value ? writeData(value, file) : removeData(file));
+              const key = `${normalizedSessionId}_${category}-${id}.json`;
+              if (value) {
+                sessionCache.set(key, value);
+                const jsonString = JSON.stringify(value, BufferJSON.replacer);
+                const encryptedRecord = encryptPayload(jsonString);
+                writes.push({ id: key, data: JSON.stringify(encryptedRecord) });
+              } else {
+                sessionCache.delete(key);
+                deletes.push(key);
+              }
             }
           }
-          await Promise.all(tasks);
+
+          if (deletes.length > 0) {
+            try {
+              await query(`DELETE FROM session_auth WHERE "id" = ANY($1)`, [deletes]);
+            } catch (delErr) {
+              console.error('[SessionAuth] Batch delete error:', delErr.message);
+            }
+          }
+
+          if (writes.length > 0) {
+            const CHUNK_SIZE = 50;
+            for (let i = 0; i < writes.length; i += CHUNK_SIZE) {
+              const chunk = writes.slice(i, i + CHUNK_SIZE);
+              const ids = chunk.map(w => w.id);
+              const payloads = chunk.map(w => w.data);
+              try {
+                await query(
+                  `INSERT INTO session_auth ("id", "data")
+                   SELECT unnest($1::text[]), unnest($2::jsonb[])
+                   ON CONFLICT ("id") DO UPDATE SET "data" = EXCLUDED."data"`,
+                  [ids, payloads]
+                );
+              } catch (writeErr) {
+                console.error('[SessionAuth] Batch write error:', writeErr.message);
+              }
+            }
+          }
         },
       },
     },
@@ -355,6 +420,7 @@ async function migrateUnencryptedSessionAuth() {
 module.exports = { 
   usePgAuthState,
   useMongoAuthState: usePgAuthState, // Alias for backwards compatibility
+  clearSessionCache,
   encryptPayload,
   decryptPayload,
   encryptData: encryptPayload,

@@ -358,3 +358,307 @@ body:before{background-image:linear-gradient(rgba(30,58,45,.025) 1px,transparent
   flex-shrink: 0;
 }
 
+/* =========================================================
+   SERVICE SWITCHER DROPDOWN MENU
+   ========================================================= */
+.service-dropdown-wrapper {
+  position: relative;
+}
+.service-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(22, 167, 101, 0.28);
+  background: linear-gradient(145deg, #ffffff, #f4faf6);
+  color: #183126;
+  box-shadow: 0 4px 14px rgba(22, 167, 101, 0.08);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: inherit;
+}
+.service-select-btn:hover {
+  border-color: rgba(22, 167, 101, 0.55);
+  box-shadow: 0 6px 18px rgba(22, 167, 101, 0.16);
+  transform: translateY(-1px);
+}
+.service-btn-icon {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.service-btn-text {
+  text-align: left;
+  line-height: 1.25;
+}
+.service-btn-text small {
+  display: block;
+  font-size: 8px;
+  font-weight: 800;
+  color: #14965b;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.service-btn-text strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #183126;
+}
+.service-chevron {
+  font-size: 11px;
+  color: #718078;
+  transition: transform 0.2s ease;
+  margin-left: 2px;
+}
+.service-chevron.open {
+  transform: rotate(180deg);
+}
+.service-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 250px;
+  background: #ffffff;
+  border: 1px solid rgba(22, 167, 101, 0.22);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15, 30, 23, 0.18), 0 4px 12px rgba(0, 0, 0, 0.06);
+  padding: 8px;
+  z-index: 100;
+  animation: serviceDropdownFade 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes serviceDropdownFade {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.service-dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid rgba(30, 58, 45, 0.08);
+  margin-bottom: 6px;
+}
+.service-dropdown-header span {
+  font-size: 9px;
+  font-weight: 800;
+  color: #718078;
+  letter-spacing: 0.8px;
+}
+.service-dropdown-header small {
+  font-size: 9px;
+  font-weight: 700;
+  color: #14965b;
+  background: rgba(22, 167, 101, 0.1);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.service-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.service-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.service-menu-item:hover {
+  background: rgba(22, 167, 101, 0.08);
+  border-color: rgba(22, 167, 101, 0.18);
+  transform: translateX(2px);
+}
+.service-menu-item.active {
+  background: linear-gradient(145deg, rgba(22, 167, 101, 0.14), rgba(22, 167, 101, 0.06));
+  border-color: rgba(22, 167, 101, 0.28);
+}
+.service-item-icon {
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: rgba(240, 248, 244, 0.9);
+  flex-shrink: 0;
+}
+.service-item-info {
+  flex: 1;
+  min-width: 0;
+}
+.service-item-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.service-item-name strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #183126;
+}
+.service-tag {
+  font-size: 8.5px;
+  font-weight: 700;
+  padding: 1.5px 5.5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.service-tag.active {
+  background: #14965b;
+  color: #fff;
+}
+.service-tag.new {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+.service-item-info small {
+  display: block;
+  font-size: 10px;
+  color: #718078;
+  margin-top: 1px;
+}
+.service-check {
+  font-size: 13px;
+  font-weight: 900;
+  color: #14965b;
+}
+
+@media(max-width: 768px) {
+  .service-select-btn {
+    padding: 5px 8px;
+  }
+  .service-btn-text small {
+    display: none;
+  }
+}
+
+/* =========================================================
+   MOBILE SMS LIGHT SKYBLUE THEME (.theme-sms)
+   ========================================================= */
+.theme-sms {
+  --cyan: #0284c7;
+  --violet: #0369a1;
+  --green: #0ea5e9;
+  --text: #0f2736;
+}
+
+body:has(.theme-sms) {
+  background: radial-gradient(circle at 85% 5%,rgba(14,165,233,.12),transparent 24%),radial-gradient(circle at 12% 82%,rgba(56,189,248,.14),transparent 24%),radial-gradient(circle at 65% 60%,rgba(2,132,199,.08),transparent 25%),linear-gradient(135deg,#f0f9ff,#e0f2fe 55%,#f8fafc) !important;
+}
+
+.theme-sms .brand-mark {
+  background: linear-gradient(145deg,#38bdf8,#0284c7) !important;
+  box-shadow: 0 8px 18px rgba(2,132,199,.25) !important;
+}
+
+.theme-sms .nav a:hover {
+  color: #0369a1 !important;
+  background: rgba(14,165,233,.08) !important;
+  border-color: rgba(14,165,233,.16) !important;
+}
+
+.theme-sms .nav a.active {
+  color: #fff !important;
+  background: linear-gradient(145deg,#38bdf8,#0284c7) !important;
+  border-color: rgba(2,132,199,.32) !important;
+  box-shadow: 0 7px 0 #0369a1,0 15px 25px rgba(2,132,199,.22),inset 0 1px rgba(255,255,255,.45) !important;
+}
+
+.theme-sms .nav a.active span,
+.theme-sms .nav a.active b {
+  color: #fff !important;
+}
+
+.theme-sms .btn.primary {
+  background: linear-gradient(145deg,#38bdf8,#0284c7) !important;
+  border-color: #0284c7 !important;
+  box-shadow: 0 6px 0 #0369a1,0 14px 24px rgba(2,132,199,.24),inset 0 1px rgba(255,255,255,.4) !important;
+  color: #fff !important;
+}
+
+.theme-sms .btn.primary:hover {
+  background: linear-gradient(145deg,#0ea5e9,#0369a1) !important;
+}
+
+.theme-sms .topbar-title small,
+.theme-sms .eyebrow {
+  color: #0284c7 !important;
+}
+
+.theme-sms .sidebar-status {
+  border-color: rgba(2,132,199,.2) !important;
+  background: rgba(2,132,199,.06) !important;
+}
+
+.theme-sms .sidebar-status strong {
+  color: #0f2736 !important;
+}
+
+.theme-sms .dot.dot-sms {
+  background: #0ea5e9 !important;
+  box-shadow: 0 0 10px rgba(14,165,233,.75) !important;
+}
+
+.theme-sms .service-sms-btn {
+  border-color: rgba(2,132,199,.35) !important;
+  background: rgba(240,249,255,.95) !important;
+}
+
+.theme-sms .service-sms-btn .service-btn-icon {
+  background: rgba(224,242,254,.85) !important;
+}
+
+.theme-sms .service-sms-btn .service-btn-text strong {
+  color: #0284c7 !important;
+}
+
+.theme-sms .stat:after {
+  background: radial-gradient(circle,rgba(56,189,248,.2),transparent 70%) !important;
+}
+
+.theme-sms .stat span {
+  color: #0284c7 !important;
+  background: rgba(2,132,199,.09) !important;
+}
+
+.theme-sms .badge.success {
+  color: #0369a1 !important;
+  background: rgba(14,165,233,.12) !important;
+  border-color: rgba(14,165,233,.24) !important;
+}
+
+.theme-sms .input:focus,
+.theme-sms .select:focus,
+.theme-sms .textarea:focus {
+  border-color: rgba(2,132,199,.45) !important;
+  box-shadow: 0 0 0 3px rgba(2,132,199,.12) !important;
+}
+
+.theme-sms .table tr:hover td {
+  background: rgba(14,165,233,.045) !important;
+}
+
+.theme-sms .icon-btn:hover {
+  border-color: rgba(2,132,199,.32) !important;
+  color: #0284c7 !important;
+}
+
+.theme-sms .sidebar-collapse-btn:hover {
+  background: #0284c7 !important;
+  border-color: #0284c7 !important;
+  box-shadow: 0 4px 14px rgba(2,132,199,.38) !important;
+}
+
+

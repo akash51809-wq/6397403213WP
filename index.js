@@ -1,9 +1,11 @@
 const {
     default: makeWASocket,
     DisconnectReason,
-    downloadMediaMessage
+    downloadMediaMessage,
+    fetchLatestBaileysVersion,
+    Browsers
 } = require('@whiskeysockets/baileys');
-const { usePgAuthState } = require('./pgAuthState');
+const { usePgAuthState, clearSessionCache } = require('./pgAuthState');
 
 const { Boom } = require('@hapi/boom');
 const qrcodeTerminal = require('qrcode-terminal');
@@ -1267,6 +1269,7 @@ app.post('/api/whatsapp/connect', authRequired, adminRequired, async (req, res) 
 
 async function clearAdminWhatsAppCredentials() {
     try {
+        clearSessionCache('admin');
         const SessionAuth = require('./models/SessionAuth');
         // 1. Delete canonical admin session and Baileys admin creds records
         await SessionAuth.deleteMany({
@@ -3602,12 +3605,18 @@ async function startBot(forceNew = false) {
             }
         }
 
+        const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1043857760] }));
+        console.log(`[Admin WhatsApp] Connecting with Baileys v${version.join('.')} (Ubuntu Chrome fingerprint)`);
+
         const newSock = makeWASocket({
+            version,
             auth: state,
             printQRInTerminal: false,
-            browser: ["Chrome (Windows)", "Desktop", "10.0"],
+            browser: Browsers.ubuntu('Chrome'),
             syncFullHistory: false,
-            keepAliveIntervalMs: 30000,
+            keepAliveIntervalMs: 25000,
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 60000,
             getMessage: async (key) => {
                 const all = getIncomingMessages();
                 const found = all.find(m => m.id === key?.id);
@@ -3627,6 +3636,12 @@ async function startBot(forceNew = false) {
             if (newSock !== sock) return;
 
             const { connection, lastDisconnect, qr } = update;
+            console.log('[Admin WhatsApp] connection.update:', {
+                connection: connection || 'qr-or-intermediate',
+                hasQR: Boolean(qr),
+                statusCode: lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : null,
+                error: lastDisconnect?.error?.message
+            });
 
             if (qr) {
                 // Check if admin phone is already active in user sessions, bridge and suppress QR
@@ -3745,7 +3760,15 @@ async function startBot(forceNew = false) {
             }
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', async () => {
+            console.log('[Admin WhatsApp] creds.update received! Saving credentials to PostgreSQL...');
+            try {
+                await saveCreds();
+                console.log('[Admin WhatsApp] Credentials committed successfully.');
+            } catch (err) {
+                console.error('[Admin WhatsApp] Error during creds.update commit:', err.message);
+            }
+        });
 
         sock.ev.on('messaging-history.set', async ({ chats, contacts, messages }) => {
             try {

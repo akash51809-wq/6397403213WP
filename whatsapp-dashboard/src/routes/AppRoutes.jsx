@@ -21,6 +21,15 @@ import SettingsPage from '../pages/admin/SettingsPage'
 import CampaignsPage from '../pages/campaigns/CampaignsPage'
 import TemplatesPage from '../pages/templates/TemplatesPage'
 import ContactsPage from '../pages/contacts/ContactsPage'
+import ServiceDashboardPage from '../pages/services/ServiceDashboardPage'
+
+// SMS Gateway Pages
+import SmsDashboardPage from '../pages/sms/SmsDashboardPage'
+import SmsDevicesPage from '../pages/sms/SmsDevicesPage'
+import SmsSendPage from '../pages/sms/SmsSendPage'
+import SmsInboxPage from '../pages/sms/SmsInboxPage'
+import SmsWebhookPage from '../pages/sms/SmsWebhookPage'
+import SmsReportsPage from '../pages/sms/SmsReportsPage'
 
 function ProtectedRoute({ children }) {
   const { login } = useAuth()
@@ -101,6 +110,25 @@ export default function AppRoutes() {
 
         {/* User Pricing & Subscription */}
         <Route path="subscription" element={<UserPlansPage />} />
+
+        {/* Mobile SMS Gateway Routes */}
+        <Route path="sms" element={<Navigate to="/sms/dashboard" replace />} />
+        <Route path="sms/dashboard" element={<SmsDashboardPage />} />
+        <Route path="sms/devices" element={<SmsDevicesPage />} />
+        <Route path="sms/send" element={<SmsSendPage />} />
+        <Route path="sms/inbox" element={<SmsInboxPage />} />
+        <Route path="sms/webhook" element={<SmsWebhookPage />} />
+        <Route path="sms/reports" element={<SmsReportsPage />} />
+
+        {/* Additional Service Hub Dashboards */}
+        <Route path="services/mobile-sms" element={<Navigate to="/sms/dashboard" replace />} />
+        <Route path="mobile-sms" element={<Navigate to="/sms/dashboard" replace />} />
+
+        <Route path="services/plan-api" element={<ServiceDashboardPage service="plan-api" />} />
+        <Route path="plan-api" element={<Navigate to="/services/plan-api" replace />} />
+
+        <Route path="services/gst-api" element={<ServiceDashboardPage service="gst-api" />} />
+        <Route path="gst-api" element={<Navigate to="/services/gst-api" replace />} />
 
         {/* Admin Routes - /admin is Dashboard, /admin/users is User Management */}
         <Route 

@@ -37,6 +37,12 @@ Thumbs.db
 # Raw UI template assets & archives
 ADMIN UI/
 /WP-UI-design-main/
+mobile SMS app/
 !frontend design/
 !frontend design/**
 *.zip
+
+# Local SQLite databases & runtime data
+data/
+*.db
+*.db-*

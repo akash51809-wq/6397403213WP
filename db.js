@@ -68,9 +68,9 @@ async function connectPostgres(customUri = null) {
 
   const config = {
     connectionString: connStr,
-    max: Number(process.env.PG_MAX_POOL || 10),
+    max: Number(process.env.PG_MAX_POOL || 25),
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000,
+    connectionTimeoutMillis: 30000,
   };
 
   if (useSSL) {
