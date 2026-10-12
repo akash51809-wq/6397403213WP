@@ -3,7 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 
 export default function GstSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialGstin = searchParams.get('gstin') || '19MAJPS4713H1Z3'
+  const initialGstin = searchParams.get('gstin') || '09AKPPG5665E1ZU'
 
   const [gstinInput, setGstinInput] = useState(initialGstin)
   const [loading, setLoading] = useState(false)
@@ -123,7 +123,7 @@ export default function GstSearchPage() {
           {/* Quick Click Samples */}
           <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: '#6d28d9', fontWeight: 600 }}>Sample GSTINs:</span>
-            {['19MAJPS4713H1Z3', '27AAACR4849R1ZZ', '07AABCS1429B1ZB'].map((s) => (
+            {['09AKPPG5665E1ZU', '19MAJPS4713H1Z3', '27AAACR4849R1ZZ'].map((s) => (
               <button
                 key={s}
                 type="button"

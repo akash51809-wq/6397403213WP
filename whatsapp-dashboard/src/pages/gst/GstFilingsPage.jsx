@@ -5,7 +5,7 @@ const FINANCIAL_YEARS = ['2026-2027', '2025-2026', '2024-2025']
 
 export default function GstFilingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialGstin = searchParams.get('gstin') || '19MAJPS4713H1Z3'
+  const initialGstin = searchParams.get('gstin') || '09AKPPG5665E1ZU'
   const initialYear = searchParams.get('year') || '2026-2027'
 
   const [gstinInput, setGstinInput] = useState(initialGstin)
@@ -127,6 +127,32 @@ export default function GstFilingsPage() {
               ⚠️ {error}
             </div>
           )}
+
+          <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: '#6d28d9', fontWeight: 600 }}>Verified Samples:</span>
+            {['09AKPPG5665E1ZU', '19MAJPS4713H1Z3'].map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  setGstinInput(s)
+                  fetchFilings(s, selectedYear)
+                }}
+                style={{
+                  background: '#f5f3ff',
+                  border: '1px solid #ddd6fe',
+                  color: '#6d28d9',
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

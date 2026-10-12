@@ -2,8 +2,8 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const GSTIN = '19MAJPS4713H1Z3';
-const TARGET_FY = '2026-2027';
+const GSTIN = process.argv[2] || '09AKPPG5665E1ZU';
+const TARGET_FY = process.argv[3] || '2026-2027';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

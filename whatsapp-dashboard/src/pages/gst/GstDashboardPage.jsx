@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 const DEFAULT_SAMPLES = [
+  { gstin: '09AKPPG5665E1ZU', label: '09AKPPG5665E1ZU (Easy Recharge Solution - Uttar Pradesh)', state: 'Uttar Pradesh' },
   { gstin: '19MAJPS4713H1Z3', label: '19MAJPS4713H1Z3 (YE WALLET - West Bengal)', state: 'West Bengal' },
-  { gstin: '27AAACR4849R1ZZ', label: '27AAACR4849R1ZZ (Reliance Retail - Maharashtra)', state: 'Maharashtra' },
-  { gstin: '07AABCS1429B1ZB', label: '07AABCS1429B1ZB (Easy Digital - Delhi)', state: 'Delhi' }
+  { gstin: '27AAACR4849R1ZZ', label: '27AAACR4849R1ZZ (Reliance Retail - Maharashtra)', state: 'Maharashtra' }
 ]
 
 export default function GstDashboardPage() {

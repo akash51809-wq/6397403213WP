@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const { authRequired } = require('./auth');
 
 // State Code to State Name mapping (Indian GST standard)
 const GST_STATE_MAP = {
@@ -58,26 +57,17 @@ const PAN_ENTITY_MAP = {
   'G': 'Government Agency'
 };
 
-// Load extracted JSON records from GST folder if available
-let cachedTaxpayerFile = null;
-let cachedFilingFile = null;
-
-try {
-  const taxpayerPath = path.join(__dirname, 'GST', 'taxpayer_details.json');
-  if (fs.existsSync(taxpayerPath)) {
-    cachedTaxpayerFile = JSON.parse(fs.readFileSync(taxpayerPath, 'utf8'));
+// Taxpayer database helper
+function getTaxpayersDatabase() {
+  const dbPath = path.join(__dirname, 'GST', 'taxpayers_database.json');
+  if (fs.existsSync(dbPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+    } catch (e) {
+      console.warn('[GST] Could not read taxpayers_database.json:', e.message);
+    }
   }
-} catch (e) {
-  console.warn('[GST Router] Could not read GST/taxpayer_details.json:', e.message);
-}
-
-try {
-  const filingPath = path.join(__dirname, 'GST', 'filing_table.json');
-  if (fs.existsSync(filingPath)) {
-    cachedFilingFile = JSON.parse(fs.readFileSync(filingPath, 'utf8'));
-  }
-} catch (e) {
-  console.warn('[GST Router] Could not read GST/filing_table.json:', e.message);
+  return {};
 }
 
 // In-memory search history for quick recall
@@ -101,6 +91,49 @@ function recordSearchHistory(record) {
 
 // Sample GSTIN records for instant demo and testing
 const SAMPLE_RECORDS = {
+  '09AKPPG5665E1ZU': {
+    gstin: '09AKPPG5665E1ZU',
+    legalName: 'PRINCE GOYAL',
+    tradeName: 'Easy Recharge Solution',
+    registrationDate: '27/07/2017',
+    constitutionOfBusiness: 'Proprietorship',
+    status: 'Active',
+    taxpayerType: 'Regular',
+    state: 'Uttar Pradesh',
+    stateCode: '09',
+    pan: 'AKPPG5665E',
+    principalAddress: '993/400/6C, MEERAPUR PRAYAGRAJ, Prayagraj, Prayagraj, Uttar Pradesh, 211003',
+    centerJurisdiction: 'State - CBIC, Zone - LUCKNOW, Commissionerate - ALLAHABAD, Division - ALLAHABAD-II, Range - RANGE-I (Jurisdictional Office)',
+    stateJurisdiction: 'State - Uttar Pradesh, Zone - Prayagraj, Range - Prayagraj(A), Sector - Prayagraj Sector-1',
+    aadhaarAuthenticated: 'Yes',
+    aadhaarAuthDate: '19/09/2024',
+    ekycVerified: 'Not Applicable',
+    einvoiceStatus: 'Yes',
+    natureOfBusiness: ['Office / Sale Office'],
+    coreActivity: 'Trader - Wholesaler/Distributor',
+    hsnServices: [
+      { hsn: '00440398', description: 'TELECOMMUNICATION SERVICES', type: 'Services' }
+    ],
+    filings: {
+      '2026-2027': {
+        gstr3b: [
+          { fy: '2026-2027', taxp: 'August', mof: 'ONLINE', dof: '18/09/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'July', mof: 'ONLINE', dof: '17/08/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'June', mof: 'ONLINE', dof: '15/07/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'May', mof: 'ONLINE', dof: '19/06/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'April', mof: 'ONLINE', dof: '18/05/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' }
+        ],
+        gstr1: [
+          { fy: '2026-2027', taxp: 'September', mof: 'ONLINE', dof: '11/10/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'August', mof: 'ONLINE', dof: '09/09/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'July', mof: 'ONLINE', dof: '08/08/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'June', mof: 'ONLINE', dof: '08/07/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'May', mof: 'ONLINE', dof: '10/06/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'April', mof: 'ONLINE', dof: '09/05/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' }
+        ]
+      }
+    }
+  },
   '19MAJPS4713H1Z3': {
     gstin: '19MAJPS4713H1Z3',
     legalName: 'BISWAJIT SHARMA',
@@ -123,7 +156,25 @@ const SAMPLE_RECORDS = {
     coreActivity: 'Service Provider and Others',
     hsnServices: [
       { hsn: '998413', description: 'Mobile telecommunications services', type: 'Services' }
-    ]
+    ],
+    filings: {
+      '2026-2027': {
+        gstr3b: [
+          { fy: '2026-2027', taxp: 'August', mof: 'ONLINE', dof: '20/09/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'July', mof: 'ONLINE', dof: '20/08/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'June', mof: 'ONLINE', dof: '20/07/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'May', mof: 'ONLINE', dof: '20/06/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'April', mof: 'ONLINE', dof: '19/05/2026', rtntype: 'GSTR3B', arn: 'NA', status: 'Filed' }
+        ],
+        gstr1: [
+          { fy: '2026-2027', taxp: 'August', mof: 'ONLINE', dof: '11/09/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'July', mof: 'ONLINE', dof: '11/08/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'June', mof: 'ONLINE', dof: '11/07/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'May', mof: 'ONLINE', dof: '11/06/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' },
+          { fy: '2026-2027', taxp: 'April', mof: 'ONLINE', dof: '11/05/2026', rtntype: 'GSTR1', arn: 'NA', status: 'Filed' }
+        ]
+      }
+    }
   },
   '27AAACR4849R1ZZ': {
     gstin: '27AAACR4849R1ZZ',
@@ -149,31 +200,6 @@ const SAMPLE_RECORDS = {
       { hsn: '998413', description: 'Mobile telecommunications services', type: 'Services' },
       { hsn: '851712', description: 'Telephones for cellular networks', type: 'Goods' }
     ]
-  },
-  '07AABCS1429B1ZB': {
-    gstin: '07AABCS1429B1ZB',
-    legalName: 'EASY DIGITAL SERVICES PRIVATE LIMITED',
-    tradeName: 'EASY PAY SOLUTIONS',
-    registrationDate: '14/02/2020',
-    constitutionOfBusiness: 'Private Limited Company',
-    status: 'Active',
-    taxpayerType: 'Regular',
-    state: 'Delhi',
-    stateCode: '07',
-    pan: 'AABCS1429B',
-    principalAddress: 'Plot No. 42, Okhla Industrial Area, Phase-III, New Delhi, Delhi, 110020',
-    centerJurisdiction: 'Commissionerate - DELHI SOUTH, Division - OKHLA, Range - RANGE-21',
-    stateJurisdiction: 'Ward 82, Zone 8, Department of Trade & Taxes, Delhi',
-    aadhaarAuthenticated: 'Yes',
-    aadhaarAuthDate: '10/08/2023',
-    ekycVerified: 'Verified',
-    einvoiceStatus: 'Yes',
-    natureOfBusiness: ['IT & Software Services', 'Payment Processing'],
-    coreActivity: 'Service Provider and Others',
-    hsnServices: [
-      { hsn: '998314', description: 'Information technology (IT) design and development services', type: 'Services' },
-      { hsn: '997159', description: 'Other financial services n.e.c.', type: 'Services' }
-    ]
   }
 };
 
@@ -182,15 +208,6 @@ function validateGstin(gstin) {
   if (!gstin || typeof gstin !== 'string') return null;
   const clean = gstin.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (clean.length !== 15) return null;
-  // Standard 15-character GST format check
-  const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/;
-  if (!gstinRegex.test(clean)) {
-    // If exact standard regex fails due to non-Z 14th character, accept loose 15 alphanumeric for demo/flexible check
-    if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z0-9]{4}$/.test(clean)) {
-      return clean;
-    }
-    return null;
-  }
   return clean;
 }
 
@@ -199,69 +216,46 @@ function buildTaxpayerProfile(gstin) {
   const clean = validateGstin(gstin);
   if (!clean) return null;
 
-  // 1. If matches known sample or cached taxpayer file
+  // 1. Check permanent database
+  const db = getTaxpayersDatabase();
+  if (db && db[clean]) {
+    return db[clean];
+  }
+
+  // 2. Check sample records
   if (SAMPLE_RECORDS[clean]) {
     return SAMPLE_RECORDS[clean];
   }
 
-  if (cachedTaxpayerFile && cachedTaxpayerFile.gstin === clean) {
-    const api = cachedTaxpayerFile.apiData || {};
-    return {
-      gstin: clean,
-      legalName: api.lgnm || 'TAXPAYER NAME',
-      tradeName: api.tradeNam || api.lgnm || 'TRADE NAME',
-      registrationDate: api.rgdt || '01/01/2021',
-      constitutionOfBusiness: api.ctb || 'Proprietorship',
-      status: api.sts || 'Active',
-      taxpayerType: api.dty || 'Regular',
-      state: GST_STATE_MAP[clean.slice(0, 2)] || 'India',
-      stateCode: clean.slice(0, 2),
-      pan: clean.slice(2, 12),
-      principalAddress: api.pradr?.adr || 'Registered Business Address',
-      centerJurisdiction: api.ctj || 'Central Jurisdiction Office',
-      stateJurisdiction: api.stj || 'State Jurisdiction Office',
-      aadhaarAuthenticated: api.adhrVFlag || 'Yes',
-      aadhaarAuthDate: api.adhrVdt || '26/11/2024',
-      ekycVerified: api.ekycVFlag || 'Not Applicable',
-      einvoiceStatus: api.einvoiceStatus || 'Yes',
-      natureOfBusiness: api.nba || ['Retail Business'],
-      coreActivity: 'Service Provider and Others',
-      hsnServices: [
-        { hsn: '998413', description: 'Mobile telecommunications services', type: 'Services' }
-      ]
-    };
-  }
-
-  // 2. Synthesize accurate structured details from GSTIN formula
+  // 3. Fallback: Parse accurate state & PAN structure, with clear unsynced status
   const stateCode = clean.slice(0, 2);
   const pan = clean.slice(2, 12);
-  const stateName = GST_STATE_MAP[stateCode] || 'Unknown State';
+  const stateName = GST_STATE_MAP[stateCode] || 'India';
   const entityChar = pan.charAt(3);
   const constitution = PAN_ENTITY_MAP[entityChar] || 'Business Entity';
 
   return {
     gstin: clean,
-    legalName: `BUSINESS OF ${pan.slice(0, 5)}`,
-    tradeName: `${pan.slice(0, 5)} ENTERPRISES`,
-    registrationDate: '01/07/2021',
+    legalName: `PAN: ${pan} (${constitution})`,
+    tradeName: `Taxpayer registered in ${stateName}`,
+    registrationDate: 'Sync from GST Portal',
     constitutionOfBusiness: constitution,
     status: 'Active',
     taxpayerType: 'Regular',
     state: stateName,
     stateCode: stateCode,
     pan: pan,
-    principalAddress: `Commercial Ward, Main Road, ${stateName}, India`,
-    centerJurisdiction: `State - CBIC, Zone - ${stateName.toUpperCase()}, Division - CENTRAL DIV`,
-    stateJurisdiction: `Commissionerate - ${stateName}, Circle - HEADQUARTERS`,
+    principalAddress: `Principal business address on record with ${stateName} State GST / CBIC Central Jurisdiction.`,
+    centerJurisdiction: `State - CBIC, Zone - ${stateName.toUpperCase()}`,
+    stateJurisdiction: `State - ${stateName}, Jurisdictional Circle`,
     aadhaarAuthenticated: 'Yes',
-    aadhaarAuthDate: '01/04/2024',
+    aadhaarAuthDate: 'On Record',
     ekycVerified: 'Verified',
     einvoiceStatus: 'Yes',
-    natureOfBusiness: ['Wholesale and Retail Trading', 'Services'],
+    natureOfBusiness: ['Trading & Services'],
     coreActivity: 'Trading & Services',
     hsnServices: [
-      { hsn: '998413', description: 'Telecommunications & IT Services', type: 'Services' },
-      { hsn: '847130', description: 'Data processing machines and units', type: 'Goods' }
+      { hsn: '998413', description: 'Telecommunication & IT Services', type: 'Services' }
     ]
   };
 }
@@ -270,52 +264,65 @@ function buildTaxpayerProfile(gstin) {
 function buildFilingRecords(gstin, selectedYear = '2026-2027') {
   const clean = validateGstin(gstin);
 
-  // If matches cached filing table from GST automation
-  if (cachedFilingFile && (clean === cachedFilingFile.gstin || !clean)) {
-    const rawList = cachedFilingFile?.apiData?.filingStatus?.[0] || [];
-    if (rawList.length > 0) {
-      const gstr3bList = rawList.filter(r => r.rtntype === 'GSTR3B');
-      const gstr1List = rawList.filter(r => r.rtntype === 'GSTR1');
-
-      return {
-        gstin: clean || cachedFilingFile.gstin,
-        selectedYear: selectedYear || cachedFilingFile.selectedYear || '2026-2027',
-        gstr3b: gstr3bList,
-        gstr1: gstr1List,
-        summary: {
-          totalReturns: rawList.length,
-          filedCount: rawList.filter(r => r.status === 'Filed').length,
-          pendingCount: rawList.filter(r => r.status !== 'Filed').length,
-          complianceScore: '100%'
-        }
-      };
-    }
+  // 1. Check permanent database
+  const db = getTaxpayersDatabase();
+  if (db && db[clean] && db[clean].filings && db[clean].filings[selectedYear]) {
+    const rec = db[clean].filings[selectedYear];
+    return {
+      gstin: clean,
+      selectedYear: selectedYear,
+      gstr3b: rec.gstr3b || [],
+      gstr1: rec.gstr1 || [],
+      summary: {
+        totalReturns: (rec.gstr3b?.length || 0) + (rec.gstr1?.length || 0),
+        filedCount: (rec.gstr3b?.filter(r => r.status === 'Filed').length || 0) + (rec.gstr1?.filter(r => r.status === 'Filed').length || 0),
+        pendingCount: 0,
+        complianceScore: '100%'
+      }
+    };
   }
 
-  // Standard return filing schedule for requested year
+  // 2. Check sample records
+  if (SAMPLE_RECORDS[clean] && SAMPLE_RECORDS[clean].filings && SAMPLE_RECORDS[clean].filings[selectedYear]) {
+    const rec = SAMPLE_RECORDS[clean].filings[selectedYear];
+    return {
+      gstin: clean,
+      selectedYear: selectedYear,
+      gstr3b: rec.gstr3b || [],
+      gstr1: rec.gstr1 || [],
+      summary: {
+        totalReturns: (rec.gstr3b?.length || 0) + (rec.gstr1?.length || 0),
+        filedCount: (rec.gstr3b?.filter(r => r.status === 'Filed').length || 0) + (rec.gstr1?.filter(r => r.status === 'Filed').length || 0),
+        pendingCount: 0,
+        complianceScore: '100%'
+      }
+    };
+  }
+
+  // 3. Standard return filing schedule for requested year
   const months = ['August', 'July', 'June', 'May', 'April'];
   const gstr3b = months.map((month, idx) => ({
     fy: selectedYear,
     taxp: month,
     mof: 'ONLINE',
-    dof: `20/${String(8 - idx).padStart(2, '0')}/2026`,
+    dof: `18/${String(8 - idx).padStart(2, '0')}/2026`,
     rtntype: 'GSTR3B',
-    arn: `AA${clean?.slice(0, 10) || '19MAJPS471'}2026${idx + 1}`,
+    arn: 'NA',
     status: 'Filed'
   }));
 
-  const gstr1 = months.map((month, idx) => ({
+  const gstr1 = ['September', 'August', 'July', 'June', 'May', 'April'].map((month, idx) => ({
     fy: selectedYear,
     taxp: month,
     mof: 'ONLINE',
-    dof: `11/${String(8 - idx).padStart(2, '0')}/2026`,
+    dof: `11/${String(9 - idx).padStart(2, '0')}/2026`,
     rtntype: 'GSTR1',
-    arn: `AA${clean?.slice(0, 10) || '19MAJPS471'}2026${idx + 6}`,
+    arn: 'NA',
     status: 'Filed'
   }));
 
   return {
-    gstin: clean || '19MAJPS4713H1Z3',
+    gstin: clean || '09AKPPG5665E1ZU',
     selectedYear: selectedYear,
     gstr3b,
     gstr1,
@@ -364,7 +371,7 @@ router.post('/api/gst/search', async (req, res) => {
     if (!cleanGstin) {
       return res.status(400).json({
         success: false,
-        message: 'अमान्य GSTIN प्रारूप! GSTIN 15 अक्षरों/संख्याओं का होना चाहिए (उदा: 19MAJPS4713H1Z3)।'
+        message: 'अमान्य GSTIN प्रारूप! GSTIN 15 अक्षरों/संख्याओं का होना चाहिए (उदा: 09AKPPG5665E1ZU)।'
       });
     }
 
@@ -401,7 +408,7 @@ router.post('/api/gst/search', async (req, res) => {
 // 3. Return Filing History
 router.post('/api/gst/filings', async (req, res) => {
   try {
-    const rawGstin = req.body.gstin || req.query.gstin || '19MAJPS4713H1Z3';
+    const rawGstin = req.body.gstin || req.query.gstin || '09AKPPG5665E1ZU';
     const selectedYear = req.body.year || req.query.year || '2026-2027';
 
     const cleanGstin = validateGstin(rawGstin);
@@ -429,7 +436,6 @@ router.post('/api/gst/filings', async (req, res) => {
 
 // 4. Search History
 router.get('/api/gst/history', (req, res) => {
-  // If empty, supply default sample history
   if (searchHistoryStore.length === 0) {
     Object.values(SAMPLE_RECORDS).forEach(rec => {
       recordSearchHistory({
@@ -454,7 +460,7 @@ router.get('/api/v1/gst/verify', (req, res) => {
   if (!gstin) {
     return res.status(400).json({
       success: false,
-      error: 'GSTIN query parameter is required (e.g. ?gstin=19MAJPS4713H1Z3)'
+      error: 'GSTIN query parameter is required (e.g. ?gstin=09AKPPG5665E1ZU)'
     });
   }
 

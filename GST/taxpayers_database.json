@@ -1,0 +1,99 @@
+{
+  "09AKPPG5665E1ZU": {
+    "gstin": "09AKPPG5665E1ZU",
+    "legalName": "PRINCE GOYAL",
+    "tradeName": "Easy Recharge Solution",
+    "registrationDate": "27/07/2017",
+    "constitutionOfBusiness": "Proprietorship",
+    "status": "Active",
+    "taxpayerType": "Regular",
+    "state": "Uttar Pradesh",
+    "stateCode": "09",
+    "pan": "AKPPG5665E",
+    "principalAddress": "993/400/6C, MEERAPUR PRAYAGRAJ, Prayagraj, Prayagraj, Uttar Pradesh, 211003",
+    "centerJurisdiction": "State - CBIC, Zone - LUCKNOW, Commissionerate - ALLAHABAD, Division - ALLAHABAD-II, Range - RANGE-I (Jurisdictional Office)",
+    "stateJurisdiction": "State - Uttar Pradesh, Zone - Prayagraj, Range - Prayagraj(A), Sector - Prayagraj Sector-1",
+    "aadhaarAuthenticated": "Yes",
+    "aadhaarAuthDate": "19/09/2024",
+    "ekycVerified": "Not Applicable",
+    "einvoiceStatus": "Yes",
+    "natureOfBusiness": [
+      "Office / Sale Office"
+    ],
+    "coreActivity": "Trader - Wholesaler/Distributor",
+    "hsnServices": [
+      {
+        "hsn": "00440398",
+        "description": "TELECOMMUNICATION SERVICES",
+        "type": "Services"
+      }
+    ],
+    "filings": {
+      "2026-2027": {
+        "gstr3b": [
+          { "fy": "2026-2027", "taxp": "August", "mof": "ONLINE", "dof": "18/09/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "July", "mof": "ONLINE", "dof": "17/08/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "June", "mof": "ONLINE", "dof": "15/07/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "May", "mof": "ONLINE", "dof": "19/06/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "April", "mof": "ONLINE", "dof": "18/05/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" }
+        ],
+        "gstr1": [
+          { "fy": "2026-2027", "taxp": "September", "mof": "ONLINE", "dof": "11/10/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "August", "mof": "ONLINE", "dof": "09/09/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "July", "mof": "ONLINE", "dof": "08/08/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "June", "mof": "ONLINE", "dof": "08/07/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "May", "mof": "ONLINE", "dof": "10/06/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "April", "mof": "ONLINE", "dof": "09/05/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" }
+        ]
+      }
+    }
+  },
+  "19MAJPS4713H1Z3": {
+    "gstin": "19MAJPS4713H1Z3",
+    "legalName": "BISWAJIT SHARMA",
+    "tradeName": "YE WALLET",
+    "registrationDate": "08/05/2022",
+    "constitutionOfBusiness": "Proprietorship",
+    "status": "Active",
+    "taxpayerType": "Regular",
+    "state": "West Bengal",
+    "stateCode": "19",
+    "pan": "MAJPS4713H",
+    "principalAddress": "1/109, Rasulpur Kuchut Road, Chak Nara Bus Stop, SKPARA, Ulara, Purba Bardhaman, West Bengal, 713151",
+    "centerJurisdiction": "State - CBIC, Zone - KOLKATA, Commissionerate - BOLPUR, Division - BARDHAMAN DIVISION, Range - RANGE-III (Jurisdictional Office)",
+    "stateJurisdiction": "Commissionerate - West Bengal, Circle - DURGAPORE, Charge - BARDHAMAN",
+    "aadhaarAuthenticated": "Yes",
+    "aadhaarAuthDate": "26/11/2024",
+    "ekycVerified": "Not Applicable",
+    "einvoiceStatus": "Yes",
+    "natureOfBusiness": [
+      "Retail Business"
+    ],
+    "coreActivity": "Service Provider and Others",
+    "hsnServices": [
+      {
+        "hsn": "998413",
+        "description": "Mobile telecommunications services",
+        "type": "Services"
+      }
+    ],
+    "filings": {
+      "2026-2027": {
+        "gstr3b": [
+          { "fy": "2026-2027", "taxp": "August", "mof": "ONLINE", "dof": "20/09/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "July", "mof": "ONLINE", "dof": "20/08/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "June", "mof": "ONLINE", "dof": "20/07/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "May", "mof": "ONLINE", "dof": "20/06/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "April", "mof": "ONLINE", "dof": "19/05/2026", "rtntype": "GSTR3B", "arn": "NA", "status": "Filed" }
+        ],
+        "gstr1": [
+          { "fy": "2026-2027", "taxp": "August", "mof": "ONLINE", "dof": "11/09/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "July", "mof": "ONLINE", "dof": "11/08/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "June", "mof": "ONLINE", "dof": "11/07/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "May", "mof": "ONLINE", "dof": "11/06/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" },
+          { "fy": "2026-2027", "taxp": "April", "mof": "ONLINE", "dof": "11/05/2026", "rtntype": "GSTR1", "arn": "NA", "status": "Filed" }
+        ]
+      }
+    }
+  }
+}
