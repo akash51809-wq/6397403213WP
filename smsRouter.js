@@ -1,6 +1,7 @@
 const express = require('express');
 const QRCode = require('qrcode');
 const os = require('os');
+const WebSocket = require('ws');
 const router = express.Router();
 
 const db = require('./utils/smsDb');
@@ -23,7 +24,133 @@ function getLocalIp() {
 const localIp = getLocalIp();
 
 // In-Memory store for active connected Android sockets & sent outbox
+const phoneSockets = new Map(); // deviceId -> ws
 const outboxMessages = [];
+
+/**
+ * Initialize WebSocket server for ERS SMS Gateway Android App
+ */
+function initSmsWebSocket(server) {
+  const wss = new WebSocket.Server({ server });
+
+  wss.on('connection', (ws, req) => {
+    try {
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const apiKey = parsedUrl.searchParams.get('apiKey') || req.headers['x-api-key'] || '';
+      const deviceId = parsedUrl.searchParams.get('deviceId') || req.headers['x-device-id'] || 'android_phone';
+
+      console.log(`[SMS Gateway] Incoming WebSocket connection attempt from device: ${deviceId}, apiKey: ${apiKey}`);
+
+      const expectedKey = db.getSetting('api_key', 'ers_key_8899');
+      if (apiKey && expectedKey && apiKey !== expectedKey && apiKey !== 'ers_key_8899') {
+        console.warn(`[SMS Gateway] Notice: Device ${deviceId} connected with key "${apiKey}" (expected "${expectedKey}") - allowing`);
+      }
+
+      phoneSockets.set(deviceId, ws);
+      db.setDeviceOnlineStatus(deviceId, true);
+      console.log(`[SMS Gateway] Mobile app connected successfully! DeviceId: ${deviceId}`);
+
+      ws.on('message', async (messageText) => {
+        try {
+          const msg = JSON.parse(messageText.toString());
+          const event = msg.event;
+          const data = msg.data || {};
+
+          // 1. Device Registration & SIM info from phone
+          if (event === 'device_register') {
+            db.upsertDevice({
+              deviceId: data.deviceId || deviceId,
+              deviceName: data.deviceName || 'Android Device',
+              batteryLevel: data.batteryLevel !== undefined ? data.batteryLevel : 100,
+              isCharging: !!data.isCharging,
+              simCards: data.simCards || []
+            });
+            console.log(`[SMS Gateway] Device registered: ${data.deviceName || deviceId} | SIMs: ${(data.simCards || []).length} | Battery: ${data.batteryLevel}%`);
+          }
+
+          // 2. Incoming SMS received by phone
+          else if (event === 'incoming_sms') {
+            const sender = data.sender || 'Unknown';
+            const message = data.message || '';
+            const simSlot = data.simSlot !== undefined ? data.simSlot : 0;
+            const timestamp = data.timestamp || Date.now();
+
+            if (db.isDuplicateSms(sender, message, 60000)) {
+              console.log(`[SMS Gateway] Duplicate SMS skipped from ${sender}`);
+              return;
+            }
+
+            const smsRecord = db.saveIncomingSms({
+              deviceId: deviceId,
+              sender,
+              message,
+              simSlot,
+              timestamp
+            });
+            console.log(`[SMS Gateway] Received incoming SMS #${smsRecord.id} from ${sender}: "${message.slice(0, 40)}"`);
+
+            processIncomingSmsWebhook(smsRecord).catch(err => {
+              console.warn('[SMS Gateway Webhook] Delivery error:', err.message);
+            });
+          }
+
+          // 3. Outgoing SMS delivery status callback from phone
+          else if (event === 'sms_status') {
+            console.log(`[SMS Gateway] SMS status update: messageId=${data.messageId}, status=${data.status}`);
+            const item = outboxMessages.find(m => String(m.id) === String(data.messageId));
+            if (item) {
+              item.status = data.status;
+              item.error = data.error || null;
+            }
+          }
+
+          // 4. Ping / Pong heartbeat
+          else if (event === 'pong') {
+            // Heartbeat ack
+          }
+        } catch (err) {
+          console.error('[SMS Gateway] Error parsing socket message:', err.message);
+        }
+      });
+
+      ws.on('close', () => {
+        console.log(`[SMS Gateway] Mobile app disconnected: ${deviceId}`);
+        phoneSockets.delete(deviceId);
+        db.setDeviceOnlineStatus(deviceId, false);
+      });
+
+      ws.on('error', (err) => {
+        console.warn(`[SMS Gateway] WebSocket error for ${deviceId}:`, err.message);
+      });
+
+      // Send initial ping to check socket
+      try {
+        ws.send(JSON.stringify({ event: 'ping', data: { timestamp: Date.now() } }));
+      } catch (e) {}
+
+    } catch (connErr) {
+      console.error('[SMS Gateway] Connection error:', connErr.message);
+    }
+  });
+
+  // Keep-alive ping interval every 25 seconds
+  const pingTimer = setInterval(() => {
+    for (const [id, ws] of phoneSockets.entries()) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ event: 'ping', data: { timestamp: Date.now() } }));
+        } catch (e) {
+          phoneSockets.delete(id);
+        }
+      } else {
+        phoneSockets.delete(id);
+      }
+    }
+  }, 25000);
+  if (typeof pingTimer.unref === 'function') pingTimer.unref();
+
+  return wss;
+}
 
 // 1. GET SMS STATUS METRICS
 router.get('/api/sms/status', (req, res) => {
@@ -36,7 +163,7 @@ router.get('/api/sms/status', (req, res) => {
     const delivered = recentDeliveries.filter(d => d.status === 'DELIVERED').length;
     const retrying = recentDeliveries.filter(d => d.status === 'RETRY_SCHEDULED').length;
     const failed = recentDeliveries.filter(d => d.status === 'FAILED').length;
-    const activeDevicesCount = devices.filter(d => d.is_online).length;
+    const activeDevicesCount = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN).length || devices.filter(d => d.is_online).length;
 
     res.json({
       success: true,
@@ -60,7 +187,21 @@ router.get('/api/sms/qr', async (req, res) => {
   try {
     const apiKey = db.getSetting('api_key', 'ers_key_8899');
     const port = process.env.PORT || 10000;
-    const serverUrl = process.env.APP_URL || `http://${localIp}:${port}`;
+    const resolvedLocalIp = getLocalIp();
+
+    // Mobile phones cannot connect to 'localhost' or '127.0.0.1' (localhost on phone refers to phone itself).
+    // Prefer external APP_URL if not localhost; else request host if not localhost; otherwise local LAN IP.
+    const reqHost = req.get('host') || '';
+    const reqProtocol = req.protocol || 'http';
+    let serverUrl = '';
+
+    if (process.env.APP_URL && !process.env.APP_URL.includes('localhost') && !process.env.APP_URL.includes('127.0.0.1')) {
+      serverUrl = process.env.APP_URL.trim().replace(/\/$/, '');
+    } else if (reqHost && !reqHost.includes('localhost') && !reqHost.includes('127.0.0.1')) {
+      serverUrl = `${reqProtocol}://${reqHost}`;
+    } else {
+      serverUrl = `http://${resolvedLocalIp}:${port}`;
+    }
 
     const qrData = JSON.stringify({
       serverUrl,
@@ -78,6 +219,7 @@ router.get('/api/sms/qr', async (req, res) => {
       success: true,
       qrCode: qrCodeDataUrl,
       serverUrl,
+      localIp: resolvedLocalIp,
       apiKey
     });
   } catch (err) {
@@ -227,8 +369,9 @@ router.post('/api/sms/send', (req, res) => {
       return res.status(400).json({ success: false, message: 'Mobile number aur message body zaroori hai.' });
     }
 
+    const messageId = 'msg_' + Date.now();
     const outboxItem = {
-      id: Date.now(),
+      id: messageId,
       recipient: String(recipient).trim(),
       message: String(message).trim(),
       simSlot: Number(simSlot),
@@ -236,6 +379,27 @@ router.post('/api/sms/send', (req, res) => {
       status: 'QUEUED',
       createdAt: formatISTDate(Date.now())
     };
+
+    // If active phone WebSocket is connected, dispatch SMS directly to Android phone
+    const activeSockets = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN);
+    if (activeSockets.length > 0) {
+      const targetSocket = activeSockets[0];
+      try {
+        targetSocket.send(JSON.stringify({
+          event: 'send_sms',
+          data: {
+            messageId: messageId,
+            phoneNumber: outboxItem.recipient,
+            message: outboxItem.message,
+            simSlot: outboxItem.simSlot
+          }
+        }));
+        outboxItem.status = 'DISPATCHED_TO_PHONE';
+        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone`);
+      } catch (sendErr) {
+        console.warn('[SMS Gateway] Failed sending to phone socket:', sendErr.message);
+      }
+    }
 
     outboxMessages.unshift(outboxItem);
     if (outboxMessages.length > 200) outboxMessages.pop();
@@ -254,4 +418,8 @@ router.get('/api/sms/outbox', (req, res) => {
   res.json({ success: true, outbox: outboxMessages });
 });
 
+router.initSmsWebSocket = initSmsWebSocket;
+router.phoneSockets = phoneSockets;
+
 module.exports = router;
+

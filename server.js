@@ -420,8 +420,20 @@ async function startServer() {
       console.warn('[Server] Media sync warning:', mediaSyncErr.message);
     }
 
-    app.listen(PORT, '0.0.0.0', () => {
+    const serverInstance = app.listen(PORT, '0.0.0.0', () => {
       console.log(`Unified Server running and listening on 0.0.0.0:${PORT}`);
+
+      // Attach SMS WebSocket Gateway for Android Mobile App
+      try {
+        const smsRouterMod = require('./smsRouter');
+        if (typeof smsRouterMod.initSmsWebSocket === 'function') {
+          smsRouterMod.initSmsWebSocket(serverInstance);
+          console.log(`[SMS Gateway] WebSocket server mounted on port ${PORT}`);
+        }
+      } catch (wsErr) {
+        console.warn('[SMS Gateway] WebSocket mount warning:', wsErr.message);
+      }
+
       if (botStartup) {
         try { botStartup(); } catch (err) { console.error('WhatsApp bot startup failed:', err); }
       }
