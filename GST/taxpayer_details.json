@@ -1,0 +1,32 @@
+{
+  "gstin": "19MAJPS4713H1Z3",
+  "apiData": {
+    "ntcrbs": "SPO",
+    "adhrVFlag": "Yes",
+    "lgnm": "BISWAJIT SHARMA",
+    "stj": "Commissionerate - West Bengal,Circle - DURGAPORE,Charge - BARDHAMAN",
+    "dty": "Regular",
+    "cxdt": "",
+    "gstin": "19MAJPS4713H1Z3",
+    "nba": [
+      "Retail Business"
+    ],
+    "ekycVFlag": "Not Applicable",
+    "cmpRt": "NA",
+    "rgdt": "08/05/2022",
+    "ctb": "Proprietorship",
+    "pradr": {
+      "adr": "1/109, Rasulpur Kuchut Road, Chak Nara Bus Stop, SKPARA, Ulara, Purba Bardhaman, West Bengal, 713151"
+    },
+    "sts": "Active",
+    "tradeNam": "YE WALLET",
+    "isFieldVisitConducted": "No",
+    "adhrVdt": "26/11/2024",
+    "ctj": "State - CBIC,Zone - KOLKATA,Commissionerate - BOLPUR,Division - BARDHAMAN DIVISION,Range - RANGE-III (Jurisdictional Office)",
+    "einvoiceStatus": "Yes"
+  },
+  "onScreenData": {
+    "Goods": "Services",
+    "_fullText": "Search Result based on GSTIN/UIN : 19MAJPS4713H1Z3\n\nLegal Name of Business\n\nBISWAJIT SHARMA\n\nTrade Name\n\nYE WALLET\n\nEffective Date of registration\n\n08/05/2022\n\nConstitution of Business\n\nProprietorship\n\nGSTIN / UIN Status\n\nActive\n\nTaxpayer Type \n\nRegular\n\nAdministrative Office\n\n(JURISDICTION - CENTER)\nState - CBIC\nZone - KOLKATA\nCommissionerate - BOLPUR\nDivision - BARDHAMAN DIVISION\nRange - RANGE-III\n\nOther Office\n\n(JURISDICTION - STATE)\nCommissionerate - West Bengal\nCircle - DURGAPORE\nCharge - BARDHAMAN\n\nPrincipal Place of Business\n\n1/109, Rasulpur Kuchut Road, Chak Nara Bus Stop, SKPARA, Ulara, Purba Bardhaman, West Bengal, 713151\n\nWhether Aadhaar Authenticated?\n\nYes\n\n(On 26/11/2024)\n\nWhether e-KYC Verified?\n\nNot Applicable\n\nAdditional Trade Name\n\nView\n\nNature Of Core Business Activity\n\nService Provider and Others\n\nNature of Business Activities\n\n1. Retail Business\nDealing In Goods and Services\nGoods\tServices\nHSN\tDescription\tHSN\tDescription\n\t\t998413\tMobile telecommunications services\n\nHSN: Harmonized System of Nomenclature of Goods and Services\n\nSHOW FILING TABLE\nSHOW RETURN FILING FREQUENCY"
+  }
+}

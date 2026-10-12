@@ -18,6 +18,7 @@ export function Sidebar() {
   const isReportsActive = location.pathname.startsWith('/report') || location.pathname === '/msg-report'
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
   const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
+  const isGstActive = location.pathname.startsWith('/gst') || location.pathname.startsWith('/services/gst')
   const [reportsOpen, setReportsOpen] = useState(true)
   const closeMobile = () => setSidebarOpen(false)
 
@@ -89,6 +90,14 @@ export function Sidebar() {
             <div>
               <strong>Plan API</strong>
               <small>Recharge & Info</small>
+            </div>
+          </NavLink>
+        ) : isGstActive ? (
+          <NavLink className="brand" to="/gst/dashboard" onClick={closeMobile} data-title="GST Verification Portal">
+            <span className="brand-mark" style={{ background: 'linear-gradient(145deg, #a855f7, #7c3aed)', color: '#fff' }}>🏛️</span>
+            <div>
+              <strong>GST Portal</strong>
+              <small>Taxpayer & Filings</small>
             </div>
           </NavLink>
         ) : (
@@ -271,6 +280,47 @@ export function Sidebar() {
               data-title="Buy API Hits"
             >
               <span>💎</span><b>Buy Hits</b>
+            </NavLink>
+          </>
+        ) : isGstActive ? (
+          /* =========================================================
+             GST PORTAL NAVIGATION (4 FOCUSED USER MENUS)
+             ========================================================= */
+          <>
+            <NavLink 
+              to="/gst/dashboard" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="GST Dashboard"
+            >
+              <span>⌂</span><b>Dashboard</b>
+            </NavLink>
+
+            <NavLink 
+              to="/gst/search" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Taxpayer Search"
+            >
+              <span>🔍</span><b>Taxpayer Search</b>
+            </NavLink>
+
+            <NavLink 
+              to="/gst/filings" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Return Filings"
+            >
+              <span>📊</span><b>Return Filings</b>
+            </NavLink>
+
+            <NavLink 
+              to="/gst/api-docs" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="GST API Docs"
+            >
+              <span>🔑</span><b>GST API Docs</b>
             </NavLink>
           </>
         ) : (
@@ -517,6 +567,22 @@ export function Sidebar() {
             <strong style={{ color: '#431407' }}>Plan API Active</strong>
             <small style={{ color: '#c2410c' }}>
               {planStats?.remainingHits !== undefined ? `${planStats.remainingHits} Hits Remaining` : '100 Hits Free'}
+            </small>
+          </div>
+        </div>
+      ) : isGstActive ? (
+        <div className="sidebar-status" data-title="GST Verification Portal">
+          <span 
+            className="dot dot-gst" 
+            style={{ 
+              backgroundColor: '#8b5cf6',
+              boxShadow: '0 0 10px rgba(139,92,246,.75)'
+            }}
+          ></span>
+          <div>
+            <strong style={{ color: '#3b0764' }}>GST Portal Active</strong>
+            <small style={{ color: '#6d28d9' }}>
+              Portal Sync Verified
             </small>
           </div>
         </div>

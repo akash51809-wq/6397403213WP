@@ -47,15 +47,20 @@ const pageMeta = {
   '/plans/pricing': { title: 'Buy API Hits', eyebrow: 'PRICING & HITS' },
   '/services/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
   '/plan-api': { title: 'Plan API', eyebrow: 'RECHARGE & PLANS' },
-  '/services/gst-api': { title: 'GST API', eyebrow: 'TAX & VERIFICATION' },
-  '/gst-api': { title: 'GST API', eyebrow: 'TAX & VERIFICATION' }
+  '/gst': { title: 'GST Dashboard', eyebrow: 'GST PORTAL' },
+  '/gst/dashboard': { title: 'GST Dashboard', eyebrow: 'GST PORTAL' },
+  '/gst/search': { title: 'Taxpayer Search', eyebrow: 'GSTIN LOOKUP' },
+  '/gst/filings': { title: 'Return Filings', eyebrow: 'GSTR-1 & GSTR-3B' },
+  '/gst/api-docs': { title: 'GST API Docs', eyebrow: 'DEVELOPER API' },
+  '/services/gst-api': { title: 'GST Portal', eyebrow: 'TAX & VERIFICATION' },
+  '/gst-api': { title: 'GST Portal', eyebrow: 'TAX & VERIFICATION' }
 }
 
 const servicesList = [
   { id: 'whatsapp', name: 'WhatsApp', path: '/dashboard', icon: '💬', badge: 'Active', desc: 'WhatsApp Automation' },
   { id: 'mobile-sms', name: 'Mobile SMS', path: '/sms/dashboard', icon: '📱', badge: 'New', desc: 'SMS & OTP Service' },
   { id: 'plan-api', name: 'Plan API', path: '/plans/dashboard', icon: '⚡', badge: 'New', desc: 'Recharge & Plans' },
-  { id: 'gst-api', name: 'GST API', path: '/services/gst-api', icon: '🏛️', badge: 'New', desc: 'GST Verification' }
+  { id: 'gst', name: 'GST', path: '/gst/dashboard', icon: '🏛️', badge: 'New', desc: 'Taxpayer & Return Filings' }
 ]
 
 export function Navbar() {
@@ -81,6 +86,7 @@ export function Navbar() {
 
   const isSmsActive = location.pathname.startsWith('/sms') || location.pathname.startsWith('/services/mobile-sms')
   const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
+  const isGstActive = location.pathname.startsWith('/gst') || location.pathname.startsWith('/services/gst')
 
   // Determine active service from current route
   let activeService = servicesList[0] // Default WhatsApp
@@ -88,7 +94,7 @@ export function Navbar() {
     activeService = servicesList[1]
   } else if (isPlanApiActive) {
     activeService = servicesList[2]
-  } else if (location.pathname.includes('gst-api')) {
+  } else if (isGstActive) {
     activeService = servicesList[3]
   }
 
@@ -131,7 +137,7 @@ export function Navbar() {
         <div className="service-dropdown-wrapper" ref={serviceMenuRef}>
           <button
             type="button"
-            className={`service-select-btn ${isSmsActive ? 'service-sms-btn' : ''}`}
+            className={`service-select-btn ${isSmsActive ? 'service-sms-btn' : ''} ${isGstActive ? 'service-gst-btn' : ''}`}
             onClick={() => setServiceMenuOpen(!serviceMenuOpen)}
             title="Switch Service"
             aria-expanded={serviceMenuOpen}

@@ -25,6 +25,8 @@ whatsapp-dashboard/dist/
 !whatsapp-dashboard/package.json
 !whatsapp-dashboard/package-lock.json
 !whatsapp-dashboard/.oxlintrc.json
+!GST/*.json
+!GST/package.json
 
 # Logs & temp
 *.log

@@ -71,7 +71,7 @@ test('Architectural & Security Enhancements Verification', async (t) => {
             plan: 'basic',
             planExpiresAt: new Date(Date.now() + 86400000).toISOString(),
             dailyMessageCount: 4,
-            dailyCountDate: '2026-10-05',
+            dailyCountDate: new Date().toISOString().slice(0, 10),
             save: async function() { return this; }
         };
         // Mock Plan model in auth

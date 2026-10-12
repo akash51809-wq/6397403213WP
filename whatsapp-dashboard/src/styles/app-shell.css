@@ -765,5 +765,123 @@ body:has(.theme-plan-api) {
   box-shadow: 0 4px 14px rgba(234,88,12,.38) !important;
 }
 
+/* =========================================================
+   GST PORTAL THEME (LIGHT PURPLE SHADE)
+========================================================= */
+.theme-gst {
+  --cyan: #8b5cf6;
+  --violet: #7c3aed;
+  --green: #7c3aed;
+  --text: #3b0764;
+}
+
+body:has(.theme-gst) {
+  background: radial-gradient(circle at 85% 5%,rgba(139,92,246,.12),transparent 24%),radial-gradient(circle at 12% 82%,rgba(167,139,250,.14),transparent 24%),radial-gradient(circle at 65% 60%,rgba(124,58,237,.08),transparent 25%),linear-gradient(135deg,#fcfaff,#f5f3ff 55%,#ede9fe) !important;
+}
+
+.theme-gst .brand-mark {
+  background: linear-gradient(145deg,#a855f7,#7c3aed) !important;
+  box-shadow: 0 8px 18px rgba(124,58,237,.25) !important;
+}
+
+.theme-gst .nav a:hover {
+  color: #6d28d9 !important;
+  background: rgba(139,92,246,.08) !important;
+  border-color: rgba(139,92,246,.16) !important;
+}
+
+.theme-gst .nav a.active {
+  color: #fff !important;
+  background: linear-gradient(145deg,#a855f7,#7c3aed) !important;
+  border-color: rgba(109,40,217,.32) !important;
+  box-shadow: 0 7px 0 #5b21b6,0 15px 25px rgba(124,58,237,.22),inset 0 1px rgba(255,255,255,.45) !important;
+}
+
+.theme-gst .nav a.active span,
+.theme-gst .nav a.active b {
+  color: #fff !important;
+}
+
+.theme-gst .btn.primary {
+  background: linear-gradient(145deg,#a855f7,#7c3aed) !important;
+  border-color: #7c3aed !important;
+  box-shadow: 0 6px 0 #5b21b6,0 14px 24px rgba(124,58,237,.24),inset 0 1px rgba(255,255,255,.4) !important;
+  color: #fff !important;
+}
+
+.theme-gst .btn.primary:hover {
+  background: linear-gradient(145deg,#9333ea,#6d28d9) !important;
+}
+
+.theme-gst .topbar-title small,
+.theme-gst .eyebrow {
+  color: #7c3aed !important;
+}
+
+.theme-gst .sidebar-status {
+  border-color: rgba(124,58,237,.2) !important;
+  background: rgba(237,233,254,.45) !important;
+}
+
+.theme-gst .sidebar-status strong {
+  color: #3b0764 !important;
+}
+
+.theme-gst .dot.dot-gst {
+  background: #8b5cf6 !important;
+  box-shadow: 0 0 10px rgba(139,92,246,.75) !important;
+}
+
+.theme-gst .stat:after {
+  background: radial-gradient(circle,rgba(167,139,250,.2),transparent 70%) !important;
+}
+
+.theme-gst .stat span {
+  color: #7c3aed !important;
+  background: rgba(139,92,246,.1) !important;
+}
+
+.theme-gst .badge.success {
+  color: #6d28d9 !important;
+  background: rgba(167,139,250,.16) !important;
+  border-color: rgba(139,92,246,.26) !important;
+}
+
+.theme-gst .input:focus,
+.theme-gst .select:focus,
+.theme-gst .textarea:focus {
+  border-color: rgba(124,58,237,.45) !important;
+  box-shadow: 0 0 0 3px rgba(139,92,246,.12) !important;
+}
+
+.theme-gst .table tr:hover td {
+  background: rgba(139,92,246,.04) !important;
+}
+
+.theme-gst .icon-btn:hover {
+  border-color: rgba(124,58,237,.32) !important;
+  color: #7c3aed !important;
+}
+
+.theme-gst .sidebar-collapse-btn:hover {
+  background: #7c3aed !important;
+  border-color: #7c3aed !important;
+  box-shadow: 0 4px 14px rgba(124,58,237,.38) !important;
+}
+
+.theme-gst .service-gst-btn {
+  border-color: rgba(124,58,237,.35) !important;
+  background: rgba(245,243,255,.95) !important;
+}
+
+.theme-gst .service-gst-btn .service-btn-icon {
+  background: rgba(237,233,254,.85) !important;
+}
+
+.theme-gst .service-gst-btn .service-btn-text strong {
+  color: #7c3aed !important;
+}
+
+
 
 

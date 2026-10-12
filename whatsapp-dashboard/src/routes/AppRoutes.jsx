@@ -41,6 +41,12 @@ import PlanRechargePage from '../pages/plan/PlanRechargePage'
 import PlanApiDocsPage from '../pages/plan/PlanApiDocsPage'
 import PlanPricingPage from '../pages/plan/PlanPricingPage'
 
+// GST Verification Pages
+import GstDashboardPage from '../pages/gst/GstDashboardPage'
+import GstSearchPage from '../pages/gst/GstSearchPage'
+import GstFilingsPage from '../pages/gst/GstFilingsPage'
+import GstApiDocsPage from '../pages/gst/GstApiDocsPage'
+
 function ProtectedRoute({ children }) {
   const { login } = useAuth()
   if (!login) {
@@ -148,8 +154,16 @@ export default function AppRoutes() {
         <Route path="services/plan-api" element={<Navigate to="/plans/dashboard" replace />} />
         <Route path="plan-api" element={<Navigate to="/plans/dashboard" replace />} />
 
-        <Route path="services/gst-api" element={<ServiceDashboardPage service="gst-api" />} />
-        <Route path="gst-api" element={<Navigate to="/services/gst-api" replace />} />
+        {/* GST Portal Routes */}
+        <Route path="gst" element={<Navigate to="/gst/dashboard" replace />} />
+        <Route path="gst/dashboard" element={<GstDashboardPage />} />
+        <Route path="gst/search" element={<GstSearchPage />} />
+        <Route path="gst/filings" element={<GstFilingsPage />} />
+        <Route path="gst/api-docs" element={<GstApiDocsPage />} />
+
+        <Route path="services/gst" element={<Navigate to="/gst/dashboard" replace />} />
+        <Route path="services/gst-api" element={<Navigate to="/gst/dashboard" replace />} />
+        <Route path="gst-api" element={<Navigate to="/gst/dashboard" replace />} />
 
         {/* Admin Routes - /admin is Dashboard, /admin/users is User Management */}
         <Route 
