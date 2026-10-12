@@ -105,8 +105,8 @@ export function PaymentDetailsModal({ plan, onClose, onSuccess, notify }) {
                 </div>
               </div>
               <div className="d-flex flex-wrap gap-2 text-muted" style={{ gap: 12, fontSize: 12, borderTop: '1px solid var(--zd-border, rgba(0,0,0,0.05))', paddingTop: 8 }}>
-                <div>✓ <strong>Daily:</strong> {plan.dailyLimit}</div>
-                <div>✓ <strong>Devices:</strong> {plan.deviceLimit}</div>
+                {plan.dailyLimit && <div>✓ <strong>Limit:</strong> {plan.dailyLimit}</div>}
+                {plan.deviceLimit && <div>✓ <strong>Access:</strong> {plan.deviceLimit}</div>}
                 {plan.apiAccess && <div>✓ <strong>API Access</strong></div>}
                 {plan.groupOption && <div>✓ <strong>Group Sending</strong></div>}
               </div>

@@ -3,6 +3,271 @@ import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import PaymentDetailsModal from '../../components/modals/PaymentDetailsModal'
 
+const SERVICES = [
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp',
+    icon: '💬',
+    color: '#10b981',
+    lightBg: 'rgba(16, 185, 129, 0.1)',
+    desc: 'High speed WhatsApp automation, Baileys connection, bulk campaigns & group tools'
+  },
+  {
+    id: 'sms',
+    label: 'SMS Gateway',
+    icon: '📱',
+    color: '#0284c7',
+    lightBg: 'rgba(2, 132, 199, 0.1)',
+    desc: 'Turn Android devices into dedicated SMS gateways with Dual-SIM routing & fast OTP'
+  },
+  {
+    id: 'plan',
+    label: 'Plan API',
+    icon: '⚡',
+    color: '#ea580c',
+    lightBg: 'rgba(234, 88, 12, 0.1)',
+    desc: 'Live prepaid/postpaid recharge plans, special R-offers & DTH operator tariff API'
+  },
+  {
+    id: 'gst',
+    label: 'GST Portal',
+    icon: '🏛️',
+    color: '#7c3aed',
+    lightBg: 'rgba(124, 58, 237, 0.1)',
+    desc: 'Instant GSTIN verification, legal profile, GSTR-1 & 3B return history & e-Invoice status'
+  }
+]
+
+const DEFAULT_PLANS = {
+  whatsapp: [
+    {
+      planId: 'plan_startup',
+      name: 'Startup',
+      price: '99',
+      validity: '30 Days',
+      dailyLimit: '500/Day',
+      deviceLimit: '1 Free + 1 Add-on',
+      badgeText: 'Basic',
+      description: 'Send messages to contacts only. Ideal for single business numbers.',
+      features: [
+        '500 Messages / Day Quota',
+        '1 Device Free (+1 Add-on ₹49)',
+        'WhatsApp Web & REST API Access',
+        'Single Contact Direct Messaging',
+        'Validity: 30 Days'
+      ]
+    },
+    {
+      planId: 'plan_business',
+      name: 'Business',
+      price: '149',
+      validity: '30 Days',
+      dailyLimit: '1,000/Day',
+      deviceLimit: '1 Free + 2 Add-ons',
+      badgeText: '⭐ Most Popular',
+      isPopular: true,
+      description: 'Send messages to contacts and groups. Includes bulk campaigns.',
+      features: [
+        '1,000 Messages / Day Quota',
+        '1 Device Free (+2 Add-ons ₹49/ea)',
+        'Bulk Broadcast Campaigns',
+        'Group Messaging Option Included',
+        'Schedule Messages & Fast Queue',
+        'Validity: 30 Days'
+      ]
+    },
+    {
+      planId: 'plan_enterprise',
+      name: 'Enterprise',
+      price: '199',
+      validity: '30 Days',
+      dailyLimit: '2,000/Day',
+      deviceLimit: '1 Free + 4 Add-ons',
+      badgeText: 'Full Suite',
+      description: 'High volume automation with received message webhooks and IP security.',
+      features: [
+        '2,000 Messages / Day Quota',
+        '1 Device Free (+4 Add-ons ₹49/ea)',
+        'Full Webhook & Inbound Triggering',
+        'Bulk Campaigns & Group Sender',
+        'IP Security & Dedicated Queue',
+        'Validity: 30 Days'
+      ]
+    }
+  ],
+  sms: [
+    {
+      planId: 'plan_sms_starter',
+      name: 'Starter SMS',
+      price: '99',
+      validity: '30 Days',
+      dailyLimit: '1,000 SMS / Day',
+      deviceLimit: '1 Android Device',
+      badgeText: 'Basic',
+      description: 'Turn your Android phone into an SMS gateway for OTP and single alerts.',
+      features: [
+        '1,000 SMS / Day Quota',
+        '1 Android Mobile Linked',
+        'Dual SIM Routing Support',
+        'Instant HTTP / REST API',
+        'Delivery Status Tracking',
+        'Validity: 30 Days'
+      ]
+    },
+    {
+      planId: 'plan_sms_business',
+      name: 'Business Gateway',
+      price: '199',
+      validity: '30 Days',
+      dailyLimit: '5,000 SMS / Day',
+      deviceLimit: '3 Android Devices',
+      badgeText: '⭐ Most Popular',
+      isPopular: true,
+      description: 'High-speed SMS dispatch for e-commerce, OTP verification and stores.',
+      features: [
+        '5,000 SMS / Day Quota',
+        '3 Android Devices Linked',
+        'Multi-SIM Load Balancing',
+        'Real-time Webhook Forwarding',
+        'Auto Retry on Network Failure',
+        'Priority Delivery Dispatch'
+      ]
+    },
+    {
+      planId: 'plan_sms_enterprise',
+      name: 'Enterprise Fleet',
+      price: '399',
+      validity: '30 Days',
+      dailyLimit: '25,000 SMS / Day',
+      deviceLimit: '10 Android Devices',
+      badgeText: 'Bulk Scale',
+      description: 'High capacity multi-device SMS cluster for large customer notification campaigns.',
+      features: [
+        '25,000 SMS / Day Quota',
+        'Up to 10 Android Devices Linked',
+        'Unlimited SIM Auto-Routing',
+        'Sub-second Gateway Dispatch',
+        'Dedicated Webhook Endpoint',
+        '99.9% High Uptime SLA'
+      ]
+    }
+  ],
+  plan: [
+    {
+      planId: 'plan_api_lite',
+      name: 'Developer Lite',
+      price: '149',
+      validity: '30 Days',
+      dailyLimit: '10,000 Hits / Month',
+      deviceLimit: 'Unlimited IP Access',
+      badgeText: 'Lite',
+      description: 'Ideal for developers testing recharge APIs and mobile tariff queries.',
+      features: [
+        '10,000 API Hits / Month',
+        'Jio, Airtel, Vi & BSNL Plans',
+        'All India Telecom Circles',
+        'Standard R-Offer Queries',
+        'Clean JSON REST Endpoints',
+        'Validity: 30 Days'
+      ]
+    },
+    {
+      planId: 'plan_api_pro',
+      name: 'Business Pro',
+      price: '299',
+      validity: '30 Days',
+      dailyLimit: '100,000 Hits / Month',
+      deviceLimit: 'High Concurrency',
+      badgeText: '⚡ Recommended',
+      isPopular: true,
+      description: 'Production plan data engine for recharge portals, mobile apps and fintech.',
+      features: [
+        '100,000 API Hits / Month',
+        'Mobile + DTH Operators Data',
+        'Live Special R-Offer Engine',
+        'Sub-150ms Response SLA',
+        'Real-time Scraping & Cache Sync',
+        'Instant Token Regeneration'
+      ]
+    },
+    {
+      planId: 'plan_api_enterprise',
+      name: 'Enterprise Scale',
+      price: '599',
+      validity: '30 Days',
+      dailyLimit: '1,000,000 Hits / Month',
+      deviceLimit: 'Dedicated Cluster',
+      badgeText: 'High Volume',
+      description: 'Full-throttle high volume access for large telecom recharge networks.',
+      features: [
+        '1,000,000 API Hits / Month',
+        'Complete Mobile, DTH & Datacard',
+        'Deep Live Scraper Engine',
+        '99.99% High Availability SLA',
+        'Dedicated High-Speed Queue',
+        'Priority Technical Support'
+      ]
+    }
+  ],
+  gst: [
+    {
+      planId: 'plan_gst_basic',
+      name: 'Basic GST Check',
+      price: '149',
+      validity: '30 Days',
+      dailyLimit: '500 Lookups / Month',
+      deviceLimit: 'Single User Access',
+      badgeText: 'Starter',
+      description: 'Verify taxpayer registration, trade name and active GST status.',
+      features: [
+        '500 GSTIN Verifications',
+        'Legal Name & Trade Name Check',
+        'Active / Inactive Status Check',
+        'Last 3 Months Filing Status',
+        'Center & State Jurisdiction',
+        'Validity: 30 Days'
+      ]
+    },
+    {
+      planId: 'plan_gst_pro',
+      name: 'Pro Taxpayer Suite',
+      price: '349',
+      validity: '30 Days',
+      dailyLimit: '3,000 Lookups / Month',
+      deviceLimit: 'Multi-User Access',
+      badgeText: '⭐ Most Popular',
+      isPopular: true,
+      description: 'Complete 2-year filing audit, Aadhaar auth and e-invoice status verification.',
+      features: [
+        '3,000 GSTIN Verifications',
+        'Full Legal Profile & Address',
+        'GSTR-1 & 3B 2-Year History Table',
+        'Aadhaar Authentication Status',
+        'e-Invoice Enabled Status Check',
+        'Instant Print & PDF Export'
+      ]
+    },
+    {
+      planId: 'plan_gst_corporate',
+      name: 'Corporate Bulk GST',
+      price: '749',
+      validity: '30 Days',
+      dailyLimit: '15,000 Lookups / Month',
+      deviceLimit: 'API + Web Portal',
+      badgeText: 'Corporate',
+      description: 'High volume GST compliance engine with batch verification and REST API.',
+      features: [
+        '15,000 GSTIN Lookups / Month',
+        'Live Official Portal Scraper Engine',
+        'Complete GSTR-1, 3B, 9 & 9C Tracking',
+        'Batch GSTIN Verification Mode',
+        'Clean JSON REST API Access',
+        'Priority 24/7 Processing Queue'
+      ]
+    }
+  ]
+}
+
 export default function UserPlansPage({ currentUser: propUser, notify: propNotify, isPreview = false }) {
   const { user: authUser, notify: authNotify } = useAuth()
   const currentUser = propUser || authUser
@@ -13,6 +278,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
   const [currentPlan, setCurrentPlan] = useState(currentUser?.plan || 'Standard')
   const [myRequests, setMyRequests] = useState([])
   const [activeTab, setActiveTab] = useState('plans')
+  const [selectedService, setSelectedService] = useState('whatsapp')
   const [selectedPlan, setSelectedPlan] = useState(null)
 
   const fetchPlansData = useCallback(async () => {
@@ -47,35 +313,65 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
     setActiveTab('requests')
   }
 
+  const activeServiceConfig = SERVICES.find(s => s.id === selectedService) || SERVICES[0]
+
+  // Filter admin plans matching current service
+  const serviceAdminPlans = plans.filter(p => {
+    const s = (p.service || 'whatsapp').toLowerCase()
+    return s === selectedService.toLowerCase()
+  })
+
+  // Fallback to compact curated default plans if no admin plans exist for this service yet
+  const displayedPlans = serviceAdminPlans.length > 0 
+    ? serviceAdminPlans 
+    : (DEFAULT_PLANS[selectedService] || [])
+
+  // Helper to extract clean bullet features from any plan
+  const getPlanFeatures = (p) => {
+    if (Array.isArray(p.features) && p.features.length > 0) {
+      return p.features
+    }
+    const f = []
+    if (p.dailyLimit) f.push(`Daily Limit: ${p.dailyLimit}`)
+    if (p.validity) f.push(`Validity: ${p.validity}`)
+    if (p.deviceLimit) f.push(`Device Limit: ${p.deviceLimit}`)
+    if (p.apiAccess) f.push('API & Developer Access Included')
+    if (p.webAccess) f.push('Web Dashboard Access Included')
+    if (p.bulkMsg) f.push('Bulk Message Campaigns')
+    if (p.groupOption) f.push('Group Messaging Option')
+    if (p.scheduleMsg) f.push('Schedule Messages')
+    if (p.ipSecurity) f.push('IP Whitelist Security')
+    return f.length > 0 ? f : ['All Core Features Included', 'Standard Support SLA']
+  }
+
   return (
     <section className="user-plans-page">
       {!isPreview && (
         <>
-          {/* Header & Breadcrumb */}
-          <div className="page-header d-flex flex-wrap align-items-center justify-content-between mb-4">
+          {/* Header & Subtitle */}
+          <div className="page-header d-flex flex-wrap align-items-center justify-content-between mb-3">
             <div>
-              <h1 className="page-title mb-1" style={{ fontSize: 24, fontWeight: 700, color: 'inherit' }}>
+              <h1 className="page-title mb-1" style={{ fontSize: 22, fontWeight: 800, color: 'inherit' }}>
                 💎 Subscription Plans &amp; Pricing
               </h1>
-              <ol className="breadcrumb mb-0" style={{ background: 'transparent', padding: 0, fontSize: 13 }}>
-                <li className="breadcrumb-item text-muted">Portal</li>
-                <li className="breadcrumb-item active text-primary">Pricing Comparison</li>
-              </ol>
+              <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+                Choose the best package for your business across WhatsApp, SMS, Plan API, and GST services.
+              </p>
             </div>
             <div className="d-flex align-items-center gap-2 mt-2 mt-md-0" style={{ gap: 10 }}>
               <button 
                 type="button" 
                 className={`btn ${activeTab === 'plans' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setActiveTab('plans')}
-                style={{ borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13 }}
+                style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 600, fontSize: 13 }}
               >
-                🏷️ Pricing Table
+                🏷️ Pricing Plans
               </button>
               <button 
                 type="button" 
                 className={`btn ${activeTab === 'requests' ? 'btn-primary' : 'btn-outline-primary'}`}
                 onClick={() => setActiveTab('requests')}
-                style={{ borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, position: 'relative' }}
+                style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 600, fontSize: 13, position: 'relative' }}
               >
                 📋 My Purchase Requests
                 {pendingCount > 0 && (
@@ -86,390 +382,264 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
               </button>
             </div>
           </div>
-
-          {/* Current Active Plan Alert Banner */}
-          <div className="card mb-4" style={{ borderRadius: 16, background: 'linear-gradient(135deg, rgba(79,117,242,0.12) 0%, rgba(112,94,200,0.12) 100%)', border: '1px solid rgba(112,94,200,0.2)' }}>
-            <div className="card-body p-3 p-md-4 d-flex flex-wrap align-items-center justify-content-between" style={{ gap: 14 }}>
-              <div className="d-flex align-items-center" style={{ gap: 14 }}>
-                <div style={{ width: 48, height: 48, borderRadius: 12, background: '#705ec8', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>
-                  🌟
-                </div>
-                <div>
-                  <h4 className="mb-1 font-weight-bold" style={{ color: 'inherit' }}>
-                    Your Current Active Plan: <span style={{ color: '#705ec8' }}>{currentPlan}</span>
-                  </h4>
-                  <p className="text-muted mb-0" style={{ fontSize: 13 }}>
-                    Choose any higher plan below to increase daily messaging capacity, add devices, and unlock group &amp; webhook access!
-                  </p>
-                </div>
-              </div>
-              <div>
-                <button 
-                  type="button" 
-                  className="btn btn-outline-primary"
-                  onClick={fetchPlansData}
-                  style={{ borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 600 }}
-                >
-                  ↻ Refresh Status
-                </button>
-              </div>
-            </div>
-          </div>
         </>
       )}
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
           <div className="spinner-border text-primary mb-2" role="status"></div>
-          <div>प्लान लोड हो रहे हैं (Loading pricing table)...</div>
+          <div>प्लान लोड हो रहे हैं (Loading pricing plans)...</div>
         </div>
       ) : activeTab === 'plans' ? (
-        plans.length === 0 ? (
-          <div className="card p-5 text-center" style={{ borderRadius: 16 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🏷️</div>
-            <h3>कोई सक्रिय प्लान उपलब्ध नहीं है</h3>
-            <p className="text-muted">No active subscription plans available at the moment. Please contact the administrator.</p>
+        <>
+          {/* SERVICE SWITCHER TABS - WHATSAPP, SMS, PLAN, GST */}
+          <div className="d-flex align-items-center flex-wrap gap-2 mb-3" style={{ gap: 10 }}>
+            {SERVICES.map((srv) => {
+              const isSelected = selectedService === srv.id
+              return (
+                <button
+                  key={srv.id}
+                  type="button"
+                  onClick={() => setSelectedService(srv.id)}
+                  className="btn"
+                  style={{
+                    borderRadius: 10,
+                    padding: '8px 18px',
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    border: isSelected ? `2px solid ${srv.color}` : '1px solid var(--zd-border, #e2e8f0)',
+                    backgroundColor: isSelected ? srv.lightBg : 'var(--zd-card-bg, #ffffff)',
+                    color: isSelected ? srv.color : 'inherit',
+                    boxShadow: isSelected ? `0 3px 12px ${srv.color}30` : 'none',
+                    transition: 'all 0.18s ease',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{srv.icon}</span>
+                  <span>{srv.label}</span>
+                </button>
+              )
+            })}
           </div>
-        ) : (
-          /* PRICING COMPARISON TABLE - EXACT LAYOUT AS MEDIA SAMPLE */
-          <div className="pricing-comparison-table-wrapper card shadow-sm" style={{ borderRadius: 20, overflow: 'hidden' }}>
-            <div className="table-responsive">
-              <table className="pricing-comparison-table mb-0 w-100">
-                <thead>
-                  <tr>
-                    {/* Left corner empty / title cell */}
-                    <th className="pricing-feature-col-head" style={{ width: '22%', minWidth: 200, padding: '24px 20px', verticalAlign: 'bottom', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--zd-text-muted, #8a98ac)', fontWeight: 700 }}>
-                        Features &amp; Specs
-                      </span>
-                      <h3 style={{ margin: '6px 0 0', fontSize: 18, fontWeight: 800, color: 'inherit' }}>
-                        Compare All Plans
-                      </h3>
-                    </th>
 
-                    {/* Dynamic Plan Header Columns */}
-                    {plans.map((p, idx) => {
-                      const isCurrent = currentPlan?.toLowerCase() === p.name?.toLowerCase()
-                      const headerBg = p.headerColor || (idx === 0 ? '#9bc5ff' : idx === 1 ? '#8fe3c9' : '#d2b4ff')
-                      const isDarkHeader = ['#10b981', '#3b82f6', '#705ec8', '#f77f00', '#4f75f2'].includes(p.headerColor)
-
-                      return (
-                        <th 
-                          key={p.planId || idx} 
-                          className="pricing-plan-header-col" 
-                          style={{ 
-                            width: `${78 / plans.length}%`, 
-                            minWidth: 200, 
-                            padding: 0, 
-                            verticalAlign: 'top',
-                            borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none'
-                          }}
-                        >
-                          <div 
-                            className="plan-header-card text-center"
-                            style={{
-                              backgroundColor: headerBg,
-                              color: isDarkHeader ? '#ffffff' : '#141b47',
-                              padding: '24px 16px 20px',
-                              position: 'relative'
-                            }}
-                          >
-                            {p.badgeText && (
-                              <span 
-                                style={{
-                                  position: 'absolute',
-                                  top: 8,
-                                  right: 12,
-                                  background: 'rgba(0,0,0,0.25)',
-                                  color: '#fff',
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  padding: '2px 8px',
-                                  borderRadius: 999
-                                }}
-                              >
-                                {p.badgeText}
-                              </span>
-                            )}
-
-                            <h2 style={{ fontSize: 24, fontWeight: 900, margin: '0 0 6px', letterSpacing: '-0.02em', color: 'inherit' }}>
-                              {p.name}
-                            </h2>
-
-                            <p style={{ fontSize: 12, margin: '0 0 14px', minHeight: 34, opacity: 0.9, lineHeight: 1.3, color: 'inherit' }}>
-                              {p.description || 'WhatsApp Automation Plan'}
-                            </p>
-
-                            {/* Price Pill */}
-                            <div className="d-flex justify-content-center mb-3">
-                              <span 
-                                className="price-pill-banner"
-                                style={{
-                                  background: isDarkHeader ? 'rgba(0,0,0,0.3)' : '#1e3a8a',
-                                  color: '#ffffff',
-                                  fontSize: 17,
-                                  fontWeight: 800,
-                                  padding: '6px 22px',
-                                  borderRadius: 999,
-                                  display: 'inline-block',
-                                  boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
-                                }}
-                              >
-                                INR {p.price}
-                              </span>
-                            </div>
-
-                            {/* Buy Now Button in Header */}
-                            <div>
-                              {isCurrent ? (
-                                <button 
-                                  type="button" 
-                                  className="btn btn-sm"
-                                  disabled
-                                  style={{
-                                    background: 'rgba(255,255,255,0.7)',
-                                    color: '#0f172a',
-                                    fontWeight: 800,
-                                    borderRadius: 999,
-                                    padding: '7px 24px',
-                                    border: 'none',
-                                    fontSize: 13
-                                  }}
-                                >
-                                  ✓ Current Plan
-                                </button>
-                              ) : (
-                                <button 
-                                  type="button" 
-                                  className="btn-buy-plan-pill"
-                                  onClick={() => handleOpenPurchase(p)}
-                                  style={{
-                                    background: isDarkHeader ? '#ffffff' : '#1e3a8a',
-                                    color: isDarkHeader ? '#141b47' : '#ffffff',
-                                    fontWeight: 800,
-                                    borderRadius: 999,
-                                    padding: '8px 26px',
-                                    border: 'none',
-                                    fontSize: 14,
-                                    cursor: 'pointer',
-                                    boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                >
-                                  Buy Now
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </th>
-                      )
-                    })}
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {/* Row 1: Daily msg limit */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      1. Daily Message Limit
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        <span className="plan-check-pill">
-                          <span className="check-icon-circle">✓</span> {p.dailyLimit}
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 2: Validity */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      2. Validity
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        <span className="plan-check-pill">
-                          <span className="check-icon-circle">✓</span> {p.validity}
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 3: Device limit */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      3. Device Limit
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        <span className="plan-check-pill">
-                          <span className="check-icon-circle">✓</span> {p.deviceLimit}
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 4: Device Add-on Price */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      4. Extra Device Add-on
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        <span className="plan-addon-pill">
-                          <span className="plus-icon-circle">+</span> ₹49 / device
-                        </span>
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 5: API Access */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      5. API Access
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.apiAccess ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 6: Web access for send msg */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      6. Web Access for Send Msg
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.webAccess ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 7: Send bulk msg */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      7. Send Bulk Msg
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.bulkMsg ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 8: Group option */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      8. Group Option
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.groupOption ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 9: Send schedule msg */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      9. Send Schedule Msg
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.scheduleMsg ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Row 10: IP security */}
-                  <tr className="pricing-spec-row">
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '16px 20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      10. IP Security
-                    </td>
-                    {plans.map((p, idx) => (
-                      <td key={p.planId || idx} className="text-center" style={{ padding: '14px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                        {p.ipSecurity ? (
-                          <span className="plan-check-pill">
-                            <span className="check-icon-circle">✓</span> Included
-                          </span>
-                        ) : (
-                          <span className="plan-cross-pill">✕ Not Included</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Bottom Action Row with duplicate Buy Now buttons */}
-                  <tr className="pricing-spec-row" style={{ background: 'var(--zd-border-subtle, rgba(0,0,0,0.02))' }}>
-                    <td className="pricing-spec-label font-weight-bold" style={{ padding: '20px', borderRight: '1px solid var(--zd-border, #eef2f6)' }}>
-                      Ready to get started?
-                    </td>
-                    {plans.map((p, idx) => {
-                      const isCurrent = currentPlan?.toLowerCase() === p.name?.toLowerCase()
-                      return (
-                        <td key={p.planId || idx} className="text-center" style={{ padding: '20px 12px', borderRight: idx < plans.length - 1 ? '1px solid var(--zd-border, #eef2f6)' : 'none' }}>
-                          {isCurrent ? (
-                            <span className="badge badge-success-light" style={{ padding: '8px 18px', fontSize: 13, borderRadius: 20 }}>
-                              ✓ Active Plan
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              onClick={() => handleOpenPurchase(p)}
-                              style={{ borderRadius: 999, padding: '7px 22px', fontSize: 13, fontWeight: 700 }}
-                            >
-                              Buy {p.name}
-                            </button>
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                </tbody>
-              </table>
+          {/* Current Active Plan Status Banner (Compact) */}
+          <div 
+            className="card mb-3" 
+            style={{ 
+              borderRadius: 12, 
+              background: `linear-gradient(135deg, ${activeServiceConfig.lightBg} 0%, rgba(255,255,255,0.02) 100%)`, 
+              border: `1px solid ${activeServiceConfig.color}40`,
+              padding: '12px 18px'
+            }}
+          >
+            <div className="d-flex flex-wrap align-items-center justify-content-between" style={{ gap: 12 }}>
+              <div className="d-flex align-items-center" style={{ gap: 12 }}>
+                <div 
+                  style={{ 
+                    width: 36, 
+                    height: 36, 
+                    borderRadius: 10, 
+                    background: activeServiceConfig.color, 
+                    color: '#fff', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    fontSize: 18, 
+                    flexShrink: 0 
+                  }}
+                >
+                  {activeServiceConfig.icon}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: 'inherit' }}>
+                    {activeServiceConfig.label} Service • Active Plan: <span style={{ color: activeServiceConfig.color }}>{currentPlan}</span>
+                  </div>
+                  <div className="text-muted" style={{ fontSize: 12 }}>
+                    {activeServiceConfig.desc}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <button 
+                  type="button" 
+                  className="btn btn-sm btn-outline-secondary"
+                  onClick={fetchPlansData}
+                  style={{ borderRadius: 8, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}
+                >
+                  ↻ Refresh
+                </button>
+              </div>
             </div>
           </div>
-        )
+
+          {/* COMPACT PRICING CARDS GRID */}
+          <div 
+            className="pricing-cards-grid mb-4"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: 16,
+              maxWidth: 1240
+            }}
+          >
+            {displayedPlans.map((plan, idx) => {
+              const isCurrent = currentPlan?.toLowerCase() === plan.name?.toLowerCase()
+              const isPopular = plan.isPopular || plan.badgeText?.toLowerCase().includes('popular') || plan.badgeText?.toLowerCase().includes('recommended')
+              const features = getPlanFeatures(plan)
+
+              return (
+                <div
+                  key={plan.planId || idx}
+                  className="pricing-card card h-100"
+                  style={{
+                    borderRadius: 14,
+                    border: isPopular ? `2px solid ${activeServiceConfig.color}` : '1px solid var(--zd-border, #e2e8f0)',
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: isPopular ? `0 6px 18px ${activeServiceConfig.color}22` : '0 2px 6px rgba(0,0,0,0.03)',
+                    transition: 'all 0.2s ease',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {/* Top Badge (if any) */}
+                  {plan.badgeText && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 10,
+                        right: 12,
+                        background: isPopular ? activeServiceConfig.color : 'rgba(0,0,0,0.08)',
+                        color: isPopular ? '#ffffff' : 'inherit',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em'
+                      }}
+                    >
+                      {plan.badgeText}
+                    </div>
+                  )}
+
+                  <div className="card-body p-3 p-md-4" style={{ flexGrow: 1 }}>
+                    {/* Card Header: Service Icon + Plan Name */}
+                    <div className="d-flex align-items-center mb-1" style={{ gap: 8 }}>
+                      <span style={{ fontSize: 16 }}>{activeServiceConfig.icon}</span>
+                      <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0, color: 'inherit' }}>
+                        {plan.name}
+                      </h3>
+                    </div>
+
+                    <p className="text-muted mb-3" style={{ fontSize: 12, minHeight: 32, lineHeight: 1.35 }}>
+                      {plan.description || `${activeServiceConfig.label} Subscription Plan`}
+                    </p>
+
+                    {/* Compact Price Pill */}
+                    <div
+                      style={{
+                        background: activeServiceConfig.lightBg,
+                        padding: '9px 12px',
+                        borderRadius: 10,
+                        marginBottom: 14,
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 22, fontWeight: 900, color: activeServiceConfig.color }}>
+                          ₹{plan.price}
+                        </span>
+                        <span className="text-muted" style={{ fontSize: 11.5, marginLeft: 4 }}>
+                          / {plan.validity || '30 Days'}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: activeServiceConfig.color }}>
+                        Instant Activation
+                      </span>
+                    </div>
+
+                    {/* Compact Features List */}
+                    <div style={{ borderTop: '1px solid var(--zd-border, #eef2f6)', paddingTop: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--zd-text-muted, #8a98ac)', letterSpacing: '0.04em', marginBottom: 8 }}>
+                        Plan Features &amp; Quotas:
+                      </div>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 12, lineHeight: 1.35 }}>
+                        {features.map((f, fIdx) => (
+                          <li key={fIdx} className="d-flex align-items-center mb-2" style={{ gap: 7 }}>
+                            <span
+                              style={{
+                                width: 16,
+                                height: 16,
+                                borderRadius: '50%',
+                                background: `${activeServiceConfig.color}20`,
+                                color: activeServiceConfig.color,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 9.5,
+                                fontWeight: 900,
+                                flexShrink: 0
+                              }}
+                            >
+                              ✓
+                            </span>
+                            <span style={{ color: 'inherit' }}>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Card Action Button (Footer) */}
+                  <div className="card-footer p-3 pt-0" style={{ background: 'transparent', borderTop: 'none' }}>
+                    {isCurrent ? (
+                      <button
+                        type="button"
+                        className="btn btn-outline-success w-100"
+                        disabled
+                        style={{ borderRadius: 8, fontWeight: 700, fontSize: 12.5, height: 36 }}
+                      >
+                        ✓ Current Active Plan
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn w-100"
+                        onClick={() => handleOpenPurchase(plan)}
+                        style={{
+                          backgroundColor: activeServiceConfig.color,
+                          borderColor: activeServiceConfig.color,
+                          color: '#ffffff',
+                          borderRadius: 8,
+                          fontWeight: 700,
+                          fontSize: 12.5,
+                          height: 36,
+                          boxShadow: `0 3px 10px ${activeServiceConfig.color}35`,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Buy {plan.name}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
       ) : (
         /* MY PURCHASE REQUESTS TAB */
-        <div className="card shadow-sm" style={{ borderRadius: 16 }}>
-          <div className="card-header d-flex align-items-center justify-content-between" style={{ padding: '16px 20px', borderBottom: '1px solid var(--zd-border, rgba(0,0,0,0.06))' }}>
+        <div className="card shadow-sm" style={{ borderRadius: 14 }}>
+          <div className="card-header d-flex align-items-center justify-content-between" style={{ padding: '14px 18px', borderBottom: '1px solid var(--zd-border, rgba(0,0,0,0.06))' }}>
             <div>
-              <h5 className="card-title mb-0" style={{ fontSize: 16, fontWeight: 700 }}>
+              <h5 className="card-title mb-0" style={{ fontSize: 15, fontWeight: 700 }}>
                 📋 My Subscription Purchase History
               </h5>
               <small className="text-muted">Track all your submitted plan purchase payments and activation statuses.</small>
@@ -486,8 +656,8 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
 
           <div className="card-body p-0">
             {myRequests.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>💳</div>
+              <div style={{ textAlign: 'center', padding: '50px 20px' }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>💳</div>
                 <h4>आपने अभी तक कोई पेमेंट रिक्वेस्ट नहीं भेजी है</h4>
                 <p className="text-muted mb-3">You haven't submitted any plan purchase requests yet.</p>
                 <button type="button" className="btn btn-primary" onClick={() => setActiveTab('plans')}>
@@ -518,15 +688,15 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                           </span>
                         </td>
                         <td>
-                          <strong style={{ fontSize: 14 }}>{req.planName}</strong>
+                          <strong style={{ fontSize: 13.5 }}>{req.planName}</strong>
                         </td>
                         <td>
-                          <span style={{ fontSize: 15, fontWeight: 700, color: '#10b981' }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: '#10b981' }}>
                             ₹{req.amount}
                           </span>
                         </td>
                         <td>
-                          <span style={{ fontSize: 13 }}>{req.paymentDate}</span>
+                          <span style={{ fontSize: 12.5 }}>{req.paymentDate}</span>
                         </td>
                         <td>
                           <div style={{ fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }} title={req.bankDetails}>
@@ -535,17 +705,17 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
                         </td>
                         <td>
                           {req.status === 'pending' && (
-                            <span className="badge badge-warning" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}>
+                            <span className="badge badge-warning" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
                               ⏳ Pending Review
                             </span>
                           )}
                           {req.status === 'approved' && (
-                            <span className="badge badge-success" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}>
+                            <span className="badge badge-success" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
                               ✓ Activated / Approved
                             </span>
                           )}
                           {req.status === 'rejected' && (
-                            <span className="badge badge-danger" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}>
+                            <span className="badge badge-danger" style={{ fontSize: 10.5, padding: '3px 8px', borderRadius: 999 }}>
                               ✕ Rejected
                             </span>
                           )}
@@ -570,7 +740,7 @@ export default function UserPlansPage({ currentUser: propUser, notify: propNotif
         </div>
       )}
 
-      {/* PAYMENT DETAILS POPUP MODAL (When user clicks Buy Now) */}
+      {/* PAYMENT DETAILS POPUP MODAL (When user clicks Buy Plan) */}
       {selectedPlan && (
         <PaymentDetailsModal 
           plan={selectedPlan}
