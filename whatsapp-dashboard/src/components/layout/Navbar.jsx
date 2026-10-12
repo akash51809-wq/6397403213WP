@@ -187,11 +187,11 @@ export function Navbar() {
           )}
         </div>
 
-        {/* User Profile Card (Shows Mobile / Username & Plan) */}
+        {/* User Profile Card (Shows Mobile / Username & Plan) - Click opens /subscription */}
         <div 
           className="user" 
-          title={`Logged in as ${username}${currentUser?.mobile ? ` (${currentUser.mobile})` : ''} - Plan: ${displayPlan}`}
-          onClick={() => navigate(isAdmin ? '/admin/settings' : '/settings')}
+          title={`User ID: ${displayMobile} · Plan: ${displayPlan} (Click to view Subscription & Plans)`}
+          onClick={() => navigate('/subscription')}
           style={{ cursor: 'pointer' }}
         >
           {status?.profilePicUrl ? (

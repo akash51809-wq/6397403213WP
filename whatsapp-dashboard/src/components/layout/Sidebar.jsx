@@ -481,17 +481,6 @@ export function Sidebar() {
               <span>⚙</span><b>Settings</b>
             </NavLink>
 
-            {!isAdmin && (
-              <NavLink 
-                to="/subscription" 
-                className={({ isActive }) => (isActive ? 'active' : '')} 
-                onClick={closeMobile}
-                data-title="Plans"
-              >
-                <span>◆</span><b>Plans</b>
-              </NavLink>
-            )}
-
             <NavLink 
               to="/api" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
