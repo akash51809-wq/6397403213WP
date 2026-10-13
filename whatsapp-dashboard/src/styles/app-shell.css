@@ -882,6 +882,126 @@ body:has(.theme-gst) {
   color: #7c3aed !important;
 }
 
+/* =========================================================
+   ADMIN PANEL THEME (RED ACCENT THEME)
+========================================================= */
+.theme-admin {
+  --cyan: #dc2626;
+  --violet: #b91c1c;
+  --green: #dc2626;
+  --text: #450a0a;
+  --primary: #dc2626;
+  --primary-hover: #b91c1c;
+}
+
+body:has(.theme-admin) {
+  background: radial-gradient(circle at 85% 5%,rgba(220,38,38,.10),transparent 24%),radial-gradient(circle at 12% 82%,rgba(239,68,68,.12),transparent 24%),radial-gradient(circle at 65% 60%,rgba(185,28,28,.06),transparent 25%),linear-gradient(135deg,#fffbfb,#fff5f5 55%,#fee2e2) !important;
+}
+
+.theme-admin .brand-mark {
+  background: linear-gradient(145deg,#ef4444,#dc2626) !important;
+  box-shadow: 0 8px 18px rgba(220,38,38,.25) !important;
+}
+
+.theme-admin .nav a:hover {
+  color: #b91c1c !important;
+  background: rgba(220,38,38,.07) !important;
+  border-color: rgba(220,38,38,.15) !important;
+}
+
+.theme-admin .nav a.active {
+  color: #fff !important;
+  background: linear-gradient(145deg,#ef4444,#dc2626) !important;
+  border-color: rgba(185,28,28,.32) !important;
+  box-shadow: 0 7px 0 #991b1b,0 15px 25px rgba(220,38,38,.22),inset 0 1px rgba(255,255,255,.45) !important;
+}
+
+.theme-admin .nav a.active span,
+.theme-admin .nav a.active b {
+  color: #fff !important;
+}
+
+.theme-admin .btn.primary,
+.theme-admin .btn-primary {
+  background: linear-gradient(145deg,#ef4444,#dc2626) !important;
+  border-color: #dc2626 !important;
+  box-shadow: 0 6px 0 #991b1b,0 14px 24px rgba(220,38,38,.24),inset 0 1px rgba(255,255,255,.4) !important;
+  color: #fff !important;
+}
+
+.theme-admin .btn.primary:hover,
+.theme-admin .btn-primary:hover {
+  background: linear-gradient(145deg,#dc2626,#b91c1c) !important;
+}
+
+.theme-admin .btn-outline-primary {
+  color: #dc2626 !important;
+  border-color: #dc2626 !important;
+}
+
+.theme-admin .btn-outline-primary:hover {
+  background: #fef2f2 !important;
+  color: #b91c1c !important;
+}
+
+.theme-admin .topbar-title small,
+.theme-admin .eyebrow {
+  color: #dc2626 !important;
+}
+
+.theme-admin .sidebar-status {
+  border-color: rgba(220,38,38,.2) !important;
+  background: rgba(254,226,226,.45) !important;
+}
+
+.theme-admin .sidebar-status strong {
+  color: #450a0a !important;
+}
+
+.theme-admin .stat:after {
+  background: radial-gradient(circle,rgba(239,68,68,.18),transparent 70%) !important;
+}
+
+.theme-admin .stat span {
+  color: #dc2626 !important;
+  background: rgba(220,38,38,.09) !important;
+}
+
+.theme-admin .badge.success {
+  color: #991b1b !important;
+  background: rgba(239,68,68,.14) !important;
+  border-color: rgba(220,38,38,.24) !important;
+}
+
+.theme-admin .input:focus,
+.theme-admin .select:focus,
+.theme-admin .textarea:focus {
+  border-color: rgba(220,38,38,.45) !important;
+  box-shadow: 0 0 0 3px rgba(220,38,38,.12) !important;
+}
+
+.theme-admin .table tr:hover td {
+  background: rgba(220,38,38,.03) !important;
+}
+
+.theme-admin .icon-btn:hover {
+  border-color: rgba(220,38,38,.32) !important;
+  color: #dc2626 !important;
+}
+
+.theme-admin .sidebar-collapse-btn:hover {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  box-shadow: 0 4px 14px rgba(220,38,38,.38) !important;
+}
+
+.theme-admin .settings-subnav a.active {
+  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  border-color: #b91c1c !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, .28) !important;
+}
+
+
 
 
 

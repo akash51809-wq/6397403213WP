@@ -34,6 +34,7 @@ const pageMeta = {
   '/sms/inbox': { title: 'SMS Inbox', eyebrow: 'INCOMING MESSAGES' },
   '/sms/webhook': { title: 'Webhook Settings', eyebrow: 'API INTEGRATION' },
   '/sms/reports': { title: 'Delivery Reports', eyebrow: 'DELIVERY LOGS' },
+  '/sms/api-docs': { title: 'SMS API Docs', eyebrow: 'MOBILE SMS GATEWAY' },
   '/services/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
   '/mobile-sms': { title: 'Mobile SMS', eyebrow: 'SMS GATEWAY' },
   '/plans': { title: 'Plan API Dashboard', eyebrow: 'TELECOM ENGINE' },
@@ -187,38 +188,44 @@ export function Navbar() {
           )}
         </div>
 
-        {/* User Wallet Balance Pill */}
-        <button
-          type="button"
-          className="wallet-pill-btn"
-          title="User Wallet Balance (Click to Top-up / Manage Plans)"
-          onClick={() => navigate('/subscription')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'rgba(16, 185, 129, 0.12)',
-            border: '1px solid rgba(16, 185, 129, 0.35)',
-            color: '#10b981',
-            borderRadius: 20,
-            padding: '6px 14px',
-            fontWeight: 700,
-            fontSize: 13,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-          }}
-        >
-          <span style={{ fontSize: 15 }}>👛</span>
-          <span>₹{(Number(currentUser?.walletBalance || 0)).toFixed(2)}</span>
-        </button>
+        {/* User Wallet Balance Pill (Hidden for Admin) */}
+        {!isAdmin && (
+          <button
+            type="button"
+            className="wallet-pill-btn"
+            title="User Wallet Balance (Click to Top-up / Manage Plans)"
+            onClick={() => navigate('/subscription')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'rgba(16, 185, 129, 0.12)',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              color: '#10b981',
+              borderRadius: 20,
+              padding: '6px 14px',
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            }}
+          >
+            <span style={{ fontSize: 15 }}>👛</span>
+            <span>₹{(Number(currentUser?.walletBalance || 0)).toFixed(2)}</span>
+          </button>
+        )}
 
-        {/* User Profile Card (Shows Mobile / Username & Plan) - Click opens /subscription */}
+        {/* User Profile Card (Shows Mobile / Username & Plan) - Admin has no plan link */}
         <div 
           className="user" 
-          title={`User ID: ${displayMobile} · Plan: ${displayPlan} (Click to view Subscription & Plans)`}
-          onClick={() => navigate('/subscription')}
-          style={{ cursor: 'pointer' }}
+          title={isAdmin ? `Super Admin: ${displayMobile}` : `User ID: ${displayMobile} · Plan: ${displayPlan} (Click to view Subscription & Plans)`}
+          onClick={() => {
+            if (!isAdmin) {
+              navigate('/subscription')
+            }
+          }}
+          style={{ cursor: isAdmin ? 'default' : 'pointer' }}
         >
           {status?.profilePicUrl ? (
             <img 
@@ -232,7 +239,7 @@ export function Navbar() {
           )}
           <div>
             <strong>{displayMobile}</strong>
-            <small>{displayPlan}</small>
+            <small>{isAdmin ? 'Super Admin' : displayPlan}</small>
           </div>
         </div>
 

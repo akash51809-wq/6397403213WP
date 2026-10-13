@@ -103,158 +103,151 @@ export default function AdminPlanRequestsPage({ notify: propNotify }) {
   return (
     <section className="admin-plan-requests-page">
       {/* Page Header */}
-      <div className="page-header d-flex flex-wrap align-items-center justify-content-between mb-4">
+      <div className="d-flex flex-wrap align-items-center justify-content-between mb-3" style={{ gap: 12 }}>
         <div>
-          <h1 className="page-title mb-1" style={{ fontSize: 24, fontWeight: 700, color: 'inherit' }}>
+          <h1 className="page-title m-0" style={{ fontSize: 22, fontWeight: 800 }}>
             💳 Plan Purchase Requests / Daybook
           </h1>
-          <ol className="breadcrumb mb-0" style={{ background: 'transparent', padding: 0, fontSize: 13 }}>
-            <li className="breadcrumb-item text-muted">Admin</li>
-            <li className="breadcrumb-item active text-primary">Purchase Requests &amp; Daybook</li>
-          </ol>
+          <small className="text-muted" style={{ fontSize: 12 }}>
+            Manage and approve user plan subscriptions &amp; wallet top-up requests
+          </small>
         </div>
-        <div className="d-flex align-items-center gap-2 mt-2 mt-md-0">
-          <button 
-            type="button" 
-            className="btn btn-outline-primary"
-            onClick={fetchRequests}
-            disabled={loading}
-            style={{ borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13 }}
-          >
-            ↻ Refresh Requests
-          </button>
-        </div>
+        <button 
+          type="button" 
+          className="btn btn-outline-primary"
+          onClick={fetchRequests}
+          disabled={loading}
+          style={{ borderRadius: 8, padding: '7px 16px', fontWeight: 700, fontSize: 13, height: 38 }}
+        >
+          {loading ? 'Refreshing…' : '↻ Refresh'}
+        </button>
       </div>
 
-      {/* Metric Counters */}
-      <div className="row row-cards mb-4">
-        <div className="col-sm-6 col-lg-3">
-          <div 
-            className="card p-3 cursor-pointer" 
-            style={{ borderRadius: 12, border: statusFilter === 'all' ? '2px solid #4f75f2' : undefined }}
+      {/* Compact Left-to-Right Filters & Search Bar */}
+      <div 
+        className="d-flex flex-wrap align-items-center justify-content-between p-2 mb-3"
+        style={{
+          background: '#ffffff',
+          borderRadius: 12,
+          border: '1px solid #e2e8f0',
+          gap: 12,
+          boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+        }}
+      >
+        {/* Status Filter Chips (Left to Right) */}
+        <div className="d-flex align-items-center gap-2" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
+          <button 
+            type="button"
             onClick={() => setStatusFilter('all')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: statusFilter === 'all' ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+              background: statusFilter === 'all' ? '#eff6ff' : '#ffffff',
+              color: statusFilter === 'all' ? '#1d4ed8' : '#475569',
+              fontWeight: statusFilter === 'all' ? 800 : 600,
+              fontSize: 13,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
           >
-            <div className="d-flex align-items-center">
-              <span className="stamp stamp-md mr-3" style={{ marginRight: 14, fontSize: 20, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: 'rgba(79, 117, 242, 0.12)', color: '#4f75f2' }}>
-                📋
-              </span>
-              <div>
-                <h4 className="m-0 font-weight-bold" style={{ fontSize: 20 }}>{counts.total}</h4>
-                <small className="text-muted">Total Requests</small>
-              </div>
-            </div>
-          </div>
-        </div>
+            <span>📋 All Requests</span>
+            <span style={{ background: statusFilter === 'all' ? '#3b82f6' : '#e2e8f0', color: statusFilter === 'all' ? '#fff' : '#475569', padding: '1px 7px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+              {counts.total}
+            </span>
+          </button>
 
-        <div className="col-sm-6 col-lg-3">
-          <div 
-            className="card p-3 cursor-pointer" 
-            style={{ borderRadius: 12, border: statusFilter === 'pending' ? '2px solid #ffab00' : undefined }}
+          <button 
+            type="button"
             onClick={() => setStatusFilter('pending')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: statusFilter === 'pending' ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+              background: statusFilter === 'pending' ? '#fffbeb' : '#ffffff',
+              color: statusFilter === 'pending' ? '#b45309' : '#475569',
+              fontWeight: statusFilter === 'pending' ? 800 : 600,
+              fontSize: 13,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
           >
-            <div className="d-flex align-items-center">
-              <span className="stamp stamp-md mr-3" style={{ marginRight: 14, fontSize: 20, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: 'rgba(255, 171, 0, 0.14)', color: '#ffab00' }}>
-                ⏳
-              </span>
-              <div>
-                <h4 className="m-0 font-weight-bold" style={{ fontSize: 20, color: counts.pending > 0 ? '#ffab00' : 'inherit' }}>
-                  {counts.pending}
-                </h4>
-                <small className="text-muted">Pending Approvals</small>
-              </div>
-            </div>
-          </div>
-        </div>
+            <span>⏳ Pending</span>
+            <span style={{ background: '#f59e0b', color: '#fff', padding: '1px 7px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+              {counts.pending}
+            </span>
+          </button>
 
-        <div className="col-sm-6 col-lg-3">
-          <div 
-            className="card p-3 cursor-pointer" 
-            style={{ borderRadius: 12, border: statusFilter === 'approved' ? '2px solid #2dce89' : undefined }}
+          <button 
+            type="button"
             onClick={() => setStatusFilter('approved')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: statusFilter === 'approved' ? '2px solid #10b981' : '1px solid #e2e8f0',
+              background: statusFilter === 'approved' ? '#f0fdf4' : '#ffffff',
+              color: statusFilter === 'approved' ? '#047857' : '#475569',
+              fontWeight: statusFilter === 'approved' ? 800 : 600,
+              fontSize: 13,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
           >
-            <div className="d-flex align-items-center">
-              <span className="stamp stamp-md mr-3" style={{ marginRight: 14, fontSize: 20, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: 'rgba(45, 206, 137, 0.12)', color: '#2dce89' }}>
-                ✓
-              </span>
-              <div>
-                <h4 className="m-0 font-weight-bold" style={{ fontSize: 20 }}>{counts.approved}</h4>
-                <small className="text-muted">Approved &amp; Active</small>
-              </div>
-            </div>
-          </div>
+            <span>✓ Approved</span>
+            <span style={{ background: '#10b981', color: '#fff', padding: '1px 7px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+              {counts.approved}
+            </span>
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => setStatusFilter('rejected')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: statusFilter === 'rejected' ? '2px solid #ef4444' : '1px solid #e2e8f0',
+              background: statusFilter === 'rejected' ? '#fef2f2' : '#ffffff',
+              color: statusFilter === 'rejected' ? '#b91c1c' : '#475569',
+              fontWeight: statusFilter === 'rejected' ? 800 : 600,
+              fontSize: 13,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <span>✕ Rejected</span>
+            <span style={{ background: '#ef4444', color: '#fff', padding: '1px 7px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+              {counts.rejected}
+            </span>
+          </button>
         </div>
 
-        <div className="col-sm-6 col-lg-3">
-          <div 
-            className="card p-3 cursor-pointer" 
-            style={{ borderRadius: 12, border: statusFilter === 'rejected' ? '2px solid #f5365c' : undefined }}
-            onClick={() => setStatusFilter('rejected')}
-          >
-            <div className="d-flex align-items-center">
-              <span className="stamp stamp-md mr-3" style={{ marginRight: 14, fontSize: 20, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: 'rgba(245, 54, 92, 0.12)', color: '#f5365c' }}>
-                ✕
-              </span>
-              <div>
-                <h4 className="m-0 font-weight-bold" style={{ fontSize: 20 }}>{counts.rejected}</h4>
-                <small className="text-muted">Rejected Requests</small>
-              </div>
-            </div>
-          </div>
+        {/* Search Input Box */}
+        <div style={{ minWidth: 260, flex: '1 0 240px', maxWidth: 360 }}>
+          <input 
+            type="text" 
+            className="form-control"
+            placeholder="🔍 Search user, mobile, UTR, ID..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ borderRadius: 8, height: 38, border: '1px solid #cbd5e1', fontSize: 13 }}
+          />
         </div>
       </div>
 
       {/* Main Table Card */}
       <div className="card shadow-sm" style={{ borderRadius: 16 }}>
-        {/* Filters Header */}
-        <div className="card-header d-flex flex-wrap align-items-center justify-content-between p-3" style={{ borderBottom: '1px solid var(--zd-border, rgba(0,0,0,0.06))', gap: 12 }}>
-          {/* Status Tabs */}
-          <div className="btn-group" role="group">
-            <button 
-              type="button" 
-              className={`btn btn-sm ${statusFilter === 'all' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setStatusFilter('all')}
-              style={{ borderRadius: '6px 0 0 6px', fontWeight: 600 }}
-            >
-              All ({counts.total})
-            </button>
-            <button 
-              type="button" 
-              className={`btn btn-sm ${statusFilter === 'pending' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setStatusFilter('pending')}
-              style={{ fontWeight: 600 }}
-            >
-              Pending ({counts.pending})
-            </button>
-            <button 
-              type="button" 
-              className={`btn btn-sm ${statusFilter === 'approved' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setStatusFilter('approved')}
-              style={{ fontWeight: 600 }}
-            >
-              Approved ({counts.approved})
-            </button>
-            <button 
-              type="button" 
-              className={`btn btn-sm ${statusFilter === 'rejected' ? 'btn-primary' : 'btn-outline-secondary'}`}
-              onClick={() => setStatusFilter('rejected')}
-              style={{ borderRadius: '0 6px 6px 0', fontWeight: 600 }}
-            >
-              Rejected ({counts.rejected})
-            </button>
-          </div>
-
-          {/* Search Box */}
-          <div style={{ maxWidth: 280, width: '100%' }}>
-            <input 
-              type="text" 
-              className="form-control form-control-sm"
-              placeholder="Search user, mobile, ID, UTR..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ borderRadius: 8, height: 36 }}
-            />
-          </div>
-        </div>
 
         {/* Requests Table Body */}
         <div className="card-body p-0">

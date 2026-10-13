@@ -185,6 +185,15 @@ export function Sidebar() {
             >
               <span>▥</span><b>Send Msg Report</b>
             </NavLink>
+
+            <NavLink 
+              to="/sms/api-docs" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="SMS API Docs"
+            >
+              <span>🔑</span><b>SMS API Docs</b>
+            </NavLink>
           </>
         ) : isPlanApiActive ? (
           /* =========================================================
@@ -268,9 +277,9 @@ export function Sidebar() {
               to="/device" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
-              data-title="Device"
+              data-title="WhatsApp Device"
             >
-              <span>▣</span><b>Device</b>
+              <span>▣</span><b>WhatsApp Device</b>
             </NavLink>
 
             <NavLink 
@@ -289,22 +298,6 @@ export function Sidebar() {
               data-title="Inbox"
             >
               <span>▤</span><b>Inbox</b>
-              {stats?.unread > 0 && (
-                <span 
-                  className="side-badge" 
-                  style={{ 
-                    marginLeft: 'auto', 
-                    background: '#e85b63', 
-                    color: '#fff', 
-                    padding: '2px 8px', 
-                    borderRadius: 10, 
-                    fontSize: 10,
-                    fontWeight: 800
-                  }}
-                >
-                  {stats.unread}
-                </span>
-              )}
             </NavLink>
 
             <NavLink 

@@ -29,6 +29,7 @@ import SmsSendPage from '../pages/sms/SmsSendPage'
 import SmsInboxPage from '../pages/sms/SmsInboxPage'
 import SmsWebhookPage from '../pages/sms/SmsWebhookPage'
 import SmsReportsPage from '../pages/sms/SmsReportsPage'
+import SmsApiDocsPage from '../pages/sms/SmsApiDocsPage'
 
 // Plan API Pages
 import PlanDashboardPage from '../pages/plan/PlanDashboardPage'
@@ -133,6 +134,9 @@ export default function AppRoutes() {
         <Route path="sms/inbox" element={<SmsInboxPage />} />
         <Route path="sms/webhook" element={<SmsWebhookPage />} />
         <Route path="sms/reports" element={<SmsReportsPage />} />
+        <Route path="sms/api-docs" element={<SmsApiDocsPage />} />
+        <Route path="sms/api" element={<Navigate to="/sms/api-docs" replace />} />
+        <Route path="sms-api" element={<Navigate to="/sms/api-docs" replace />} />
 
         {/* Additional Service Hub Dashboards */}
         <Route path="services/mobile-sms" element={<Navigate to="/sms/dashboard" replace />} />

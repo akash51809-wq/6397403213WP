@@ -16,7 +16,7 @@ const ADMIN_SERVICES = [
   { id: 'whatsapp', label: 'WhatsApp', icon: '💬', color: '#10b981', softBg: '#f0fdf4' },
   { id: 'sms', label: 'SMS Gateway', icon: '📱', color: '#0284c7', softBg: '#f0f9ff' },
   { id: 'plan', label: 'Plan API', icon: '⚡', color: '#ea580c', softBg: '#fff7ed' },
-  { id: 'gst', label: 'GST Portal', icon: '🏛️', color: '#7c3aed', softBg: '#faf5ff' },
+  { id: 'gst', label: 'GST', icon: '🏛️', color: '#7c3aed', softBg: '#faf5ff' },
 ]
 
 export default function AdminPlansPage({ notify: propNotify }) {
@@ -262,24 +262,6 @@ export default function AdminPlansPage({ notify: propNotify }) {
           >
             {previewMode ? '⚙️ Admin List View' : '👁️ Preview User Pricing Table'}
           </button>
-          <button 
-            type="button" 
-            className="btn btn-primary"
-            onClick={openCreateModal}
-            style={{ 
-              borderRadius: 8, 
-              padding: '8px 18px', 
-              fontWeight: 700, 
-              fontSize: 13, 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 6,
-              background: activeServiceObj.color,
-              borderColor: activeServiceObj.color
-            }}
-          >
-            <span>➕</span> Create {activeServiceObj.label} Plan
-          </button>
         </div>
       </div>
 
@@ -307,14 +289,16 @@ export default function AdminPlansPage({ notify: propNotify }) {
         </div>
       ) : (
         <>
-          {/* Service Selector Tabs (Horizontal 4 Services) */}
+          {/* Service Selector Tabs (Horizontal 4 Services in 1 Line Left to Right) */}
           <div 
             className="d-flex align-items-center gap-2 mb-4 p-2"
             style={{ 
-              background: 'var(--zd-card-bg, #ffffff)', 
+              background: '#ffffff', 
               borderRadius: 14, 
-              border: '1px solid var(--zd-border, #eef2f6)',
-              overflowX: 'auto'
+              border: '1px solid #e2e8f0',
+              overflowX: 'auto',
+              flexWrap: 'nowrap',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
             }}
           >
             {ADMIN_SERVICES.map(srv => {
@@ -329,16 +313,18 @@ export default function AdminPlansPage({ notify: propNotify }) {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    padding: '10px 18px',
+                    padding: '10px 22px',
                     borderRadius: 10,
-                    border: isSelected ? `2px solid ${srv.color}` : '1px solid transparent',
-                    background: isSelected ? srv.softBg : 'transparent',
-                    color: isSelected ? srv.color : 'var(--zd-text-muted, #64748b)',
-                    fontWeight: isSelected ? 800 : 600,
+                    border: isSelected ? `2px solid ${srv.color}` : '1px solid #e2e8f0',
+                    background: isSelected ? srv.softBg : '#ffffff',
+                    color: isSelected ? srv.color : '#334155',
+                    fontWeight: isSelected ? 800 : 700,
                     fontSize: 14,
                     cursor: 'pointer',
                     transition: 'all 0.2s',
-                    whiteSpace: 'nowrap'
+                    whiteSpace: 'nowrap',
+                    boxShadow: isSelected ? `0 4px 12px ${srv.color}25` : 'none',
+                    flex: '1 0 auto'
                   }}
                 >
                   <span style={{ fontSize: 18 }}>{srv.icon}</span>
