@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import Layout from '../components/layout/Layout'
 
 // Page Components
+import LandingPage from '../pages/home/LandingPage'
 import LoginPage from '../pages/auth/LoginPage'
 import DashboardPage from '../pages/dashboard/DashboardPage'
 import DevicePage from '../pages/device/DevicePage'
@@ -71,12 +72,17 @@ function PublicOnlyRoute({ children }) {
 }
 
 function RootRedirect() {
-  return <Navigate to="/dashboard" replace />
+  const { login } = useAuth()
+  return login ? <Navigate to="/dashboard" replace /> : <Navigate to="/" replace />
 }
 
 export default function AppRoutes() {
   return (
     <Routes>
+      {/* Public Landing & Marketing */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/home" element={<LandingPage />} />
+
       {/* Public Login Route */}
       <Route 
         path="/login" 
@@ -97,14 +103,12 @@ export default function AppRoutes() {
 
       {/* Main Shell (Protected) */}
       <Route
-        path="/"
         element={
           <ProtectedRoute>
             <Layout />
           </ProtectedRoute>
         }
       >
-        <Route index element={<RootRedirect />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="device" element={<DevicePage />} />
         <Route path="send" element={<SendPage />} />

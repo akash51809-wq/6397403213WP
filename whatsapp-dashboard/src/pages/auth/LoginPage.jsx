@@ -619,19 +619,19 @@ export function LoginPage({ initialMode }) {
           {!customBanner && (
             <div className="auth-floating-card">
               <div className="auth-floating-text">
-                <h3>Automate WhatsApp faster</h3>
-                <p>Scale broadcasts, trigger auto-replies, and connect multi-device sessions effortlessly.</p>
-                <span className="auth-learn-btn">Active Engine</span>
+                <h3>Unified Multi-Service Portal</h3>
+                <p>Scale WhatsApp automation, route high-speed Android SMS, query live Telecom Plans, and verify GSTIN Taxpayers all in one place.</p>
+                <span className="auth-learn-btn">4-in-1 Platform</span>
               </div>
               <div className="auth-mock-graphic">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div className="mock-chip" />
-                  <span className="mock-title">PRO</span>
+                  <span className="mock-title">SLA 99.9%</span>
                 </div>
-                <div className="mock-number">•••• •••• 99.8%</div>
+                <div className="mock-number">•••• •••• ACTIVE</div>
                 <div className="mock-badge">
                   <div className="mock-badge-dot" />
-                  <span>Delivered</span>
+                  <span>Online &amp; Ready</span>
                 </div>
               </div>
             </div>
@@ -639,9 +639,9 @@ export function LoginPage({ initialMode }) {
 
           {/* Bottom Features & Carousel Dots */}
           <div className="auth-banner-footer">
-            <h2>Introducing new features</h2>
+            <h2>WhatsApp · SMS · Telecom · GST</h2>
             <p>
-              Automated campaign flows, instant delivery receipts, and rock-solid cloud PostgreSQL architecture.
+              High-speed REST APIs, encrypted PostgreSQL isolation, and 24/7 Render Keep-Alive infrastructure.
             </p>
             <div className="auth-slider-indicators">
               <div className="auth-indicator-pill" />
