@@ -13,12 +13,12 @@ test('Frontend routing and static serving verification', async (t) => {
 
   const app = express();
 
-  // 1. Static assets from marketing website and React dashboard
-  app.use(express.static(websitePath, { index: false }));
+  // 1. Static assets from React dashboard (priority) and marketing assets
   app.use(express.static(distPath, { index: false }));
+  app.use(express.static(websitePath, { index: false }));
 
-  // 2. Marketing website subpages
-  const marketingSubpages = ['plans', 'api-docs', 'contact', 'privacy', 'refund', 'security', 'terms'];
+  // 2. Marketing website subpages (privacy, refund, security, terms)
+  const marketingSubpages = ['privacy', 'refund', 'security', 'terms'];
   marketingSubpages.forEach(sp => {
     app.get(`/${sp}`, (req, res) => {
       const cleanPath = req.originalUrl.split('?')[0];
@@ -34,12 +34,12 @@ test('Frontend routing and static serving verification', async (t) => {
     });
   });
 
-  // 3. Marketing website home page
+  // 3. React Multi-Service Portal home page
   app.get(['/', '/index.html'], (req, res) => {
+    const reactIndex = path.join(distPath, 'index.html');
+    if (fs.existsSync(reactIndex)) return res.sendFile(reactIndex);
     const homeFile = path.join(websitePath, 'index.html');
-    if (fs.existsSync(homeFile)) return res.sendFile(homeFile);
-    const fallbackDashboard = path.join(distPath, 'index.html');
-    return res.sendFile(fallbackDashboard);
+    return res.sendFile(homeFile);
   });
 
   // 4. React Dashboard SPA fallback
@@ -68,43 +68,23 @@ test('Frontend routing and static serving verification', async (t) => {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   try {
-    // 1. Root / should return marketing website landing page
+    // 1. Root / should return React 3D Multi-Service Portal SPA
     const resHome = await fetch(`${baseUrl}/`);
     assert.equal(resHome.status, 200);
     const homeHtml = await resHome.text();
-    assert.ok(homeHtml.includes('Easy Recharge Solution — WhatsApp Automation'), 'Home page title must match marketing design');
-    assert.ok(homeHtml.includes('href="/login"'), 'Home page must link to /login');
-    assert.ok(!homeHtml.includes('Get Started'), 'Home page must not have Get Started button');
+    assert.ok(homeHtml.includes('id="root"'), 'Home page must serve React SPA root div');
 
     // 2. /login should return React Dashboard SPA
     const resLogin = await fetch(`${baseUrl}/login`);
     assert.equal(resLogin.status, 200);
     const loginHtml = await resLogin.text();
     assert.ok(loginHtml.includes('id="root"'), 'Login must serve React Dashboard SPA root div');
-    assert.ok(!loginHtml.includes('Easy Recharge Solution — WhatsApp Automation'), 'Login must not serve marketing landing page');
 
-    // 3. /plans should redirect 301 to /plans/
-    const resPlansRedirect = await fetch(`${baseUrl}/plans`, { redirect: 'manual' });
-    assert.equal(resPlansRedirect.status, 301);
-    assert.equal(resPlansRedirect.headers.get('location'), '/plans/');
-
-    // 4. /plans/ should return marketing plans page
-    const resPlans = await fetch(`${baseUrl}/plans/`);
-    assert.equal(resPlans.status, 200);
-    const plansHtml = await resPlans.text();
-    assert.ok(plansHtml.includes('Easy Recharge Solution — Pricing'), 'Plans page title must match');
-    assert.ok(plansHtml.includes('href="/login"'), 'Plans page must link to /login');
-    assert.ok(!plansHtml.includes('Get Started'), 'Plans page must not contain Get Started');
-
-    // 5. /api-docs should redirect 301 to /api-docs/ and return marketing API docs
-    const resApiDocsRedirect = await fetch(`${baseUrl}/api-docs`, { redirect: 'manual' });
-    assert.equal(resApiDocsRedirect.status, 301);
-    assert.equal(resApiDocsRedirect.headers.get('location'), '/api-docs/');
-
-    const resApiDocs = await fetch(`${baseUrl}/api-docs/`);
-    assert.equal(resApiDocs.status, 200);
-    const apiDocsHtml = await resApiDocs.text();
-    assert.ok(apiDocsHtml.includes('Easy Recharge Solution — API Docs'), 'API docs page title must match');
+    // 3. /privacy should return privacy subpage
+    const resPrivacy = await fetch(`${baseUrl}/privacy/`);
+    assert.equal(resPrivacy.status, 200);
+    const privacyHtml = await resPrivacy.text();
+    assert.ok(privacyHtml.includes('Privacy Policy'), 'Privacy policy page should be served');
 
     // 6. In-app dashboard routes (e.g. /dashboard, /subscription, /api, /admin, /admin/plans) should return React SPA
     const resDash = await fetch(`${baseUrl}/dashboard`);

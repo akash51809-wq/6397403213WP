@@ -267,80 +267,7 @@ function buildTaxpayerProfile(gstin) {
   };
 }
 
-// Generate Filing Table for GSTIN
-function buildFilingRecords(gstin, selectedYear = '2026-2027') {
-  const clean = validateGstin(gstin);
 
-  // 1. Check permanent database
-  const db = getTaxpayersDatabase();
-  if (db && db[clean] && db[clean].filings && db[clean].filings[selectedYear]) {
-    const rec = db[clean].filings[selectedYear];
-    return {
-      gstin: clean,
-      selectedYear: selectedYear,
-      gstr3b: rec.gstr3b || [],
-      gstr1: rec.gstr1 || [],
-      summary: {
-        totalReturns: (rec.gstr3b?.length || 0) + (rec.gstr1?.length || 0),
-        filedCount: (rec.gstr3b?.filter(r => r.status === 'Filed').length || 0) + (rec.gstr1?.filter(r => r.status === 'Filed').length || 0),
-        pendingCount: 0,
-        complianceScore: '100%'
-      }
-    };
-  }
-
-  // 2. Check sample records
-  if (SAMPLE_RECORDS[clean] && SAMPLE_RECORDS[clean].filings && SAMPLE_RECORDS[clean].filings[selectedYear]) {
-    const rec = SAMPLE_RECORDS[clean].filings[selectedYear];
-    return {
-      gstin: clean,
-      selectedYear: selectedYear,
-      gstr3b: rec.gstr3b || [],
-      gstr1: rec.gstr1 || [],
-      summary: {
-        totalReturns: (rec.gstr3b?.length || 0) + (rec.gstr1?.length || 0),
-        filedCount: (rec.gstr3b?.filter(r => r.status === 'Filed').length || 0) + (rec.gstr1?.filter(r => r.status === 'Filed').length || 0),
-        pendingCount: 0,
-        complianceScore: '100%'
-      }
-    };
-  }
-
-  // 3. Standard return filing schedule for requested year
-  const months = ['August', 'July', 'June', 'May', 'April'];
-  const gstr3b = months.map((month, idx) => ({
-    fy: selectedYear,
-    taxp: month,
-    mof: 'ONLINE',
-    dof: `18/${String(8 - idx).padStart(2, '0')}/2026`,
-    rtntype: 'GSTR3B',
-    arn: 'NA',
-    status: 'Filed'
-  }));
-
-  const gstr1 = ['September', 'August', 'July', 'June', 'May', 'April'].map((month, idx) => ({
-    fy: selectedYear,
-    taxp: month,
-    mof: 'ONLINE',
-    dof: `11/${String(9 - idx).padStart(2, '0')}/2026`,
-    rtntype: 'GSTR1',
-    arn: 'NA',
-    status: 'Filed'
-  }));
-
-  return {
-    gstin: clean || '09AKPPG5665E1ZU',
-    selectedYear: selectedYear,
-    gstr3b,
-    gstr1,
-    summary: {
-      totalReturns: gstr3b.length + gstr1.length,
-      filedCount: gstr3b.length + gstr1.length,
-      pendingCount: 0,
-      complianceScore: '100%'
-    }
-  };
-}
 
 // ---------------------------------------------------------------------------
 // ROUTES
@@ -451,36 +378,7 @@ router.post('/api/gst/search', authRequired, async (req, res) => {
   }
 });
 
-// 3. Return Filing History
-router.post('/api/gst/filings', async (req, res) => {
-  try {
-    const rawGstin = req.body.gstin || req.query.gstin || '09AKPPG5665E1ZU';
-    const selectedYear = req.body.year || req.query.year || '2026-2027';
-
-    const cleanGstin = validateGstin(rawGstin);
-    if (!cleanGstin) {
-      return res.status(400).json({
-        success: false,
-        message: 'कृपया 15-अंकों का मान्य GSTIN दर्ज करें।'
-      });
-    }
-
-    const filings = buildFilingRecords(cleanGstin, selectedYear);
-    res.json({
-      success: true,
-      data: filings,
-      timestamp: new Date().toISOString()
-    });
-  } catch (err) {
-    console.error('[GST Filings Error]:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Filing table प्राप्त करने में त्रुटि: ' + (err.message || err)
-    });
-  }
-});
-
-// 4. Search History (strictly user-scoped)
+// 3. Search History (strictly user-scoped)
 router.get('/api/gst/history', authRequired, (req, res) => {
   try {
     const userId = req.user?.userId;

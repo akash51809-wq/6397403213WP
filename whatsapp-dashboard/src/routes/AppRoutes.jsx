@@ -17,11 +17,9 @@ import AdminPlansPage from '../pages/admin/AdminPlansPage'
 import AdminPlanRequestsPage from '../pages/admin/AdminPlanRequestsPage'
 import UserPlansPage from '../pages/subscription/UserPlansPage'
 import ApiPage from '../pages/api/ApiPage'
-import SystemPage from '../pages/system/SystemPage'
 import SettingsPage from '../pages/admin/SettingsPage'
 import TemplatesPage from '../pages/templates/TemplatesPage'
 import ContactsPage from '../pages/contacts/ContactsPage'
-import ServiceDashboardPage from '../pages/services/ServiceDashboardPage'
 
 // SMS Gateway Pages
 import SmsDashboardPage from '../pages/sms/SmsDashboardPage'
@@ -40,7 +38,6 @@ import PlanRofferPage from '../pages/plan/PlanRofferPage'
 import PlanDthPage from '../pages/plan/PlanDthPage'
 import PlanRechargePage from '../pages/plan/PlanRechargePage'
 import PlanApiDocsPage from '../pages/plan/PlanApiDocsPage'
-import PlanPricingPage from '../pages/plan/PlanPricingPage'
 
 // GST Verification Pages
 import GstDashboardPage from '../pages/gst/GstDashboardPage'
