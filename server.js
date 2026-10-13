@@ -291,12 +291,12 @@ app.post('/api/system/autoping/trigger', authRequired, adminRequired, async (req
   });
 });
 
-// 1. Serve static files from marketing website and React dashboard
-app.use(express.static(websitePath, { index: false }));
+// 1. Serve static files from React dashboard (priority) and marketing assets
 app.use(express.static(distPath, { index: false }));
+app.use(express.static(websitePath, { index: false }));
 
-// 2. Marketing website subpages (plans, api-docs, contact, privacy, refund, security, terms)
-const marketingSubpages = ['plans', 'api-docs', 'contact', 'privacy', 'refund', 'security', 'terms'];
+// 2. Marketing website subpages (privacy, refund, security, terms)
+const marketingSubpages = ['privacy', 'refund', 'security', 'terms'];
 marketingSubpages.forEach(sp => {
   app.get(`/${sp}`, (req, res) => {
     const cleanPath = req.originalUrl.split('?')[0];
@@ -306,18 +306,17 @@ marketingSubpages.forEach(sp => {
     }
     const file = path.join(websitePath, sp, 'index.html');
     if (fs.existsSync(file)) return res.sendFile(file);
-    const notFound = path.join(websitePath, '404.html');
-    if (fs.existsSync(notFound)) return res.status(404).sendFile(notFound);
-    res.status(404).send('Not Found');
+    const indexPath = path.join(distPath, 'index.html');
+    return res.sendFile(indexPath);
   });
 });
 
-// 3. Marketing website home page
+// 3. Main home page (React Multi-Service 3D Portal)
 app.get(['/', '/index.html'], (req, res) => {
+  const reactIndex = path.join(distPath, 'index.html');
+  if (fs.existsSync(reactIndex)) return res.sendFile(reactIndex);
   const homeFile = path.join(websitePath, 'index.html');
-  if (fs.existsSync(homeFile)) return res.sendFile(homeFile);
-  const fallbackDashboard = path.join(distPath, 'index.html');
-  return res.sendFile(fallbackDashboard);
+  return res.sendFile(homeFile);
 });
 
 // 4. API and backend routers
