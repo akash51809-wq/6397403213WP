@@ -188,6 +188,8 @@ async function initTables(pool) {
       "updatedAt" TIMESTAMPTZ DEFAULT NOW()
     );`,
     `CREATE INDEX IF NOT EXISTS idx_wa_sessions_ownerUserId ON whatsapp_sessions("ownerUserId");`,
+    `ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS "profilePicUrl" TEXT;`,
+    `ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS "profileName" TEXT;`,
 
     // 4. plans
     `CREATE TABLE IF NOT EXISTS plans (
@@ -508,7 +510,7 @@ async function initTables(pool) {
    findOneAndDelete, deleteOne, deleteMany, countDocuments, exists, bulkWrite
    ========================================================================== */
 
-function parseFilter(filter, paramOffset = 1, jsonCols = []) {
+function parseFilter(filter, paramOffset = 1, jsonCols = [], defaultPk = null) {
   if (!filter || Object.keys(filter).length === 0) {
     return { clause: '1=1', params: [] };
   }
@@ -517,11 +519,17 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
   const params = [];
   let pIdx = paramOffset;
 
-  for (const [key, value] of Object.entries(filter)) {
+  for (let [key, value] of Object.entries(filter)) {
+    if (value === undefined) continue;
+
+    if (key === '_id' && defaultPk) {
+      key = defaultPk;
+    }
+
     if (key === '$or' && Array.isArray(value)) {
       const orClauses = [];
       for (const subFilter of value) {
-        const sub = parseFilter(subFilter, pIdx, jsonCols);
+        const sub = parseFilter(subFilter, pIdx, jsonCols, defaultPk);
         orClauses.push(`(${sub.clause})`);
         params.push(...sub.params);
         pIdx += sub.params.length;
@@ -535,7 +543,7 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
     if (key === '$and' && Array.isArray(value)) {
       const andClauses = [];
       for (const subFilter of value) {
-        const sub = parseFilter(subFilter, pIdx, jsonCols);
+        const sub = parseFilter(subFilter, pIdx, jsonCols, defaultPk);
         andClauses.push(`(${sub.clause})`);
         params.push(...sub.params);
         pIdx += sub.params.length;
@@ -571,6 +579,7 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
 
       if (hasOperators) {
         for (const [op, opVal] of Object.entries(value)) {
+          if (opVal === undefined) continue;
           if (op === '$options') {
             // Handled alongside $regex
             continue;
@@ -608,14 +617,22 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
             pIdx++;
           } else if (op === '$in') {
             const arrVal = Array.isArray(opVal) ? opVal : [opVal];
-            conditions.push(`${colName} = ANY($${pIdx})`);
-            params.push(arrVal);
-            pIdx++;
+            if (arrVal.length === 0) {
+              conditions.push('1=0');
+            } else {
+              conditions.push(`${colName} = ANY($${pIdx})`);
+              params.push(arrVal);
+              pIdx++;
+            }
           } else if (op === '$nin') {
             const arrVal = Array.isArray(opVal) ? opVal : [opVal];
-            conditions.push(`${colName} != ALL($${pIdx})`);
-            params.push(arrVal);
-            pIdx++;
+            if (arrVal.length === 0) {
+              conditions.push('1=1');
+            } else {
+              conditions.push(`${colName} != ALL($${pIdx})`);
+              params.push(arrVal);
+              pIdx++;
+            }
           } else if (op === '$regex') {
             const regSource = opVal instanceof RegExp ? opVal.source : String(opVal);
             const flags = value.$options || (opVal instanceof RegExp ? opVal.flags : '');
@@ -658,24 +675,28 @@ function parseFilter(filter, paramOffset = 1, jsonCols = []) {
 function extractUpdateFields(update) {
   let setFields = {};
   let setOnInsertFields = {};
+  let incFields = {};
 
   if (!update || typeof update !== 'object') {
-    return { setFields, setOnInsertFields };
+    return { setFields, setOnInsertFields, incFields };
   }
 
   // Strictly check for unsupported update operators
   for (const k of Object.keys(update)) {
-    if (k.startsWith('$') && !['$set', '$setOnInsert', '$unset'].includes(k)) {
-      throw new Error(`[PostgreSQL Compatibility Layer] Unsupported MongoDB update operator '${k}'. Please use direct document manipulation or supported operators ($set, $setOnInsert, $unset).`);
+    if (k.startsWith('$') && !['$set', '$setOnInsert', '$unset', '$inc'].includes(k)) {
+      throw new Error(`[PostgreSQL Compatibility Layer] Unsupported MongoDB update operator '${k}'. Please use direct document manipulation or supported operators ($set, $setOnInsert, $unset, $inc).`);
     }
   }
 
-  if (update.$set || update.$setOnInsert || update.$unset) {
+  if (update.$set || update.$setOnInsert || update.$unset || update.$inc) {
     if (update.$set && typeof update.$set === 'object') {
       Object.assign(setFields, update.$set);
     }
     if (update.$setOnInsert && typeof update.$setOnInsert === 'object') {
       Object.assign(setOnInsertFields, update.$setOnInsert);
+    }
+    if (update.$inc && typeof update.$inc === 'object') {
+      Object.assign(incFields, update.$inc);
     }
     if (update.$unset && typeof update.$unset === 'object') {
       for (const field of Object.keys(update.$unset)) {
@@ -698,8 +719,11 @@ function extractUpdateFields(update) {
   for (const k of Object.keys(setOnInsertFields)) {
     if (k.startsWith('$')) delete setOnInsertFields[k];
   }
+  for (const k of Object.keys(incFields)) {
+    if (k.startsWith('$')) delete incFields[k];
+  }
 
-  return { setFields, setOnInsertFields };
+  return { setFields, setOnInsertFields, incFields };
 }
 
 function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = [], allowedColumns = []) {
@@ -781,6 +805,11 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
       this._single = single;
     }
 
+    select(fields) {
+      this._selectFields = fields;
+      return this;
+    }
+
     sort(sortSpec) {
       this._sort = sortSpec;
       return this;
@@ -802,8 +831,29 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     }
 
     async exec() {
-      const { clause, params } = parseFilter(this._filter, 1, jsonColumns);
-      let sql = `SELECT * FROM "${tableName}" WHERE ${clause}`;
+      const { clause, params } = parseFilter(this._filter, 1, jsonColumns, primaryKey);
+      let selectClause = '*';
+      if (this._selectFields) {
+        if (typeof this._selectFields === 'string') {
+          const parts = this._selectFields.split(' ').map(s => s.trim()).filter(Boolean);
+          const colsToSelect = [];
+          for (let p of parts) {
+            if (p === '_id' && primaryKey) p = primaryKey;
+            if (!p.startsWith('-')) colsToSelect.push(`"${p}"`);
+          }
+          if (colsToSelect.length > 0) selectClause = colsToSelect.join(', ');
+        } else if (typeof this._selectFields === 'object' && !Array.isArray(this._selectFields)) {
+          const colsToSelect = [];
+          for (let [k, inc] of Object.entries(this._selectFields)) {
+            if (inc && inc !== 0) {
+              const col = (k === '_id' && primaryKey) ? primaryKey : k;
+              colsToSelect.push(`"${col}"`);
+            }
+          }
+          if (colsToSelect.length > 0) selectClause = colsToSelect.join(', ');
+        }
+      }
+      let sql = `SELECT ${selectClause} FROM "${tableName}" WHERE ${clause}`;
 
       if (this._sort) {
         const orderParts = [];
@@ -936,7 +986,7 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
   };
 
   Model.updateOne = async function(filter, update, options = {}) {
-    const { setFields, setOnInsertFields } = extractUpdateFields(update);
+    const { setFields, setOnInsertFields, incFields } = extractUpdateFields(update);
 
     const existing = await Model.findOne(filter);
     if (!existing) {
@@ -947,7 +997,21 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
             cleanFilter[k] = v;
           }
         }
+        if (filter.$or && Array.isArray(filter.$or) && filter.$or.length > 0) {
+          for (const sub of filter.$or) {
+            for (const [sk, sv] of Object.entries(sub)) {
+              if (!sk.startsWith('$') && (typeof sv !== 'object' || sv === null || sv instanceof Date)) {
+                if (cleanFilter[sk] === undefined) cleanFilter[sk] = sv;
+              }
+            }
+          }
+        }
         const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
+        if (incFields && Object.keys(incFields).length > 0) {
+          for (const [ik, iv] of Object.entries(incFields)) {
+            insertData[ik] = (Number(insertData[ik]) || 0) + (Number(iv) || 0);
+          }
+        }
         try {
           await Model.create(insertData);
           return { modifiedCount: 1, upserted: true };
@@ -981,6 +1045,15 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
       idx++;
     }
 
+    for (const [k, v] of Object.entries(incFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = COALESCE("${k}", 0) + $${idx}`);
+      vals.push(Number(v) || 0);
+      idx++;
+    }
+
     if (cols.length === 0) {
       return { modifiedCount: 0 };
     }
@@ -991,8 +1064,51 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
     return { modifiedCount: 1 };
   };
 
+  Model.updateMany = async function(filter, update, options = {}) {
+    const { setFields, incFields } = extractUpdateFields(update);
+    const { clause, params } = parseFilter(filter, 1, jsonColumns, primaryKey);
+
+    const cols = [];
+    const vals = [...params];
+    let idx = params.length + 1;
+
+    for (const [k, v] of Object.entries(setFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = $${idx}`);
+      let val = v;
+      if (jsonColumns.includes(k) && typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      vals.push(val);
+      idx++;
+    }
+
+    for (const [k, v] of Object.entries(incFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = COALESCE("${k}", 0) + $${idx}`);
+      vals.push(Number(v) || 0);
+      idx++;
+    }
+
+    if (cols.length === 0) {
+      return { modifiedCount: 0 };
+    }
+
+    if (allowedColumns.length === 0 || allowedColumns.includes('updatedAt')) {
+      cols.push(`"updatedAt" = NOW()`);
+    }
+
+    const sql = `UPDATE "${tableName}" SET ${cols.join(', ')} WHERE ${clause}`;
+    const res = await query(sql, vals);
+    return { modifiedCount: res.rowCount, matchedCount: res.rowCount };
+  };
+
   Model.findOneAndUpdate = async function(filter, update, options = {}) {
-    const { setFields, setOnInsertFields } = extractUpdateFields(update);
+    const { setFields, setOnInsertFields, incFields } = extractUpdateFields(update);
 
     const existing = await Model.findOne(filter);
     if (!existing) {
@@ -1003,7 +1119,21 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
             cleanFilter[k] = v;
           }
         }
+        if (filter.$or && Array.isArray(filter.$or) && filter.$or.length > 0) {
+          for (const sub of filter.$or) {
+            for (const [sk, sv] of Object.entries(sub)) {
+              if (!sk.startsWith('$') && (typeof sv !== 'object' || sv === null || sv instanceof Date)) {
+                if (cleanFilter[sk] === undefined) cleanFilter[sk] = sv;
+              }
+            }
+          }
+        }
         const insertData = { ...cleanFilter, ...setOnInsertFields, ...setFields };
+        if (incFields && Object.keys(incFields).length > 0) {
+          for (const [ik, iv] of Object.entries(incFields)) {
+            insertData[ik] = (Number(insertData[ik]) || 0) + (Number(iv) || 0);
+          }
+        }
         try {
           return await Model.create(insertData);
         } catch (createErr) {
@@ -1033,6 +1163,15 @@ function createModel(tableName, primaryKey, defaultFields = {}, jsonColumns = []
         val = JSON.stringify(val);
       }
       vals.push(val);
+      idx++;
+    }
+
+    for (const [k, v] of Object.entries(incFields)) {
+      if (k === primaryKey || k.startsWith('$')) continue;
+      if (allowedColumns.length > 0 && !allowedColumns.includes(k)) continue;
+
+      cols.push(`"${k}" = COALESCE("${k}", 0) + $${idx}`);
+      vals.push(Number(v) || 0);
       idx++;
     }
 
@@ -1109,6 +1248,8 @@ const User = createModel('users', 'userId', {
   email: '',
   role: 'user',
   plan: 'Standard',
+  dailyMessageCount: 0,
+  dailyCountDate: '',
   walletBalance: 0,
   smsPlan: '',
   planApiPlan: '',
@@ -1121,7 +1262,7 @@ const User = createModel('users', 'userId', {
   autoSendImage: { enabled: false, imageUrl: '', fileName: '' }
 }, ['sessions', 'autoSendImage'], [
   'userId', 'username', 'name', 'email', 'mobile', 'passwordHash', 'apiToken', 'apiTokenHash', 'apiTokenPrefix', 'apiTokenLast4', 'role',
-  'plan', 'planExpiresAt', 'walletBalance', 'smsPlan', 'smsPlanExpiresAt', 'planApiPlan', 'planApiExpiresAt', 'gstPlan', 'gstPlanExpiresAt',
+  'plan', 'planExpiresAt', 'dailyMessageCount', 'dailyCountDate', 'walletBalance', 'smsPlan', 'smsPlanExpiresAt', 'planApiPlan', 'planApiExpiresAt', 'gstPlan', 'gstPlanExpiresAt',
   'status', 'sessions', 'autoSendImage', 'createdAt', 'updatedAt'
 ]);
 
@@ -1134,9 +1275,11 @@ const Otp = createModel('otps', 'id', {
 
 const WhatsAppSession = createModel('whatsapp_sessions', 'sessionId', {
   role: 'admin',
-  status: 'waiting'
+  status: 'waiting',
+  profilePicUrl: null,
+  profileName: null
 }, [], [
-  'sessionId', 'ownerUserId', 'phone', 'role', 'authPath', 'status', 'lastConnectedAt', 'createdAt', 'updatedAt'
+  'sessionId', 'ownerUserId', 'phone', 'role', 'authPath', 'status', 'lastConnectedAt', 'profilePicUrl', 'profileName', 'createdAt', 'updatedAt'
 ]);
 
 const Plan = createModel('plans', 'planId', {
@@ -1219,7 +1362,6 @@ const CompanySettings = createModel('company_settings', 'key', {
   'socialFacebook', 'socialTwitter', 'socialInstagram', 'socialLinkedin', 'socialYoutube',
   'customCss', 'customJs', 'updatedAt'
 ]);
-
 
 const SessionAuth = createModel('session_auth', 'id', {}, ['data'], [
   'id', 'data'
@@ -1304,10 +1446,32 @@ const MediaFile = createModel('media_files', 'filename', {
   'filename', 'mimetype', 'size', 'data', 'ownerUserId', 'metadata', 'createdAt', 'updatedAt'
 ]);
 
+/**
+ * Executes operations inside a database transaction with automatic COMMIT and ROLLBACK
+ */
+async function withTransaction(callback) {
+  if (!connection.pool) {
+    throw new Error('[PostgreSQL] Database not connected. Call connectPostgres() first.');
+  }
+  const client = await connection.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   connection,
   connectPostgres,
   query,
+  withTransaction,
   createModel,
   User,
   Otp,

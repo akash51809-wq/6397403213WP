@@ -30,63 +30,88 @@ try {
     throw new Error('Invalid WhatsApp mobile number: ' + value);
   }
 
-  // Robust helper to send message through active Baileys socket
+  // Robust helper to send message through active Baileys socket with deduplication & retry safety
   async function sendAdminText(number, text, retries = 3) {
-    let lastError = null;
-    let socketWasAvailable = false;
+    const { messageDeduplicator } = require('./utils/messageDeduplicator');
+    const digits = normalizeIndianWhatsAppNumber(number);
+    const dedupKey = messageDeduplicator.generateKey('admin', digits, text);
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      let current = global.__waAdminSocket;
-      if (!current || typeof current.sendMessage !== 'function') {
-        try {
-          const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-          const adminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '';
-          const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-          if (match?.session?.socket && match?.session?.status === 'connected') {
-            current = match.session.socket;
-            global.__waAdminSocket = current;
-          } else {
-            const fallbackUser = process.env.ADMIN_DEFAULT_USER_ID ? String(process.env.ADMIN_DEFAULT_USER_ID).trim() : '';
-            if (fallbackUser) {
-              const userS = sessions?.get(fallbackUser);
-              if (userS?.socket && userS?.status === 'connected') {
-                current = userS.socket;
-                global.__waAdminSocket = current;
+    // Check if duplicate request is in-flight or recently completed
+    const existing = messageDeduplicator.check(dedupKey);
+    if (existing) {
+      if (existing.status === 'completed' && existing.result) {
+        console.log(`[Auth WhatsApp] Deduplicating admin message to ${digits} (already sent)`);
+        return existing.result;
+      }
+      if (existing.status === 'in_flight' && existing.promise) {
+        console.log(`[Auth WhatsApp] Waiting for in-flight admin send to ${digits}`);
+        return await existing.promise;
+      }
+    }
+
+    const opMessageId = messageDeduplicator.generateBaileysMessageId(dedupKey);
+
+    const executeSend = async () => {
+      let lastError = null;
+      let socketWasAvailable = false;
+
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        let current = global.__waAdminSocket;
+        if (!current || typeof current.sendMessage !== 'function') {
+          try {
+            const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
+            const adminPhone = process.env.ADMIN_PHONE ? String(process.env.ADMIN_PHONE).trim() : '';
+            const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
+            if (match?.session?.socket && match?.session?.status === 'connected') {
+              current = match.session.socket;
+              global.__waAdminSocket = current;
+            } else {
+              const fallbackUser = process.env.ADMIN_DEFAULT_USER_ID ? String(process.env.ADMIN_DEFAULT_USER_ID).trim() : '';
+              if (fallbackUser) {
+                const userS = sessions?.get(fallbackUser);
+                if (userS?.socket && userS?.status === 'connected') {
+                  current = userS.socket;
+                  global.__waAdminSocket = current;
+                }
               }
             }
-          }
-        } catch (e) {}
-      }
-
-      if (current && typeof current.sendMessage === 'function') {
-        socketWasAvailable = true;
-        try {
-          const digits = normalizeIndianWhatsAppNumber(number);
-          const jid = `${digits}@s.whatsapp.net`;
-          const result = await current.sendMessage(jid, { text: String(text) });
-          console.log(`[Auth WhatsApp] Message sent successfully to ${digits}`);
-          return result;
-        } catch (error) {
-          lastError = error;
-          console.error(`[Auth WhatsApp] Attempt ${attempt}/${retries} failed:`, error?.message || error);
+          } catch (e) {}
         }
-      } else {
-        console.warn(`[Auth WhatsApp] Attempt ${attempt}/${retries}: Admin socket not available (socket=${!!current}, sendMessage=${typeof current?.sendMessage})`);
+
+        if (current && typeof current.sendMessage === 'function') {
+          socketWasAvailable = true;
+          try {
+            const jid = `${digits}@s.whatsapp.net`;
+            // Pass deterministic messageId so WhatsApp server deduplicates if packet arrived
+            const result = await current.sendMessage(jid, { text: String(text) }, { messageId: opMessageId });
+            console.log(`[Auth WhatsApp] Message sent successfully to ${digits} (id: ${opMessageId})`);
+            return result;
+          } catch (error) {
+            lastError = error;
+            console.error(`[Auth WhatsApp] Attempt ${attempt}/${retries} failed:`, error?.message || error);
+          }
+        } else {
+          console.warn(`[Auth WhatsApp] Attempt ${attempt}/${retries}: Admin socket not available (socket=${!!current}, sendMessage=${typeof current?.sendMessage})`);
+        }
+
+        if (attempt < retries) {
+          console.log(`[Auth WhatsApp] Waiting 2s before retry (${attempt}/${retries})...`);
+          await new Promise(res => setTimeout(res, 2000));
+        }
       }
 
-      if (attempt < retries) {
-        console.log(`[Auth WhatsApp] Waiting 2s before retry (${attempt}/${retries})...`);
-        await new Promise(res => setTimeout(res, 2000));
+      // If the socket was available but sending failed, throw the actual error
+      if (socketWasAvailable && lastError) {
+        console.error('[Auth WhatsApp] All retries exhausted. Last error:', lastError?.message || lastError);
+        throw new Error(`WhatsApp message भेजने में error: ${lastError?.message || 'Unknown error'}`);
       }
-    }
 
-    // If the socket was available but sending failed, throw the actual error
-    if (socketWasAvailable && lastError) {
-      console.error('[Auth WhatsApp] All retries exhausted. Last error:', lastError?.message || lastError);
-      throw new Error(`WhatsApp message भेजने में error: ${lastError?.message || 'Unknown error'}`);
-    }
+      throw new Error('Admin WhatsApp अभी connected नहीं है। कृपया कुछ देर, फिर प्रयास करें।');
+    };
 
-    throw new Error('Admin WhatsApp अभी connected नहीं है। कृपया कुछ देर, फिर प्रयास करें।');
+    const sendPromise = executeSend();
+    messageDeduplicator.setInFlight(dedupKey, sendPromise, opMessageId);
+    return await sendPromise;
   }
 
   global.__waSendAdminText = sendAdminText;

@@ -5,6 +5,7 @@ const path = require('path');
 const { generateTTS, convertAudioToWhatsAppVoice, generateWhatsAppVoiceNote } = require('./ttsHelper');
 const { 
   connection, 
+  query,
   User, 
   Otp, 
   WhatsAppSession, 
@@ -501,6 +502,26 @@ async function getUserPlanFeatures(user) {
   };
 }
 
+const userQuotaLocks = new Map();
+
+async function withUserQuotaLock(userId, fn) {
+  const normalizedId = String(userId || 'global');
+  const currentLock = userQuotaLocks.get(normalizedId) || Promise.resolve();
+  let release;
+  const nextLock = new Promise(resolve => { release = resolve; });
+  userQuotaLocks.set(normalizedId, currentLock.then(() => nextLock).catch(() => nextLock));
+
+  try {
+    await currentLock;
+    return await fn();
+  } finally {
+    release();
+    if (userQuotaLocks.get(normalizedId) === nextLock) {
+      userQuotaLocks.delete(normalizedId);
+    }
+  }
+}
+
 async function checkAndIncrementDailyUsage(user, count = 1) {
   if (!user) return { allowed: false, message: 'User not found' };
   if (user.status === 'blocked' || user.status === 'inactive') {
@@ -521,36 +542,123 @@ async function checkAndIncrementDailyUsage(user, count = 1) {
 
   const dailyLimit = typeof features.dailyLimit === 'number' ? features.dailyLimit : 500;
   const today = getTodayDateIST();
+  const userId = user.userId;
 
-  if (user.dailyCountDate !== today) {
-    user.dailyMessageCount = 0;
+  // Execute inside per-user lock to serialize concurrent requests in this process
+  return await withUserQuotaLock(userId, async () => {
+    // 1. If PostgreSQL is connected, perform atomic database-level increment
+    if (connection.readyState === 1 && userId && typeof query === 'function') {
+      try {
+        // Attempt atomic same-day increment
+        const sameDayRes = await query(
+          `UPDATE users
+           SET "dailyMessageCount" = "dailyMessageCount" + $1,
+               "updatedAt" = NOW()
+           WHERE "userId" = $2
+             AND "dailyCountDate" = $3
+             AND ("dailyMessageCount" + $1) <= $4
+           RETURNING "dailyMessageCount"`,
+          [count, userId, today, dailyLimit]
+        );
+
+        if (sameDayRes.rows && sameDayRes.rows.length > 0) {
+          const newCount = Number(sameDayRes.rows[0].dailyMessageCount);
+          user.dailyMessageCount = newCount;
+          user.dailyCountDate = today;
+          return {
+            allowed: true,
+            current: newCount,
+            limit: dailyLimit,
+            remaining: Math.max(0, dailyLimit - newCount)
+          };
+        }
+
+        // Same-day query did not match: could be date mismatch or limit exceeded
+        // Try atomic new-day reset & increment
+        const newDayRes = await query(
+          `UPDATE users
+           SET "dailyMessageCount" = $1,
+               "dailyCountDate" = $2,
+               "updatedAt" = NOW()
+           WHERE "userId" = $3
+             AND ("dailyCountDate" IS DISTINCT FROM $2)
+             AND $1 <= $4
+           RETURNING "dailyMessageCount"`,
+          [count, today, userId, dailyLimit]
+        );
+
+        if (newDayRes.rows && newDayRes.rows.length > 0) {
+          const newCount = Number(newDayRes.rows[0].dailyMessageCount);
+          user.dailyMessageCount = newCount;
+          user.dailyCountDate = today;
+          return {
+            allowed: true,
+            current: newCount,
+            limit: dailyLimit,
+            remaining: Math.max(0, dailyLimit - newCount)
+          };
+        }
+
+        // Both atomic updates failed: limit has definitely been exceeded!
+        // Retrieve current count for reporting
+        const currRes = await query(
+          `SELECT "dailyMessageCount", "dailyCountDate" FROM users WHERE "userId" = $1 LIMIT 1`,
+          [userId]
+        );
+        let currCount = 0;
+        if (currRes.rows && currRes.rows.length > 0) {
+          const r = currRes.rows[0];
+          currCount = (r.dailyCountDate === today) ? Number(r.dailyMessageCount || 0) : 0;
+        } else {
+          currCount = Number(user.dailyMessageCount || 0);
+        }
+
+        user.dailyMessageCount = currCount;
+        user.dailyCountDate = today;
+
+        return {
+          allowed: false,
+          code: 'DAILY_LIMIT_EXCEEDED',
+          current: currCount,
+          limit: dailyLimit,
+          message: `दैनिक सीमा समाप्त: आपके प्लान की दैनिक सीमा ${dailyLimit} संदेश प्रति दिन है। (उपयोग: ${currCount}/${dailyLimit})`
+        };
+      } catch (dbErr) {
+        console.warn('[DailyUsage] Atomic DB increment fallback to memory lock:', dbErr.message);
+      }
+    }
+
+    // 2. In-memory / Mock fallback (guaranteed serialized by withUserQuotaLock)
+    if (user.dailyCountDate !== today) {
+      user.dailyMessageCount = 0;
+      user.dailyCountDate = today;
+    }
+
+    const currentCount = Number(user.dailyMessageCount || 0);
+    if (currentCount + count > dailyLimit) {
+      return {
+        allowed: false,
+        code: 'DAILY_LIMIT_EXCEEDED',
+        current: currentCount,
+        limit: dailyLimit,
+        message: `दैनिक सीमा समाप्त: आपके प्लान की दैनिक सीमा ${dailyLimit} संदेश प्रति दिन है। (उपयोग: ${currentCount}/${dailyLimit})`
+      };
+    }
+
+    user.dailyMessageCount = currentCount + count;
     user.dailyCountDate = today;
-  }
+    user.updatedAt = new Date();
+    if (typeof user.save === 'function') {
+      await user.save().catch((e) => console.warn('[DailyUsage] Counter save warning:', e.message));
+    }
 
-  const currentCount = Number(user.dailyMessageCount || 0);
-  if (currentCount + count > dailyLimit) {
     return {
-      allowed: false,
-      code: 'DAILY_LIMIT_EXCEEDED',
-      current: currentCount,
+      allowed: true,
+      current: user.dailyMessageCount,
       limit: dailyLimit,
-      message: `दैनिक सीमा समाप्त: आपके प्लान की दैनिक सीमा ${dailyLimit} संदेश प्रति दिन है। (उपयोग: ${currentCount}/${dailyLimit})`
+      remaining: Math.max(0, dailyLimit - user.dailyMessageCount)
     };
-  }
-
-  user.dailyMessageCount = currentCount + count;
-  user.dailyCountDate = today;
-  user.updatedAt = new Date();
-  if (typeof user.save === 'function') {
-    await user.save().catch((e) => console.warn('[DailyUsage] Counter save warning:', e.message));
-  }
-
-  return {
-    allowed: true,
-    current: user.dailyMessageCount,
-    limit: dailyLimit,
-    remaining: Math.max(0, dailyLimit - user.dailyMessageCount)
-  };
+  });
 }
 
 router.post('/api/auth/login', loginLimiter, async (req, res) => {

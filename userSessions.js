@@ -270,6 +270,16 @@ async function startUserSession(userId) {
                     }, userId, phoneNum);
                 }
             } catch (e) {}
+
+            // Resume pending message queue for this user if any
+            try {
+                const indexModule = require('./index');
+                if (indexModule && typeof indexModule.resumeUserQueue === 'function') {
+                    indexModule.resumeUserQueue(userId);
+                }
+            } catch (qErr) {
+                console.warn(`[UserSession ${userId}] Queue resume notice:`, qErr.message);
+            }
         }
     });
 
@@ -280,6 +290,9 @@ async function startUserSession(userId) {
             console.log(`[UserSession ${userId}] Credentials saved successfully.`);
         } catch (err) {
             console.error(`[UserSession ${userId}] saveCreds error:`, err.message);
+            setTimeout(() => {
+                saveCreds().catch(retryErr => console.error(`[UserSession ${userId}] saveCreds retry failed:`, retryErr.message));
+            }, 2000);
         }
     });
 

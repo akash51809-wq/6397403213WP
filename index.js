@@ -27,6 +27,7 @@ const IncomingMessageModel = require('./models/IncomingMessage');
 const ContactModel = require('./models/Contact');
 const ApiSettingsModel = require('./models/ApiSettings');
 const { generateTTS, generateWhatsAppVoiceNote } = require('./ttsHelper');
+const { messageDeduplicator } = require('./utils/messageDeduplicator');
 
 const app = express();
 app.disable('x-powered-by');
@@ -2952,7 +2953,7 @@ function normalizeIndianNumber(number) {
    SEND SINGLE WHATSAPP MESSAGE (WITH ATTACHMENT & BUTTONS)
 ========================================================= */
 
-async function sendWhatsAppMessage(targetSocket, number, message, attachment = null, buttons = []) {
+async function sendWhatsAppMessage(targetSocket, number, message, attachment = null, buttons = [], options = {}) {
     const s = targetSocket || (global.__waAdminSocket || sock);
     if (!s || typeof s.sendMessage !== 'function') {
         throw new Error('WhatsApp socket is not available');
@@ -2992,25 +2993,25 @@ async function sendWhatsAppMessage(targetSocket, number, message, attachment = n
         const fileName = validation.originalName || validation.safeFilename || attachment.name || 'document';
 
         if (mimeType.startsWith('image/')) {
-            await s.sendMessage(jid, { image: buffer, caption: textToSend || undefined, mimetype: mimeType });
+            return await s.sendMessage(jid, { image: buffer, caption: textToSend || undefined, mimetype: mimeType }, options);
         } else if (mimeType.startsWith('video/')) {
-            await s.sendMessage(jid, { video: buffer, caption: textToSend || undefined, mimetype: mimeType });
+            return await s.sendMessage(jid, { video: buffer, caption: textToSend || undefined, mimetype: mimeType }, options);
         } else if (mimeType.startsWith('audio/')) {
-            await s.sendMessage(jid, { audio: buffer, mimetype: mimeType, ptt: false });
+            const audioRes = await s.sendMessage(jid, { audio: buffer, mimetype: mimeType, ptt: false }, options);
             if (textToSend) {
-                await s.sendMessage(jid, { text: textToSend });
+                await s.sendMessage(jid, { text: textToSend }, options);
             }
+            return audioRes;
         } else {
-            await s.sendMessage(jid, { document: buffer, fileName: fileName, caption: textToSend || undefined, mimetype: mimeType });
+            return await s.sendMessage(jid, { document: buffer, fileName: fileName, caption: textToSend || undefined, mimetype: mimeType }, options);
         }
-        return;
     }
 
     if (!textToSend) {
         throw new Error('Message or attachment is required');
     }
 
-    await s.sendMessage(jid, { text: textToSend });
+    return await s.sendMessage(jid, { text: textToSend }, options);
 }
 
 /* =========================================================
@@ -3216,12 +3217,41 @@ async function processUserQueue(userId) {
         return;
     }
 
+    // Dynamically resolve live connected socket for user
+    let liveSocket = null;
+    let liveConnectedNumber = null;
+    try {
+        const { sessions } = require('./userSessions');
+        const userSession = sessions.get(userId);
+        if (userSession?.socket && userSession?.status === 'connected') {
+            liveSocket = userSession.socket;
+            liveConnectedNumber = userSession.connectedNumber;
+        } else if (String(userId).toUpperCase() === 'ADMIN') {
+            const adminSock = getActiveAdminSocket();
+            if (adminSock) {
+                liveSocket = adminSock;
+                liveConnectedNumber = connectedNumber;
+            }
+        }
+    } catch (e) {}
+
+    // Check if socket is currently available and open (ws.OPEN === 1)
+    const wsState = liveSocket?.ws?.readyState;
+    if (!liveSocket || (wsState !== undefined && wsState !== 1)) {
+        console.warn(`[UserQueue ${userId}] Session socket is not connected (wsState=${wsState}). Holding queue until reconnection.`);
+        return;
+    }
+
     userSendingState.set(userId, true);
     const job = queue.shift();
 
     // Also remove from backward-compatibility sendingQueue array
     const sqIdx = sendingQueue.findIndex(j => j.id === job.id);
     if (sqIdx >= 0) sendingQueue.splice(sqIdx, 1);
+
+    // Update job socket to live socket
+    job.socket = liveSocket;
+    if (liveConnectedNumber) job.fromNumber = liveConnectedNumber;
 
     console.log(`\n[UserQueue ${userId}] Starting job: ${job.id} (Delay: ${job.delayMs}ms, Attachment: ${Boolean(job.attachment)}, Buttons: ${job.buttons?.length || 0})`);
 
@@ -3233,10 +3263,23 @@ async function processUserQueue(userId) {
 
             const msgType = job.attachment ? (job.attachment.mimetype?.split('/')[0] || 'media') : 'text';
 
+            // Check if socket got disconnected in the middle of sending loop
+            if (job.socket?.ws?.readyState !== undefined && job.socket?.ws?.readyState !== 1) {
+                console.warn(`[UserQueue ${userId}] Socket disconnected during sending loop. Re-queueing remaining recipients.`);
+                const remainingNumbers = job.numbers.slice(job.results.length);
+                if (remainingNumbers.length > 0) {
+                    const remainingJob = { ...job, numbers: remainingNumbers };
+                    queue.unshift(remainingJob);
+                }
+                break;
+            }
+
             try {
-                console.log(`[UserQueue ${userId}] Sending message to ${number}`);
-                const sendRes = await sendWhatsAppMessage(job.socket, number, job.message, job.attachment, job.buttons);
-                const messageId = sendRes?.key?.id || (Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6));
+                const dedupKey = messageDeduplicator.generateKey(userId, number, job.message || job.attachment?.name || '');
+                const opMessageId = messageDeduplicator.generateBaileysMessageId(dedupKey);
+                console.log(`[UserQueue ${userId}] Sending message to ${number} (msgId: ${opMessageId})`);
+                const sendRes = await sendWhatsAppMessage(job.socket, number, job.message, job.attachment, job.buttons, { messageId: opMessageId });
+                const messageId = sendRes?.key?.id || opMessageId;
 
                 job.results.push({
                     number,
@@ -3297,6 +3340,15 @@ async function processUserQueue(userId) {
         if (queue.length > 0) {
             setTimeout(() => processUserQueue(userId), 100);
         }
+    }
+}
+
+function resumeUserQueue(userId) {
+    if (!userId) return;
+    const queue = userQueues.get(userId);
+    if (queue && queue.length > 0 && !userSendingState.get(userId)) {
+        console.log(`[UserQueue ${userId}] Resuming pending queue (${queue.length} jobs in queue)`);
+        setImmediate(() => processUserQueue(userId));
     }
 }
 
@@ -3752,9 +3804,35 @@ async function handleSendText(req, res) {
             }
         }
 
+        // Deduplication & Idempotency Protection
+        const clientKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || req.query.idempotencyKey || req.body?.idempotencyKey || null;
+        const dedupKey = messageDeduplicator.generateKey(ownerUserId || 'admin', jid, messageText, clientKey);
+        const deterministicMsgId = messageDeduplicator.generateBaileysMessageId(dedupKey);
+
+        const existing = messageDeduplicator.check(dedupKey);
+        if (existing) {
+            if (existing.status === 'completed' && existing.result) {
+                console.log(`[API /send-text] Returning deduplicated response for key: ${dedupKey}`);
+                const deduplicatedMsgId = existing.result?.key?.id || existing.baileysMessageId || deterministicMsgId;
+                return res.status(200).json({
+                    status: true,
+                    deduplicated: true,
+                    message: isGroup ? "Group message sent successfully" : "Message sent successfully",
+                    data: {
+                        to: normalizedTo,
+                        recipientType: isGroup ? 'group' : 'user',
+                        message: messageText,
+                        session: activeSession10 || providedSession || null,
+                        autoImageAttached: autoImageAttached,
+                        messageId: deduplicatedMsgId
+                    }
+                });
+            }
+        }
+
         // Fast / Async Mode: Instant HTTP response under 15ms
         if (isAsync) {
-            const tempMessageId = 'api_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+            const tempMessageId = deterministicMsgId;
             res.status(200).json({
                 status: true,
                 message: isGroup ? "Group message queued for immediate delivery" : "Message queued for immediate delivery",
@@ -3770,8 +3848,9 @@ async function handleSendText(req, res) {
 
             setImmediate(async () => {
                 try {
-                    const sendResult = await activeSocket.sendMessage(jid, messagePayload);
-                    const messageId = sendResult?.key?.id || tempMessageId;
+                    const sendResult = await activeSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId });
+                    const messageId = sendResult?.key?.id || deterministicMsgId;
+                    messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
                     appendMessageReport({
                         id: messageId,
                         date: new Date().toISOString(),
@@ -3818,7 +3897,7 @@ async function handleSendText(req, res) {
         // We race Baileys socket against a 2200ms timeout.
         // If Baileys finishes in <= 2200ms: return actual messageId.
         // If Baileys takes > 2200ms: return immediate HTTP 200 to satisfy client software, while sending finishes in background!
-        const fallbackMsgId = 'api_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        const fallbackMsgId = deterministicMsgId;
 
         function handleBackgroundLogging(finalMsgId) {
             setImmediate(() => {
@@ -3871,10 +3950,21 @@ async function handleSendText(req, res) {
 
         let sendResult = null;
         try {
-            sendResult = await Promise.race([
-                activeSocket.sendMessage(jid, messagePayload),
-                sendTimeoutPromise
-            ]);
+            if (existing && existing.status === 'in_flight' && existing.promise) {
+                console.log(`[API /send-text] Waiting on in-flight send for key: ${dedupKey}`);
+                sendResult = await existing.promise;
+            } else {
+                const executeSend = async () => {
+                    return await Promise.race([
+                        activeSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId }),
+                        sendTimeoutPromise
+                    ]);
+                };
+                const sendPromise = executeSend();
+                messageDeduplicator.setInFlight(dedupKey, sendPromise, deterministicMsgId);
+                sendResult = await sendPromise;
+                messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
+            }
         } catch (sendErr) {
             console.error('[API /send-text Socket Error]:', sendErr.message);
             // Log failed message in report
@@ -4610,6 +4700,7 @@ module.exports = {
     dispatchWebhookWithRetry,
     userQueues,
     processUserQueue,
+    resumeUserQueue,
     unwrapMessage,
     extractMessageText,
     saveContact,

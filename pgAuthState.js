@@ -181,9 +181,8 @@ async function usePgAuthState(sessionId) {
   const sessionCache = getSessionCache(normalizedSessionId);
 
   const writeData = async (data, file) => {
+    const key = `${normalizedSessionId}_${file}`;
     try {
-      const key = `${normalizedSessionId}_${file}`;
-      sessionCache.set(key, data);
       const jsonString = JSON.stringify(data, BufferJSON.replacer);
       const encryptedRecord = encryptPayload(jsonString);
       await query(
@@ -191,59 +190,57 @@ async function usePgAuthState(sessionId) {
          ON CONFLICT ("id") DO UPDATE SET "data" = EXCLUDED."data"`,
         [key, JSON.stringify(encryptedRecord)]
       );
+      sessionCache.set(key, data);
     } catch (e) {
+      sessionCache.delete(key);
       console.error(`[SessionAuth] Error writing ${file}:`, e.message);
+      throw new Error(`[SessionAuth] Failed to persist ${file}: ${e.message}`);
     }
   };
 
   const readData = async (file) => {
-    try {
-      const key = `${normalizedSessionId}_${file}`;
-      if (sessionCache.has(key)) {
-        return sessionCache.get(key);
-      }
-      const res = await query(
-        `SELECT "data" FROM session_auth WHERE "id" = $1 LIMIT 1`,
-        [key]
-      );
-      if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
-        return null;
-      }
-      const rawData = res.rows[0].data;
-      let parsed = null;
-      if (rawData.encrypted === true) {
-        const decryptedJson = decryptPayload(rawData);
-        if (!decryptedJson) {
-          throw new Error(`Failed to decrypt ${key} with any candidate key`);
-        }
-        parsed = JSON.parse(decryptedJson, BufferJSON.reviver);
-      } else {
-        const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
-        parsed = JSON.parse(jsonString, BufferJSON.reviver);
-        try {
-          const encryptedRecord = encryptPayload(jsonString);
-          await query(
-            `UPDATE session_auth SET "data" = $1 WHERE "id" = $2`,
-            [JSON.stringify(encryptedRecord), key]
-          );
-        } catch (migErr) {}
-      }
-      sessionCache.set(key, parsed);
-      return parsed;
-    } catch (error) {
-      if (file === 'creds.json') {
-        throw error;
-      }
+    const key = `${normalizedSessionId}_${file}`;
+    if (sessionCache.has(key)) {
+      return sessionCache.get(key);
+    }
+    const res = await query(
+      `SELECT "data" FROM session_auth WHERE "id" = $1 LIMIT 1`,
+      [key]
+    );
+    if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
       return null;
     }
+    const rawData = res.rows[0].data;
+    let parsed = null;
+    if (rawData.encrypted === true) {
+      const decryptedJson = decryptPayload(rawData);
+      if (!decryptedJson) {
+        throw new Error(`Failed to decrypt ${key} with any candidate key`);
+      }
+      parsed = JSON.parse(decryptedJson, BufferJSON.reviver);
+    } else {
+      const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+      parsed = JSON.parse(jsonString, BufferJSON.reviver);
+      try {
+        const encryptedRecord = encryptPayload(jsonString);
+        await query(
+          `UPDATE session_auth SET "data" = $1 WHERE "id" = $2`,
+          [JSON.stringify(encryptedRecord), key]
+        );
+      } catch (migErr) {}
+    }
+    sessionCache.set(key, parsed);
+    return parsed;
   };
 
   const removeData = async (file) => {
+    const key = `${normalizedSessionId}_${file}`;
+    sessionCache.delete(key);
     try {
-      const key = `${normalizedSessionId}_${file}`;
-      sessionCache.delete(key);
       await query(`DELETE FROM session_auth WHERE "id" = $1`, [key]);
-    } catch (error) {}
+    } catch (error) {
+      console.warn(`[SessionAuth] Warning deleting ${file}:`, error.message);
+    }
   };
 
   const credsKey = `${normalizedSessionId}_creds.json`;
@@ -253,7 +250,8 @@ async function usePgAuthState(sessionId) {
   try {
     creds = await readData('creds.json');
   } catch (err) {
-    console.warn(`[SessionAuth] Notice: error reading ${credsKey}:`, err.message);
+    console.error(`[SessionAuth] Database error reading credentials for ${normalizedSessionId}:`, err.message);
+    throw new Error(`[SessionAuth] Failed to load session credentials from PostgreSQL: ${err.message}`);
   }
 
   if (!creds) {
@@ -329,12 +327,10 @@ async function usePgAuthState(sessionId) {
               const value = data[category][id];
               const key = `${normalizedSessionId}_${category}-${id}.json`;
               if (value) {
-                sessionCache.set(key, value);
                 const jsonString = JSON.stringify(value, BufferJSON.replacer);
                 const encryptedRecord = encryptPayload(jsonString);
-                writes.push({ id: key, data: JSON.stringify(encryptedRecord) });
+                writes.push({ id: key, data: JSON.stringify(encryptedRecord), value });
               } else {
-                sessionCache.delete(key);
                 deletes.push(key);
               }
             }
@@ -343,8 +339,12 @@ async function usePgAuthState(sessionId) {
           if (deletes.length > 0) {
             try {
               await query(`DELETE FROM session_auth WHERE "id" = ANY($1)`, [deletes]);
+              for (const k of deletes) {
+                sessionCache.delete(k);
+              }
             } catch (delErr) {
               console.error('[SessionAuth] Batch delete error:', delErr.message);
+              throw new Error(`[SessionAuth] Batch delete failed: ${delErr.message}`);
             }
           }
 
@@ -361,8 +361,15 @@ async function usePgAuthState(sessionId) {
                    ON CONFLICT ("id") DO UPDATE SET "data" = EXCLUDED."data"`,
                   [ids, payloads]
                 );
+                for (const item of chunk) {
+                  sessionCache.set(item.id, item.value);
+                }
               } catch (writeErr) {
+                for (const item of chunk) {
+                  sessionCache.delete(item.id);
+                }
                 console.error('[SessionAuth] Batch write error:', writeErr.message);
+                throw new Error(`[SessionAuth] Batch write failed: ${writeErr.message}`);
               }
             }
           }

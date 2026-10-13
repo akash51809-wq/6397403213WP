@@ -222,41 +222,70 @@ class MediaStorageService {
     }
 
     const mimetype = options.mimetype || inferMimeType(safeName);
+    let diskSaved = false;
+    let dbSaved = false;
+    let cloudSaved = false;
+    let lastError = null;
 
     // 1. Write to local disk cache for instant fast access
     const filePath = path.join(this.localDir, safeName);
     try {
       fs.writeFileSync(filePath, buffer);
+      diskSaved = true;
     } catch (fsErr) {
-      console.warn(`[MediaStorage] Local disk write warning for ${safeName}:`, fsErr.message);
+      lastError = fsErr;
+      console.error(`[MediaStorage] Local disk write error for ${safeName}:`, fsErr.message);
     }
 
     // 2. Persist to PostgreSQL database (survives Render restart / redeploy)
     try {
-      await this.postgresProvider.save(safeName, buffer, {
+      const pgRes = await this.postgresProvider.save(safeName, buffer, {
         mimetype,
         ownerUserId: options.ownerUserId,
         metadata: options.metadata
       });
+      if (pgRes) {
+        dbSaved = true;
+      }
     } catch (pgErr) {
-      console.warn(`[MediaStorage] Database persist warning for ${safeName}:`, pgErr.message);
+      lastError = pgErr;
+      console.error(`[MediaStorage] Database persist error for ${safeName}:`, pgErr.message);
     }
 
     // 3. Optional Cloud storage mirror if configured
     if (this.cloudProvider.enabled) {
       try {
-        await this.cloudProvider.save(safeName, buffer, { mimetype, ...options });
+        const cRes = await this.cloudProvider.save(safeName, buffer, { mimetype, ...options });
+        if (cRes) cloudSaved = true;
       } catch (cloudErr) {
         console.warn(`[MediaStorage] Cloud storage mirror warning for ${safeName}:`, cloudErr.message);
       }
     }
 
+    // Fail-safe verification: Ensure media is actually persisted
+    if (!diskSaved && !dbSaved && !cloudSaved) {
+      const errorMsg = `[MediaStorage] Failed to save media '${safeName}': both disk cache and persistent database storage failed. (${lastError?.message || 'Unknown error'})`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // If options.requirePersistent is requested, verify persistent storage
+    if (options.requirePersistent && !dbSaved && !cloudSaved) {
+      const errorMsg = `[MediaStorage] Persistent database storage failed for '${safeName}' while requirePersistent was requested.`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+
     return {
+      success: true,
       filename: safeName,
       url: `/media/${safeName}`,
       mimetype,
       size: buffer.length,
-      filePath
+      filePath,
+      savedToDisk: diskSaved,
+      savedToDb: dbSaved,
+      savedToCloud: cloudSaved
     };
   }
 
