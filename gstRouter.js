@@ -329,8 +329,32 @@ router.post('/api/gst/search', authRequired, async (req, res) => {
         pricePerHit = Number(planDoc.price);
       }
 
-      const curBalance = Number(user.walletBalance || 0);
-      if (curBalance < pricePerHit) {
+// Atomic PostgreSQL wallet balance deduction (Guarantees zero double-spending & no negative balance)
+async function atomicDeductWalletBalance(userId, amount) {
+  try {
+    const { connection } = require('./db');
+    if (connection?.pool) {
+      const res = await connection.pool.query(
+        `UPDATE users 
+         SET "walletBalance" = "walletBalance" - $1, "updatedAt" = NOW() 
+         WHERE "userId" = $2 AND "walletBalance" >= $1 
+         RETURNING "walletBalance"`,
+        [amount, String(userId)]
+      );
+      if (res.rowCount > 0) {
+        return { success: true, newBalance: Number(res.rows[0].walletBalance) };
+      }
+    }
+  } catch (err) {
+    console.error('[GST Wallet Debit Error]:', err.message);
+  }
+  return { success: false };
+}
+
+      // Atomic deduction from wallet
+      const deduction = await atomicDeductWalletBalance(user.userId, pricePerHit);
+      if (!deduction.success) {
+        const curBalance = Number(user.walletBalance || 0);
         return res.status(402).json({
           success: false,
           code: 'INSUFFICIENT_BALANCE',
@@ -339,11 +363,7 @@ router.post('/api/gst/search', authRequired, async (req, res) => {
           walletBalance: curBalance
         });
       }
-
-      // Deduct from wallet
-      user.walletBalance = Math.max(0, curBalance - pricePerHit);
-      user.updatedAt = new Date();
-      await user.save();
+      user.walletBalance = deduction.newBalance;
     }
 
     const profile = buildTaxpayerProfile(cleanGstin);
@@ -453,15 +473,21 @@ router.get('/api/v1/gst/verify', async (req, res) => {
       });
     }
 
-    // Deduct wallet balance for non-admin
+    // Atomic deduction from wallet for non-admin
     if (!isAdmin) {
-      authUser.walletBalance = Math.max(0, curBalance - pricePerHit);
-      authUser.updatedAt = new Date();
-      await authUser.save();
+      const deduction = await atomicDeductWalletBalance(authUser.userId, pricePerHit);
+      if (!deduction.success) {
+        const curBalance = Number(authUser.walletBalance || 0);
+        return res.status(402).json({
+          success: false,
+          code: 'INSUFFICIENT_BALANCE',
+          error: `Insufficient wallet balance! GST verification requires ₹${pricePerHit} per hit. Your current balance is ₹${curBalance.toFixed(2)}. Please add funds to your wallet.`
+        });
+      }
+      authUser.walletBalance = deduction.newBalance;
     }
 
     const profile = buildTaxpayerProfile(clean);
-    const filings = buildFilingRecords(clean, '2026-2027');
 
     // Record in user's search history
     recordSearchHistory(authUser.userId, {
@@ -476,8 +502,7 @@ router.get('/api/v1/gst/verify', async (req, res) => {
       success: true,
       status: 200,
       data: {
-        taxpayer: profile,
-        recentFilings: filings.summary
+        taxpayer: profile
       },
       charged: isAdmin ? 0 : pricePerHit,
       walletBalance: isAdmin ? 999999 : authUser.walletBalance

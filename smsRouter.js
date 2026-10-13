@@ -451,10 +451,20 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
       createdAt: formatISTDate(Date.now())
     };
 
-    // If active phone WebSocket is connected, dispatch SMS directly to Android phone
+    // If active phone WebSocket is connected, dispatch SMS directly to target or first available Android phone
     const activeSockets = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN);
-    if (activeSockets.length > 0) {
-      const targetSocket = activeSockets[0];
+    let targetSocket = null;
+    if (deviceId && phoneSockets.has(deviceId)) {
+      const specificWs = phoneSockets.get(deviceId);
+      if (specificWs && specificWs.readyState === WebSocket.OPEN) {
+        targetSocket = specificWs;
+      }
+    }
+    if (!targetSocket && activeSockets.length > 0) {
+      targetSocket = activeSockets[0];
+    }
+
+    if (targetSocket) {
       try {
         targetSocket.send(JSON.stringify({
           event: 'send_sms',
@@ -466,10 +476,12 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
           }
         }));
         outboxItem.status = 'DISPATCHED_TO_PHONE';
-        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone`);
+        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone (${outboxItem.deviceId})`);
       } catch (sendErr) {
         console.warn('[SMS Gateway] Failed sending to phone socket:', sendErr.message);
       }
+    } else {
+      outboxItem.status = 'QUEUED_OFFLINE';
     }
 
     outboxMessages.unshift(outboxItem);
@@ -477,7 +489,9 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
 
     res.json({
       success: true,
-      message: `SMS to ${recipient} queued successfully.`,
+      message: outboxItem.status === 'DISPATCHED_TO_PHONE' 
+        ? `SMS to ${recipient} dispatched to Android Gateway.`
+        : `SMS to ${recipient} queued (Gateway currently offline. Will dispatch when phone connects).`,
       sms: outboxItem
     });
   } catch (err) {
