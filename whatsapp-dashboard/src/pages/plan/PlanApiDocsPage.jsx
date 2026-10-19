@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanApiDocsPage() {
   const { notify } = useAuth()
@@ -23,8 +24,7 @@ export default function PlanApiDocsPage() {
   const origin = window.location.origin
 
   useEffect(() => {
-    fetch('/api/plans/user/stats')
-      .then(r => r.json())
+    api('/api/plans/user/stats')
       .then(data => {
         if (data.success && data.stats) {
           setStats(data.stats)
@@ -105,8 +105,9 @@ export default function PlanApiDocsPage() {
       }
     },
     dth: {
-      name: 'DTH Info & Last Recharge API',
+      name: 'DTH Customer Info API',
       path: '/api/Mobile/DthInfoWithLastRechargeDate',
+      altPath: '/DTHinfoDetails.aspx',
       method: 'GET / POST',
       desc: 'Query customer account balance, monthly pack amount, and next due date for DTH subscriber numbers.',
       params: [
@@ -125,6 +126,40 @@ export default function PlanApiDocsPage() {
           "Monthly": "310",
           "Next Recharge Date": "2026-10-30",
           "Plan": "Mega HD Pack"
+        },
+        "Message": "Offer Successfully Checked"
+      }
+    },
+    recharge: {
+      name: 'Last Recharge Check API',
+      path: '/RechargeCheck.aspx',
+      altPath: '/api/Mobile/RechargeCheck',
+      method: 'GET / POST',
+      desc: 'Verify previous recharge amount, transaction date, customer name, and active plan expiry date for any mobile or DTH number (Directly compatible with https://planapi.in/RechargeCheck.aspx).',
+      params: [
+        { name: 'apimember_id', req: 'Required', desc: 'Your registered mobile number or Member ID (or ApiUserID)' },
+        { name: 'api_password', req: 'Required', desc: 'Your primary Plan API secret token (or token)' },
+        { name: 'mobile_no', req: 'Required', desc: '10-digit mobile number or DTH VC / Subscriber ID' },
+        { name: 'Opcode', req: 'Required', desc: 'Operator code (2 for Airtel, 11 for Jio, 6 for VI, 4 for BSNL, 28 for Tata Play, etc.)' }
+      ],
+      sampleCurl: `curl -X GET "${origin}/RechargeCheck.aspx?apimember_id=${stats.mobile}&api_password=${stats.apiToken}&mobile_no=${testMobile}&Opcode=2"`,
+      sampleResponse: {
+        "error": "0",
+        "DATA": {
+          "VC": testMobile,
+          "Name": "MR Subscriber .",
+          "Rmn": testMobile,
+          "Balance": "299.00",
+          "Monthly": "299",
+          "Next Recharge Date": "2026-11-15",
+          "Plan": "₹299 Unlimited Pack",
+          "Address": "Jaipur, Rajasthan",
+          "City": "Jaipur",
+          "District": "40",
+          "State": "Rajasthan",
+          "PIN Code": "302020",
+          "Last Recharge Date": "2026-10-15",
+          "Operator": "AIRTEL"
         },
         "Message": "Offer Successfully Checked"
       }
@@ -147,6 +182,8 @@ export default function PlanApiDocsPage() {
         url = `/api/Mobile/RofferCheck?apimember_id=${stats.mobile}&api_password=${stats.apiToken}&operator_code=${testOpCode}&mobile_no=${testMobile}`
       } else if (activeTab === 'dth') {
         url = `/api/Mobile/DthInfoWithLastRechargeDate?apimember_id=${stats.mobile}&api_password=${stats.apiToken}&mobile_no=${testMobile}&Opcode=28`
+      } else if (activeTab === 'recharge') {
+        url = `/RechargeCheck.aspx?apimember_id=${stats.mobile}&api_password=${stats.apiToken}&mobile_no=${testMobile}&Opcode=2`
       }
 
       const res = await fetch(url)
@@ -243,6 +280,11 @@ export default function PlanApiDocsPage() {
             <code style={{ fontSize: 14, fontWeight: 700, color: '#431407' }}>
               {current.path}
             </code>
+            {current.altPath && (
+              <span style={{ fontSize: 11, color: '#78867f', marginLeft: 4 }}>
+                (or <code>{current.altPath}</code>)
+              </span>
+            )}
           </div>
           <button type="button" className="btn" onClick={handleCopyCurl}>
             {copiedCurl ? '✓ cURL Copied' : 'Copy cURL'}

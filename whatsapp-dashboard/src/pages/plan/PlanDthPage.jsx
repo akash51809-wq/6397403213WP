@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanDthPage() {
   const { notify } = useAuth()
@@ -25,12 +26,10 @@ export default function PlanDthPage() {
 
     try {
       setLoading(true)
-      const res = await fetch('/api/dth/query', {
+      const data = await api('/api/dth/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dthNumber: clean, operatorCode: op })
       })
-      const data = await res.json()
       if (data.success && data.data) {
         setResult(data.data.DATA || data.data)
         setResponseTime(data.responseTime || '< 1 ms')

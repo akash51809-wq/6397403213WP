@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export function Sidebar() {
   const {
@@ -48,8 +49,7 @@ export function Sidebar() {
     let mounted = true
     const fetchPlanStatus = async () => {
       try {
-        const res = await fetch('/api/plans/user/stats')
-        const data = await res.json()
+        const data = await api('/api/plans/user/stats')
         if (mounted && data.success && data.stats) {
           setPlanStats(data.stats)
         }
@@ -219,12 +219,57 @@ export function Sidebar() {
             </NavLink>
 
             <NavLink 
+              to="/plans/browse" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Browse Plans"
+            >
+              <span>📋</span><b>Browse Plans</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/roffer" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Customer R-Offer"
+            >
+              <span>🎁</span><b>Customer R-Offer</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/dth" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="DTH Customer Info"
+            >
+              <span>📺</span><b>DTH Info</b>
+            </NavLink>
+
+            <NavLink 
+              to="/plans/recharge-status" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Last Recharge Check"
+            >
+              <span>⚡</span><b>Last Recharge</b>
+            </NavLink>
+
+            <NavLink 
               to="/plans/api-docs" 
               className={({ isActive }) => (isActive ? 'active' : '')} 
               onClick={closeMobile}
               data-title="Plan API Docs"
             >
               <span>🔑</span><b>API Documents</b>
+            </NavLink>
+
+            <NavLink 
+              to="/subscription?service=plan" 
+              className={({ isActive }) => (isActive ? 'active' : '')} 
+              onClick={closeMobile}
+              data-title="Buy API Hits"
+            >
+              <span>💎</span><b>Buy API Hits</b>
             </NavLink>
           </>
         ) : isGstActive ? (

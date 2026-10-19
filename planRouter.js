@@ -605,24 +605,23 @@ router.all(['/api/Mobile/RofferCheck', '/api/Mobile/roffercheck', '/api/mobile/r
   }
 });
 
-// 4. DTH Info & Last Recharge Check API
+// 4. DTH Customer Info API
 router.all([
   '/api/Mobile/DthInfoWithLastRechargeDate',
   '/api/Mobile/dthinfowithlastrechargedate',
   '/api/mobile/dthinfowithlastrechargedate',
   '/api/Mobile/DthInfo',
   '/api/Mobile/DthInfoDetails',
-  '/api/Mobile/LastRechargeCheck',
-  '/api/Mobile/RechargeCheck',
-  '/api/Mobile/LastRecharge'
+  '/DTHinfoDetails.aspx',
+  '/dthinfodetails.aspx'
 ], async (req, res) => {
   const clientIp = getClientIp(req);
   const params = { ...req.query, ...req.body };
 
-  const apiUserId = params.apimember_id || params.ApiUserID || params.apiuserid || params.userMobile;
-  const token = params.api_password || params.token || params.Token;
-  const opCode = params.Opcode || params.opcode || params.operator_code || params.operatorcode || params.OpCode;
-  const mobileNo = params.mobile_no || params.Mobileno || params.mobileno || params.mobile || params.MobileNo || params.VC || params.vc;
+  const apiUserId = params.apimember_id || params.ApiUserID || params.apiuserid || params.userMobile || params.username;
+  const token = params.api_password || params.token || params.Token || params.password;
+  const opCode = params.Opcode || params.opcode || params.operator_code || params.operatorcode || params.OpCode || '28';
+  const mobileNo = params.mobile_no || params.Mobileno || params.mobileno || params.mobile || params.MobileNo || params.VC || params.vc || params.number;
 
   const auth = await authenticateApiRequest(apiUserId, token, clientIp);
   if (!auth.authenticated) {
@@ -647,16 +646,65 @@ router.all([
   const cleanNumber = String(mobileNo).trim().replace(/\D/g, '');
 
   try {
-    let result;
-    const dthCodes = ['24', '25', '27', '28', '29', '21'];
-    const cleanOpStr = String(opCode || '').trim();
+    const result = await fetchDthInfoDetails(cleanNumber, opCode);
+    return res.status(200).json(result);
+  } catch (err) {
+    return res.status(200).json({
+      "error": "1",
+      "DATA": null,
+      "Message": "Service temporarily unavailable"
+    });
+  }
+});
 
-    if (dthCodes.includes(cleanOpStr) || req.originalUrl.toLowerCase().includes('dth')) {
-      result = await fetchDthInfoDetails(cleanNumber, opCode);
-    } else {
-      result = await fetchLastRechargeDetails(cleanNumber, opCode);
-    }
+// 5. Dedicated Last Recharge Check API (Matching https://planapi.in/RechargeCheck.aspx)
+router.all([
+  '/RechargeCheck.aspx',
+  '/rechargecheck.aspx',
+  '/Rechargecheck.aspx',
+  '/api/RechargeCheck.aspx',
+  '/api/rechargecheck.aspx',
+  '/api/Mobile/RechargeCheck.aspx',
+  '/api/mobile/rechargecheck.aspx',
+  '/api/Mobile/RechargeCheck',
+  '/api/mobile/rechargecheck',
+  '/api/Mobile/LastRechargeCheck',
+  '/api/mobile/lastrechargecheck',
+  '/api/Mobile/LastRecharge',
+  '/api/mobile/lastrecharge'
+], async (req, res) => {
+  const clientIp = getClientIp(req);
+  const params = { ...req.query, ...req.body };
 
+  const apiUserId = params.apimember_id || params.ApiUserID || params.apiuserid || params.userMobile || params.username;
+  const token = params.api_password || params.token || params.Token || params.password;
+  const opCode = params.Opcode || params.opcode || params.operator_code || params.operatorcode || params.OpCode || '2';
+  const mobileNo = params.mobile_no || params.Mobileno || params.mobileno || params.mobile || params.MobileNo || params.VC || params.vc || params.number;
+
+  const auth = await authenticateApiRequest(apiUserId, token, clientIp);
+  if (!auth.authenticated) {
+    return res.status(200).json({
+      "error": "3",
+      "DATA": null,
+      "Message": "Authentication failed"
+    });
+  }
+
+  const allowed = await checkAndDeductPlanHit(auth, res, mobileNo);
+  if (!allowed) return;
+
+  if (!mobileNo || String(mobileNo).trim().replace(/\D/g, '').length < 8) {
+    return res.status(200).json({
+      "error": "2",
+      "DATA": null,
+      "Message": "Invalid or missing mobile / DTH number"
+    });
+  }
+
+  const cleanNumber = String(mobileNo).trim().replace(/\D/g, '');
+
+  try {
+    const result = await fetchLastRechargeDetails(cleanNumber, opCode);
     return res.status(200).json(result);
   } catch (err) {
     return res.status(200).json({

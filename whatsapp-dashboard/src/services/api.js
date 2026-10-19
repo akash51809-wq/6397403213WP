@@ -1,6 +1,6 @@
 // API Client & Authentication Token Helpers
 
-export const getToken = () => localStorage.getItem('wa_login') || ''
+export const getToken = () => localStorage.getItem('wa_login') || localStorage.getItem('token') || ''
 
 export const setToken = (token) => {
   if (token) {

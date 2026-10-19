@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanLookupPage() {
   const { notify } = useAuth()
@@ -23,17 +24,11 @@ export default function PlanLookupPage() {
 
     try {
       setLoading(true)
-      const token = localStorage.getItem('token') || ''
-      const res = await fetch('/api/lookup/operator', {
+      const data = await api('/api/lookup/operator', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
         body: JSON.stringify({ mobile: clean })
       })
-      const data = await res.json()
-      if (res.status === 402 || data.code === 'INSUFFICIENT_BALANCE') {
+      if (data.code === 'INSUFFICIENT_BALANCE') {
         notify(data.message || 'अपर्याप्त वॉलेट बैलेंस! कृपया वॉलेट में फंड जोड़ें।')
         return
       }

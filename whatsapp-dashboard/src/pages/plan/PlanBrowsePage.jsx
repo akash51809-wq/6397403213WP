@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanBrowsePage() {
   const { notify } = useAuth()
@@ -46,8 +47,7 @@ export default function PlanBrowsePage() {
 
   // Fetch operators & circles metadata
   useEffect(() => {
-    fetch('/api/plans/mobile/meta')
-      .then(r => r.json())
+    api('/api/plans/mobile/meta')
       .then(data => {
         if (data.success) {
           if (data.operators?.length) setOperators(data.operators)
@@ -60,12 +60,10 @@ export default function PlanBrowsePage() {
   const fetchPlans = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/plans/mobile/query', {
+      const data = await api('/api/plans/mobile/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operatorCode: selectedOp, circleCode: selectedCircle })
       })
-      const data = await res.json()
       if (data.success && data.data) {
         setPlansData(data.data.plans || {})
         setCurrentMeta({

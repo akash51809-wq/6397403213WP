@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import api from '../../services/api'
 
 export default function PlanRofferPage() {
   const { notify } = useAuth()
@@ -26,12 +27,10 @@ export default function PlanRofferPage() {
     try {
       setLoading(true)
       setOffers([])
-      const res = await fetch('/api/roffer/query', {
+      const data = await api('/api/roffer/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: clean, operatorCode })
       })
-      const data = await res.json()
       if (data.success && data.data) {
         setQueriedNumber(clean)
         setResponseTime(data.responseTime || '< 1 ms')

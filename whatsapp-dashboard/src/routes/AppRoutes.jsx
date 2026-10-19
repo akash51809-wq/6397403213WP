@@ -151,6 +151,9 @@ export default function AppRoutes() {
         <Route path="plans/roffer" element={<PlanRofferPage />} />
         <Route path="plans/dth" element={<PlanDthPage />} />
         <Route path="plans/recharge-status" element={<PlanRechargePage />} />
+        <Route path="plans/recharge" element={<Navigate to="/plans/recharge-status" replace />} />
+        <Route path="plans/last-recharge" element={<Navigate to="/plans/recharge-status" replace />} />
+        <Route path="plans/recharge-check" element={<Navigate to="/plans/recharge-status" replace />} />
         <Route path="plans/api-docs" element={<PlanApiDocsPage />} />
         <Route path="plans/pricing" element={<Navigate to="/subscription?service=plan" replace />} />
 

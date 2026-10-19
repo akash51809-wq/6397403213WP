@@ -240,8 +240,11 @@ async function purgeExpired() {
   } catch (err) {}
 }
 
-// Run cleanup every 1 hour
-setInterval(purgeExpired, 60 * 60 * 1000);
+// Run cleanup every 1 hour (unref so timer does not block exit)
+const purgeTimer = setInterval(purgeExpired, 60 * 60 * 1000);
+if (purgeTimer && purgeTimer.unref) {
+  purgeTimer.unref();
+}
 
 module.exports = {
   getNext2MidnightExpiry,
