@@ -60,7 +60,7 @@ function getDefaultSeedAccounts() {
       username: defaultUser2,
       password: defaultPass2,
       label: `Secondary EzyTM Node (${defaultUser2})`,
-      status: 'Active',
+      status: 'Disabled',
       total_requests: 0,
       success_requests: 0,
       failed_requests: 0,

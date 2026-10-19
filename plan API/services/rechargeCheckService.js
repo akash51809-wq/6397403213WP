@@ -43,12 +43,12 @@ function normalizeRechargeResult(rawResult, cleanNumber, opCode) {
   }
 
   const rawData = rawResult.DATA || rawResult.data || {};
-  const opName = rawData.Operator || OPERATOR_NAMES[String(opCode)] || 'AIRTEL';
-  const amount = rawData.Balance || rawData.Monthly || rawData.amount || rawData.lastRechargeAmount || '299.00';
-  const lastDate = rawData["Last Recharge Date"] || rawData.lastRechargeDate || rawData.date || new Date(Date.now() - 5 * 86400000).toISOString().split('T')[0].replace(/-/g, '/');
-  const nextDate = rawData["Next Recharge Date"] || rawData.expiryDate || rawData.duedate || new Date(Date.now() + 23 * 86400000).toISOString().split('T')[0];
-  const plan = rawData.Plan || (amount ? `₹${parseFloat(amount) || amount} Unlimited Pack` : 'Unlimited Plan');
-  const rmn = rawData.Rmn || (cleanNumber.length >= 10 ? cleanNumber.slice(-10) : cleanNumber);
+  const opName = rawData.Operator || rawData.operator || OPERATOR_NAMES[String(opCode)] || 'Airtel';
+  const amount = (rawData.Balance !== undefined && rawData.Balance !== '') ? rawData.Balance : (rawData.Monthly || rawData.amount || rawData.lastRechargeAmount || '');
+  const lastDate = rawData["Last Recharge Date"] || rawData.lastRechargeDate || rawData.date || '';
+  const nextDate = rawData["Next Recharge Date"] || rawData.expiryDate || rawData.duedate || '';
+  const plan = rawData.Plan || rawData.plan || (amount ? `₹${parseFloat(amount) || amount} Plan` : '');
+  const rmn = rawData.Rmn || rawData.mobile || (cleanNumber.length >= 10 ? cleanNumber.slice(-10) : cleanNumber);
 
   const normalizedData = {
     VC: rawData.VC || cleanNumber,
@@ -97,21 +97,24 @@ async function fetchLastRechargeDetails(mobileOrVc, opCode) {
 
   const cacheKey = `${cleanNumber}_${opCode || 'auto'}`;
 
-  // 1. Check persistent memory cache (<0.001 ms)
+  // 1. Check persistent memory cache (only if was fetched from live website)
   if (rechargeCache.has(cacheKey)) {
     const cached = rechargeCache.get(cacheKey);
-    const normalized = normalizeRechargeResult(cached, cleanNumber, opCode);
-    return {
-      ...normalized,
-      cached: true
-    };
+    if (cached && cached.isLive) {
+      const normalized = normalizeRechargeResult(cached, cleanNumber, opCode);
+      return {
+        ...normalized,
+        cached: true
+      };
+    }
   }
 
-  // 2. Fetch live data
+  // 2. Fetch live data from https://planapi.in/RechargeCheck.aspx
   try {
     const liveRes = await browserManager.checkLastRecharge(cleanNumber, opCode);
     if (liveRes && liveRes.error === "0") {
       const normalized = normalizeRechargeResult(liveRes, cleanNumber, opCode);
+      normalized.isLive = true;
       rechargeCache.set(cacheKey, normalized);
       saveRechargeCache(rechargeCache);
       return normalized;
@@ -130,24 +133,23 @@ async function fetchLastRechargeDetails(mobileOrVc, opCode) {
       VC: cleanNumber,
       Name: "MR Subscriber .",
       Rmn: cleanNumber.length >= 10 ? cleanNumber.slice(-10) : cleanNumber,
-      Balance: "299.00",
-      Monthly: "299",
-      "Next Recharge Date": new Date(Date.now() + 24 * 86400000).toISOString().split('T')[0],
-      Plan: "₹299 Unlimited Pack",
-      Address: "Flat no apartment, Model Town, In",
-      City: "Jaipur",
-      District: "40",
-      State: "Rajasthan",
-      "PIN Code": "302020",
-      "Last Recharge Date": new Date(Date.now() - 4 * 86400000).toISOString().split('T')[0].replace(/-/g, '/'),
+      Balance: "0.00",
+      Monthly: "0",
+      "Next Recharge Date": "",
+      Plan: "",
+      Address: "",
+      City: "",
+      District: "",
+      State: "",
+      "PIN Code": "",
+      "Last Recharge Date": "",
       Operator: opName
     },
     Message: "Offer Successfully Checked"
   };
 
   const normalizedFallback = normalizeRechargeResult(fallbackResult, cleanNumber, opCode);
-  rechargeCache.set(cacheKey, normalizedFallback);
-  saveRechargeCache(rechargeCache);
+  normalizedFallback.isLive = false;
   return normalizedFallback;
 }
 

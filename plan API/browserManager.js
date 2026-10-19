@@ -10,7 +10,7 @@ const config = require('./config');
 const logger = require('./services/logger');
 const ezytmAccountService = require('./services/ezytmAccountService');
 const operatorCacheService = require('./services/operatorCacheService');
-const isLiveBrowserEnabled = process.env.ENABLE_LIVE_BROWSER === 'true';
+const isLiveBrowserEnabled = process.env.ENABLE_LIVE_BROWSER !== 'false';
 const seriesEngine = require('./services/seriesEngine');
 
 const CACHE_FILE = path.join(__dirname, 'data', 'operator_cache.json');
@@ -91,7 +91,7 @@ class EzytmAccountSession {
       return this.page;
     }
 
-    if (this.sessionState === 'INITIALIZING' && this.initPromise) {
+    if (this.initPromise) {
       return this.initPromise;
     }
 
@@ -138,11 +138,13 @@ class EzytmAccountSession {
           await passInput.waitFor({ state: 'visible', timeout: 10000 });
           await passInput.fill(this.password || config.password || '123456');
 
-          await Promise.all([
-            this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-            this.page.locator('#ContentPlaceHolder1_LinkButton1').click()
-          ]);
-          await this.page.waitForTimeout(1000);
+          await this.page.locator('#ContentPlaceHolder1_LinkButton1').click().catch(async () => {
+            await this.page.evaluate(() => {
+              const btn = document.getElementById('ContentPlaceHolder1_LinkButton1');
+              if (btn) btn.click();
+            });
+          });
+          await this.page.waitForTimeout(3000);
 
           // Check for explicit error message on login page
           const errorMsgEl = this.page.locator('#ContentPlaceHolder1_lblMsg, #lblMsg, .alert-danger');
@@ -153,17 +155,13 @@ class EzytmAccountSession {
             }
           }
 
-          // 2. Pre-warm page at OperatorLook.aspx
-          await this.page.goto(config.operatorLookUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-          await this.page.locator('#ContentPlaceHolder1_TxtRechMobLoo').waitFor({ state: 'visible', timeout: 12000 });
-
           this.sessionState = 'READY';
           this.consecutiveErrors = 0;
           this.lastError = null;
           ezytmAccountService.recordAccountSuccess(this.id).catch(() => {});
 
           const elapsed = (performance.now() - t0).toFixed(2);
-          logger.info(`[Pool Node: ${this.label}] Session READY & Pre-warmed successfully in ${elapsed}ms.`);
+          logger.info(`[Pool Node: ${this.label}] Session READY & Authenticated successfully in ${elapsed}ms.`);
           return this.page;
         } catch (err) {
           logger.warn(`[Pool Node: ${this.label}] Session init attempt ${attempt} failed: ${err.message}`);
@@ -194,7 +192,7 @@ class EzytmAccountSession {
   /**
    * Execute a task on this account's sequential queue
    */
-  async executeTask(taskFn, taskName = 'task', timeoutMs = 25000) {
+  async executeTask(taskFn, taskName = 'task', timeoutMs = 60000) {
     if (this.status !== 'Active') {
       throw new Error(`EzyTM account ${this.label} is currently disabled.`);
     }
@@ -509,8 +507,9 @@ class EzytmSessionPool {
           }
           const session = new EzytmAccountSession(acc, this);
           this.sessions.set(acc.id, session);
-          // Parallel background init with error isolation
-          session.init().catch(err => logger.warn(`Session [${acc.label}] initial pre-warm notice: ${err.message}`));
+          if (process.env.AUTO_START_BROWSER_POOL === 'true') {
+            session.init().catch(err => logger.warn(`Session [${acc.label}] initial pre-warm notice: ${err.message}`));
+          }
         }
       }
 
@@ -618,7 +617,7 @@ class EzytmSessionPool {
   /**
    * Dispatch a task across the session pool with automatic failover
    */
-  async dispatchTask(taskFn, taskName = 'task', timeoutMs = 25000) {
+  async dispatchTask(taskFn, taskName = 'task', timeoutMs = 60000) {
     const session = await this.acquireBestSession();
     try {
       return await session.executeTask(taskFn, taskName, timeoutMs);
@@ -790,17 +789,37 @@ class EzytmSessionPool {
       await page.locator('#ContentPlaceHolder1_TxtRechMobLoo').fill(cleanNumber);
 
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {}),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
         page.locator('#ContentPlaceHolder1_LinkButton1').click()
       ]);
 
+      await page.waitForTimeout(2000);
+
       const parsed = await page.evaluate((num) => {
-        const op = document.getElementById('ContentPlaceHolder1_opcodetxt')?.innerText.trim() || '';
-        const amount = document.getElementById('ContentPlaceHolder1_LblAmount')?.innerText.trim() || '';
-        const mobile = document.getElementById('ContentPlaceHolder1_mobileno')?.innerText.trim() || num;
-        const expiry = document.getElementById('ContentPlaceHolder1_lblExprydate')?.innerText.trim() || '';
-        const lastRecharge = document.getElementById('ContentPlaceHolder1_lblstats')?.innerText.trim() || '';
-        const err = document.getElementById('ContentPlaceHolder1_errlblrc')?.innerText.trim() || '';
+        let op = document.getElementById('ContentPlaceHolder1_opcodetxt')?.innerText?.trim() || '';
+        let amount = document.getElementById('ContentPlaceHolder1_LblAmount')?.innerText?.trim() || '';
+        let mobile = document.getElementById('ContentPlaceHolder1_mobileno')?.innerText?.trim() || num;
+        let expiry = document.getElementById('ContentPlaceHolder1_lblExprydate')?.innerText?.trim() || '';
+        let lastRecharge = document.getElementById('ContentPlaceHolder1_lblstats')?.innerText?.trim() || '';
+        const err = document.getElementById('ContentPlaceHolder1_errlblrc')?.innerText?.trim() || '';
+
+        const billText = document.getElementById('ContentPlaceHolder1_pnlBillData')?.innerText || '';
+        if (!op && billText.includes('Operator Name :')) {
+          const m = billText.match(/Operator\s*Name\s*:\s*([A-Za-z0-9\s]+?)(?=\r|\n|Amount|$)/i);
+          if (m && m[1].trim() && !m[1].includes(':')) op = m[1].trim();
+        }
+        if (!amount && billText.includes('Amount :')) {
+          const m = billText.match(/Amount\s*:\s*([0-9.]+)/i);
+          if (m && m[1].trim()) amount = m[1].trim();
+        }
+        if (!expiry && billText.includes('Expiry Date :')) {
+          const m = billText.match(/Expiry\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
+          if (m && m[1].trim()) expiry = m[1].trim();
+        }
+        if (!lastRecharge && billText.includes('Last Recharge Date :')) {
+          const m = billText.match(/Last\s*Recharge\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
+          if (m && m[1].trim()) lastRecharge = m[1].trim();
+        }
 
         return { op, amount, mobile, expiry, lastRecharge, err };
       }, cleanNumber);
@@ -832,7 +851,7 @@ class EzytmSessionPool {
         },
         Message: "Offer Successfully Checked"
       };
-    }, `recharge_${cleanNumber}`);
+    }, `recharge_${cleanNumber}`, 60000);
   }
 
   /**
