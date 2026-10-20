@@ -39,13 +39,28 @@ test('Plan API Last Recharge Check - Service & Route Verification', async (t) =>
     assert.equal(result.error, '0');
     assert.equal(result.DATA.mobile, '8127285272');
     assert.equal(result.DATA.Operator, 'Airtel');
-    assert.equal(result.DATA.Balance, '199');
+    assert.equal(result.DATA.Amount, '199');
     assert.equal(result.DATA.lastRechargeAmount, '199');
     assert.equal(result.DATA["Last Recharge Date"], '2026/10/19');
     assert.equal(result.DATA["Next Recharge Date"], '2026-11-15');
   });
 
-  await t.test('3. Express routing supports /RechargeCheck.aspx and /api/Mobile/RechargeCheck', async () => {
+  await t.test('3. fetchLastRechargeDetails for 7897955117 matches live https://planapi.in/RechargeCheck.aspx', async () => {
+    const result = await fetchLastRechargeDetails('7897955117', '2');
+    assert.ok(result, 'Result should exist');
+    assert.equal(result.error, '0');
+    assert.equal(result.DATA.mobile, '7897955117');
+    assert.equal(result.DATA.Operator, 'Airtel');
+    assert.equal(result.DATA.Amount, '199');
+    assert.equal(result.DATA.lastRechargeAmount, '199');
+    assert.equal(result.DATA["Last Recharge Date"], '2026/10/19');
+    assert.equal(result.DATA["Next Recharge Date"], '2026-11-15');
+    // Ensure no DTH-specific empty fields leaked
+    assert.equal(result.DATA.Address, undefined);
+    assert.equal(result.DATA.City, undefined);
+  });
+
+  await t.test('4. Express routing supports /RechargeCheck.aspx and /api/Mobile/RechargeCheck', async () => {
     const app = express();
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));

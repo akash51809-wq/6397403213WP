@@ -69,13 +69,13 @@ export default function PlanRechargePage() {
     }
   }
 
-  const displayAmount = result?.lastRechargeAmount || result?.Balance || result?.Monthly || result?.Amount || result?.amount || '0.00'
-  const displayLastDate = result?.lastRechargeDate || result?.["Last Recharge Date"] || result?.Date || result?.date || 'N/A'
-  const displayExpiry = result?.expiryDate || result?.["Next Recharge Date"] || result?.Expiry || result?.duedate || 'Active · Network Verified'
+  const displayAmount = result?.Amount || result?.amount || result?.lastRechargeAmount || result?.RechargeAmount || result?.Balance || '0.00'
+  const displayLastDate = result?.LastRechargeDate || result?.["Last Recharge Date"] || result?.lastRechargeDate || result?.RechargeDate || result?.Date || result?.date || 'N/A'
+  const displayExpiry = result?.ExpiryDate || result?.["Expiry Date"] || result?.expiryDate || result?.["Next Recharge Date"] || result?.nextRechargeDate || result?.Expiry || result?.duedate || 'Active · Network Verified'
   const displayPlan = result?.Plan || result?.plan || (displayAmount ? `₹${displayAmount} Plan` : '')
   const displayOperator = result?.Operator || result?.operator || 'Verified'
   const displayName = result?.Name || result?.name || ''
-  const displayMobile = result?.mobile || result?.Rmn || result?.VC || mobile
+  const displayMobile = result?.Mobile || result?.mobile || result?.Mobile_No || result?.MOBILENO || result?.Rmn || result?.VC || mobile
 
   return (
     <div className="content">
