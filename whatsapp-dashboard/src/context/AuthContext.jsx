@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { api, clearToken, getSavedUser, setSavedUser, setToken } from '../services/api'
 
 const AuthContext = createContext(null)
