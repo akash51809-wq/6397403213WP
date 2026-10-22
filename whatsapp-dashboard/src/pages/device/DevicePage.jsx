@@ -31,7 +31,10 @@ export function DevicePage() {
     try {
       const res = await api('/api/devices')
       if (res && res.success) {
-        setDevices(res.devices || [])
+        setDevices(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(res.devices)) return prev
+          return res.devices || []
+        })
         if (res.allowedDevices) {
           setAllowedDevicesCount(res.allowedDevices)
         }
@@ -69,7 +72,7 @@ export function DevicePage() {
       }
       setDevices(fallbackList)
     }
-  }, [isAdmin, planInfo, status, currentUser])
+  }, [isAdmin, planInfo?.allowedDevices, currentUser?.username])
 
   useEffect(() => {
     fetchDevices()

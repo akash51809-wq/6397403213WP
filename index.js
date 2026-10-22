@@ -35,6 +35,7 @@ app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
 // Strict CORS Configuration
 const defaultAllowedOrigins = [
+    'https://services.easyrechargesolution.com',
     'https://local-whatsapp-eq4i.onrender.com',
     'https://wp.easyrechargesolution.com',
     'http://localhost:3000',
@@ -4088,7 +4089,7 @@ async function startBot(forceNew = false) {
             version,
             auth: state,
             printQRInTerminal: false,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'),
             syncFullHistory: false,
             keepAliveIntervalMs: 25000,
             connectTimeoutMs: 60000,
@@ -4228,10 +4229,11 @@ async function startBot(forceNew = false) {
 
                 if (shouldReconnect) {
                     if (adminReconnectTimer) clearTimeout(adminReconnectTimer);
+                    const isRestart = statusCode === DisconnectReason.restartRequired || statusCode === 515;
                     adminReconnectTimer = setTimeout(() => {
                         adminReconnectTimer = null;
                         startBot();
-                    }, 3000);
+                    }, isRestart ? 500 : 3000);
                 }
             }
         });

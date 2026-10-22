@@ -142,6 +142,7 @@ app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
 // Strict CORS Configuration
 const defaultAllowedOrigins = [
+  'https://services.easyrechargesolution.com',
   'https://local-whatsapp-eq4i.onrender.com',
   'https://wp.easyrechargesolution.com',
   'http://localhost:3000',

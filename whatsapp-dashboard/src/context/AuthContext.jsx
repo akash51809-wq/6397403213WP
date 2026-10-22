@@ -344,68 +344,26 @@ export function AuthProvider({ children }) {
     }
   }, [login])
 
-  // Polling status & qr (only poll QR when not yet connected)
+  // Stable status & qr polling (statusRef avoids interval teardown loops)
+  const statusRef = useRef(status)
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
   useEffect(() => {
     if (!login) return
     loadStatus()
-    if (status?.status !== 'connected') {
+    if (statusRef.current?.status !== 'connected') {
       loadQr()
     }
     const t = setInterval(() => {
       loadStatus()
-      if (status?.status !== 'connected') {
+      if (statusRef.current?.status !== 'connected') {
         loadQr()
       }
-    }, 4000)
+    }, 4500)
     return () => clearInterval(t)
-  }, [login, loadStatus, loadQr, status?.status])
-
-  // Real-time EventSource listener (STABLE: only created once on login, never reconnecting in a loop)
-  const esHandlersRef = useRef({ loadStatus, loadQr, loadChats, loadMessages, loadReports, selected })
-  useEffect(() => {
-    esHandlersRef.current = { loadStatus, loadQr, loadChats, loadMessages, loadReports, selected }
-  })
-
-  useEffect(() => {
-    if (!login) return
-    const es = new EventSource(`/api/incoming/events?token=${encodeURIComponent(login)}`)
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data || '{}')
-        if (payload.type === 'connected') {
-          // SSE handshake connection established — do not trigger heavy reloads
-          return
-        }
-        if (payload.type === 'connection_status' || payload.type === 'qr') {
-          if (payload.data?.status === 'connected') {
-            setQr(null)
-            setStatus(s => ({
-              ...s,
-              status: 'connected',
-              number: payload.data.number || s?.number,
-              profileName: payload.data.profileName || s?.profileName,
-              profilePicUrl: payload.data.profilePicUrl || s?.profilePicUrl,
-              ready: true
-            }))
-          } else if (payload.data?.qr) {
-            setQr(payload.data.qr)
-          }
-          esHandlersRef.current.loadStatus()
-          if (payload.data?.status !== 'connected') {
-            esHandlersRef.current.loadQr()
-          }
-        } else if (payload.type === 'new_message' || payload.type === 'refresh' || payload.type === 'read_update') {
-          esHandlersRef.current.loadChats()
-          if (esHandlersRef.current.selected) {
-            esHandlersRef.current.loadMessages(esHandlersRef.current.selected.chatJid)
-          }
-          esHandlersRef.current.loadReports()
-        }
-      } catch {}
-    }
-    es.onerror = () => {}
-    return () => es.close()
-  }, [login])
+  }, [login, loadStatus, loadQr])
 
   // Inactivity Watcher (30 minutes non-use condition)
   // Only logs out the web browser panel. WhatsApp Baileys session & API message workers remain active 24/7 on the server.
