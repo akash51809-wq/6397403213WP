@@ -155,11 +155,11 @@ async function scrapeLastRechargeHttp(mobile, opCode = '2') {
 
   const html = await rcPost.text();
 
-  const opMatch = html.match(/id="ContentPlaceHolder1_opcodetxt"[^>]*>([^<]+)<\/span>/i) || html.match(/Operator\s*Name\s*:\s*([^<\r\n]+)/i);
-  const amtMatch = html.match(/id="ContentPlaceHolder1_LblAmount"[^>]*>([^<]+)<\/span>/i) || html.match(/Amount\s*:\s*([0-9.]+)/i);
-  const mobMatch = html.match(/id="ContentPlaceHolder1_mobileno"[^>]*>([^<]+)<\/span>/i) || html.match(/Mobile\s*No\s*:\s*([0-9]+)/i);
-  const expMatch = html.match(/id="ContentPlaceHolder1_lblExprydate"[^>]*>([^<]+)<\/span>/i) || html.match(/Expiry\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
-  const lastMatch = html.match(/id="ContentPlaceHolder1_lblstats"[^>]*>([^<]+)<\/span>/i) || html.match(/Last\s*Recharge\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
+  const opMatch = html.match(/id="[^"]*opcodetxt"[^>]*>([^<]+)<\/span>/i) || html.match(/Operator\s*Name\s*:\s*([^<\r\n]+)/i);
+  const amtMatch = html.match(/id="[^"]*LblAmount"[^>]*>([^<]+)<\/span>/i) || html.match(/Amount\s*:\s*([0-9.]+)/i);
+  const mobMatch = html.match(/id="[^"]*mobileno"[^>]*>([^<]+)<\/span>/i) || html.match(/Mobile\s*No\s*:\s*([0-9]+)/i);
+  const expMatch = html.match(/id="[^"]*lblExprydate"[^>]*>([^<]+)<\/span>/i) || html.match(/Expiry\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
+  const lastMatch = html.match(/id="[^"]*lblstats"[^>]*>([^<]+)<\/span>/i) || html.match(/Last\s*Recharge\s*Date\s*:\s*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2})/i);
 
   const amount = amtMatch ? amtMatch[1].trim() : '';
   const expiryDate = expMatch ? expMatch[1].trim() : '';

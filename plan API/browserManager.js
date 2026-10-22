@@ -786,22 +786,27 @@ class EzytmSessionPool {
         await page.goto(config.rechargeCheckUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
       }
 
-      await page.locator('#ContentPlaceHolder1_TxtRechMobLoo').fill(cleanNumber);
+      const inputSelector = '[id$="TxtRechMobLoo"], [name$="TxtRechMobLoo"], input[name*="TxtRechMobLoo"]';
+      const btnSelector = '[id$="LinkButton1"], a[id*="LinkButton1"]';
+
+      await page.waitForSelector(inputSelector, { timeout: 15000 });
+      await page.locator(inputSelector).first().fill(cleanNumber);
 
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {}),
-        page.locator('#ContentPlaceHolder1_LinkButton1').click()
+        page.locator(btnSelector).first().click()
       ]);
 
       await page.waitForTimeout(2000);
 
       const parsed = await page.evaluate((num) => {
-        let op = document.getElementById('ContentPlaceHolder1_opcodetxt')?.innerText?.trim() || '';
-        let amount = document.getElementById('ContentPlaceHolder1_LblAmount')?.innerText?.trim() || '';
-        let mobile = document.getElementById('ContentPlaceHolder1_mobileno')?.innerText?.trim() || num;
-        let expiry = document.getElementById('ContentPlaceHolder1_lblExprydate')?.innerText?.trim() || '';
-        let lastRecharge = document.getElementById('ContentPlaceHolder1_lblstats')?.innerText?.trim() || '';
-        const err = document.getElementById('ContentPlaceHolder1_errlblrc')?.innerText?.trim() || '';
+        const findEl = (suffix) => document.querySelector(`[id$="${suffix}"]`) || document.getElementById(`ContentPlaceHolder1_${suffix}`) || document.getElementById(`ctl00_ContentPlaceHolder1_${suffix}`);
+        let op = findEl('opcodetxt')?.innerText?.trim() || '';
+        let amount = findEl('LblAmount')?.innerText?.trim() || '';
+        let mobile = findEl('mobileno')?.innerText?.trim() || num;
+        let expiry = findEl('lblExprydate')?.innerText?.trim() || '';
+        let lastRecharge = findEl('lblstats')?.innerText?.trim() || '';
+        const err = findEl('errlblrc')?.innerText?.trim() || '';
 
         const billText = document.getElementById('ContentPlaceHolder1_pnlBillData')?.innerText || '';
         if (!op && billText.includes('Operator Name :')) {

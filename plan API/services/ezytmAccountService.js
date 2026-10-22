@@ -1,8 +1,17 @@
 const fs = require('fs');
 const path = require('path');
-const db = require('./db');
 const config = require('../config');
 const logger = require('./logger');
+
+let rootDb = null;
+try {
+  rootDb = require('../../db');
+} catch (e) {
+  try {
+    rootDb = require('../db');
+  } catch (e2) {}
+}
+const localDb = require('./db');
 
 const ACCOUNTS_JSON_PATH = path.join(__dirname, '..', 'data', 'ezytm_accounts.json');
 
@@ -29,68 +38,73 @@ function notifyChange(event, data) {
   }
 }
 
+function getDbClient() {
+  if (rootDb && rootDb.connection && rootDb.connection.readyState === 1 && rootDb.connection.pool) {
+    return rootDb;
+  }
+  if (localDb && (localDb.isConnected || localDb.pool)) {
+    return localDb;
+  }
+  return null;
+}
+
+async function queryDb(sql, params) {
+  const client = getDbClient();
+  if (client) {
+    try {
+      return await client.query(sql, params);
+    } catch (e) {
+      logger.warn('DB query error in ezytmAccountService', { error: e.message });
+    }
+  }
+  return null;
+}
+
 /**
- * Load default fallback accounts if file or table is empty
+ * Single default primary account if store is completely empty
  */
 function getDefaultSeedAccounts() {
-  const defaultUser1 = (config.username && /^\d{10}$/.test(config.username) && config.username !== 'admin') 
+  const defaultUser = (config.username && /^\d{10}$/.test(config.username) && config.username !== 'admin') 
     ? config.username 
     : '8840457632';
-  const defaultPass1 = config.password || '123456';
-  const defaultUser2 = '9335819686';
-  const defaultPass2 = '123456';
+  const defaultPass = config.password || '123456';
 
   return [
     {
       id: 'EZY_DEFAULT_1',
-      username: defaultUser1,
-      password: defaultPass1,
-      label: `Primary EzyTM Node (${defaultUser1})`,
+      username: defaultUser,
+      password: defaultPass,
+      label: `Primary EzyTM Node (${defaultUser})`,
       status: 'Active',
       total_requests: 0,
       success_requests: 0,
       failed_requests: 0,
       last_used_at: null,
       last_error: null,
-      created_at: '2026-10-02T09:00:00.000Z',
-      updated_at: new Date().toISOString()
-    },
-    {
-      id: 'EZY_DEFAULT_2',
-      username: defaultUser2,
-      password: defaultPass2,
-      label: `Secondary EzyTM Node (${defaultUser2})`,
-      status: 'Disabled',
-      total_requests: 0,
-      success_requests: 0,
-      failed_requests: 0,
-      last_used_at: null,
-      last_error: null,
-      created_at: '2026-10-02T09:00:00.000Z',
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
   ];
 }
 
 /**
- * Read accounts from JSON file
+ * Read accounts from JSON file (Never re-seeds inside read)
  */
 function readAccountsFromFile() {
   try {
     if (fs.existsSync(ACCOUNTS_JSON_PATH)) {
-      const data = JSON.parse(fs.readFileSync(ACCOUNTS_JSON_PATH, 'utf8'));
-      if (Array.isArray(data) && data.length > 0) {
-        const valid = data.filter(a => a && a.username && String(a.username).toLowerCase() !== 'admin');
-        if (valid.length > 0) return valid;
+      const content = fs.readFileSync(ACCOUNTS_JSON_PATH, 'utf8');
+      if (content && content.trim()) {
+        const data = JSON.parse(content);
+        if (Array.isArray(data)) {
+          return data.filter(a => a && a.username && String(a.username).toLowerCase() !== 'admin');
+        }
       }
     }
   } catch (e) {
     logger.warn('Error reading ezytm_accounts.json', { error: e.message });
   }
-
-  const defaultAccounts = getDefaultSeedAccounts();
-  saveAccountsToFile(defaultAccounts);
-  return defaultAccounts;
+  return [];
 }
 
 /**
@@ -108,64 +122,49 @@ function saveAccountsToFile(accounts) {
 }
 
 /**
- * Get all accounts (Admin view) with permanent dual-sync & no-loss guarantee
+ * Get all accounts (Admin view)
+ * 1. Checks PostgreSQL first
+ * 2. Falls back to JSON file
+ * 3. Never restores deleted accounts
  */
 async function getAllAccounts() {
-  // 0. Auto-purge any 'admin' entries from DB permanently
-  if (db.isConnected) {
+  const dbClient = getDbClient();
+  let dbAccounts = [];
+
+  if (dbClient) {
     try {
-      await db.query("DELETE FROM ezytm_accounts WHERE LOWER(username) = 'admin' OR LOWER(label) LIKE '%admin%'");
-    } catch (e) {}
+      // Auto-purge any dummy admin entries permanently
+      await dbClient.query("DELETE FROM ezytm_accounts WHERE LOWER(username) = 'admin' OR LOWER(label) LIKE '%admin%'").catch(() => {});
+
+      const res = await dbClient.query("SELECT * FROM ezytm_accounts WHERE LOWER(username) != 'admin' ORDER BY created_at ASC");
+      if (res && Array.isArray(res.rows)) {
+        dbAccounts = res.rows;
+      }
+    } catch (e) {
+      logger.warn('Database query for ezytm_accounts failed, using local store', { error: e.message });
+    }
   }
 
-  const defaultSeeds = getDefaultSeedAccounts();
   const fileAccounts = readAccountsFromFile();
 
-  const mergedMap = new Map();
-  // 1. Seed defaults first (8840457632 & 9335819686)
-  for (const s of defaultSeeds) {
-    if (s && s.username && String(s.username).toLowerCase() !== 'admin') {
-      mergedMap.set(s.username, s);
-    }
+  // If DB has accounts, sync to file and return DB rows
+  if (dbAccounts.length > 0) {
+    saveAccountsToFile(dbAccounts);
+    return dbAccounts;
   }
 
-  // 2. Overlay file accounts (preserves edits, credentials, stats)
-  for (const f of fileAccounts) {
-    if (f && f.username && String(f.username).toLowerCase() !== 'admin') {
-      const existing = mergedMap.get(f.username);
-      mergedMap.set(f.username, existing ? { ...existing, ...f } : f);
-    }
-  }
-
-  // 3. Overlay DB accounts & sync merged items to PostgreSQL
-  if (db.isConnected) {
-    try {
-      const res = await db.query("SELECT * FROM ezytm_accounts WHERE LOWER(username) != 'admin' ORDER BY created_at ASC");
-      if (res && Array.isArray(res.rows)) {
-        for (const row of res.rows) {
-          if (row && row.username && String(row.username).toLowerCase() !== 'admin') {
-            const existing = mergedMap.get(row.username);
-            mergedMap.set(row.username, existing ? { ...existing, ...row } : row);
-          }
-        }
-      }
-
-      // Ensure all merged accounts exist in DB
-      for (const acc of mergedMap.values()) {
-        const existRes = await db.query('SELECT id FROM ezytm_accounts WHERE username = $1', [acc.username]).catch(() => null);
-        if (existRes && existRes.rows && existRes.rows.length > 0) {
-          await db.query(
-            `UPDATE ezytm_accounts 
-             SET password = $1, label = $2, status = $3, updated_at = NOW()
-             WHERE username = $4`,
-            [acc.password, acc.label, acc.status || 'Active', acc.username]
-          ).catch(() => {});
-        } else {
-          await db.query(
+  // If DB has no accounts, but file has accounts, insert file accounts into DB
+  if (fileAccounts.length > 0) {
+    if (dbClient) {
+      for (const acc of fileAccounts) {
+        try {
+          await dbClient.query(
             `INSERT INTO ezytm_accounts (id, username, password, label, status, total_requests, success_requests, failed_requests, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+             ON CONFLICT (username) DO UPDATE
+             SET password = EXCLUDED.password, label = EXCLUDED.label, status = EXCLUDED.status, updated_at = NOW()`,
             [
-              acc.id || ('EZY_' + Date.now()),
+              acc.id || ('EZY_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)),
               acc.username,
               acc.password,
               acc.label || `EzyTM (${acc.username})`,
@@ -174,24 +173,29 @@ async function getAllAccounts() {
               acc.success_requests || 0,
               acc.failed_requests || 0
             ]
-          ).catch(() => {});
-        }
+          );
+        } catch (err) {}
       }
-    } catch (e) {
-      logger.warn('Database query for ezytm_accounts failed, using local store', { error: e.message });
     }
+    return fileAccounts;
   }
 
-  // 4. Final safety filter to guarantee no admin entry can ever leak
-  for (const [key, acc] of mergedMap.entries()) {
-    if (String(acc.username).toLowerCase() === 'admin') {
-      mergedMap.delete(key);
+  // If BOTH DB and File are empty, seed only the primary account
+  const initialSeeds = getDefaultSeedAccounts();
+  saveAccountsToFile(initialSeeds);
+  if (dbClient) {
+    for (const acc of initialSeeds) {
+      try {
+        await dbClient.query(
+          `INSERT INTO ezytm_accounts (id, username, password, label, status, total_requests, success_requests, failed_requests, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 0, 0, 0, NOW(), NOW())
+           ON CONFLICT (username) DO NOTHING`,
+          [acc.id, acc.username, acc.password, acc.label, acc.status]
+        );
+      } catch (err) {}
     }
   }
-
-  const finalAccounts = Array.from(mergedMap.values());
-  saveAccountsToFile(finalAccounts);
-  return finalAccounts;
+  return initialSeeds;
 }
 
 /**
@@ -207,7 +211,7 @@ async function getActiveAccounts() {
 }
 
 /**
- * Add a new EzyTM Account (Persists to both DB and File)
+ * Add / Upsert an EzyTM Account (Persists to both DB and File)
  */
 async function addAccount({ username, password, label }) {
   if (!username || !password) {
@@ -238,11 +242,17 @@ async function addAccount({ username, password, label }) {
     updated_at: new Date().toISOString()
   };
 
-  if (db.isConnected) {
+  const dbClient = getDbClient();
+  if (dbClient) {
     try {
-      const res = await db.query(
+      const res = await dbClient.query(
         `INSERT INTO ezytm_accounts (id, username, password, label, status, total_requests, success_requests, failed_requests, created_at, updated_at)
          VALUES ($1, $2, $3, $4, 'Active', 0, 0, 0, NOW(), NOW())
+         ON CONFLICT (username) DO UPDATE
+         SET password = EXCLUDED.password,
+             label = EXCLUDED.label,
+             status = 'Active',
+             updated_at = NOW()
          RETURNING *`,
         [accountId, cleanUser, cleanPass, cleanLabel]
       );
@@ -250,7 +260,7 @@ async function addAccount({ username, password, label }) {
         createdAccount = res.rows[0];
       }
     } catch (e) {
-      logger.error('Failed to insert ezytm account into DB', { error: e.message });
+      logger.error('Failed to insert/update ezytm account in DB', { error: e.message });
     }
   }
 
@@ -258,7 +268,15 @@ async function addAccount({ username, password, label }) {
   const accounts = readAccountsFromFile();
   const existingIdx = accounts.findIndex(a => a.id === createdAccount.id || a.username === cleanUser);
   if (existingIdx !== -1) {
-    accounts[existingIdx] = createdAccount;
+    accounts[existingIdx] = {
+      ...accounts[existingIdx],
+      ...createdAccount,
+      password: cleanPass,
+      label: cleanLabel,
+      status: 'Active',
+      updated_at: new Date().toISOString()
+    };
+    createdAccount = accounts[existingIdx];
   } else {
     accounts.push(createdAccount);
   }
@@ -275,8 +293,9 @@ async function updateAccount(id, { username, password, label, status }) {
   if (!id) throw new Error('Account ID is required.');
 
   let updatedRow = null;
+  const dbClient = getDbClient();
 
-  if (db.isConnected) {
+  if (dbClient) {
     try {
       const updates = [];
       const values = [id];
@@ -288,8 +307,8 @@ async function updateAccount(id, { username, password, label, status }) {
       if (status) { updates.push(`status = $${idx++}`); values.push(status === 'Active' ? 'Active' : 'Disabled'); }
       updates.push(`updated_at = NOW()`);
 
-      const sql = `UPDATE ezytm_accounts SET ${updates.join(', ')} WHERE id = $1 RETURNING *`;
-      const res = await db.query(sql, values);
+      const sql = `UPDATE ezytm_accounts SET ${updates.join(', ')} WHERE id = $1 OR username = $1 RETURNING *`;
+      const res = await dbClient.query(sql, values);
       if (res && res.rows && res.rows.length > 0) {
         updatedRow = res.rows[0];
       }
@@ -300,7 +319,7 @@ async function updateAccount(id, { username, password, label, status }) {
 
   // Always sync to local file store
   const accounts = readAccountsFromFile();
-  const accIndex = accounts.findIndex(a => a.id === id);
+  const accIndex = accounts.findIndex(a => a.id === id || a.username === id);
   if (accIndex !== -1) {
     if (username) accounts[accIndex].username = String(username).trim();
     if (password) accounts[accIndex].password = String(password).trim();
@@ -323,29 +342,30 @@ async function updateAccount(id, { username, password, label, status }) {
  */
 async function toggleAccountStatus(id) {
   const all = await getAllAccounts();
-  const target = all.find(a => a.id === id);
+  const target = all.find(a => a.id === id || a.username === id);
   if (!target) throw new Error('Account not found.');
 
   const newStatus = target.status === 'Active' ? 'Disabled' : 'Active';
-  return await updateAccount(id, { status: newStatus });
+  return await updateAccount(target.id || id, { status: newStatus });
 }
 
 /**
- * Delete an account (Deletes from both DB and File)
+ * Delete an account (Deletes permanently from both DB and File)
  */
 async function deleteAccount(id) {
   if (!id) throw new Error('Account ID is required.');
 
-  if (db.isConnected) {
+  const dbClient = getDbClient();
+  if (dbClient) {
     try {
-      await db.query('DELETE FROM ezytm_accounts WHERE id = $1', [id]);
+      await dbClient.query('DELETE FROM ezytm_accounts WHERE id = $1 OR username = $1', [id]);
     } catch (e) {
       logger.error('Failed to delete ezytm account from DB', { error: e.message });
     }
   }
 
   const accounts = readAccountsFromFile();
-  const filtered = accounts.filter(a => a.id !== id);
+  const filtered = accounts.filter(a => a.id !== id && a.username !== id);
   saveAccountsToFile(filtered);
   notifyChange('delete', id);
   return true;
@@ -381,20 +401,13 @@ async function getNextActiveAccount() {
 async function recordAccountUsage(id) {
   if (!id) return;
   const now = new Date().toISOString();
-
-  if (db.isConnected) {
-    try {
-      await db.query(
-        'UPDATE ezytm_accounts SET total_requests = total_requests + 1, last_used_at = NOW() WHERE id = $1',
-        [id]
-      );
-      return;
-    } catch (e) {}
-  }
-
+  await queryDb(
+    'UPDATE ezytm_accounts SET total_requests = total_requests + 1, last_used_at = NOW() WHERE id = $1 OR username = $1',
+    [id]
+  );
   try {
     const accounts = readAccountsFromFile();
-    const acc = accounts.find(a => a.id === id);
+    const acc = accounts.find(a => a.id === id || a.username === id);
     if (acc) {
       acc.total_requests = (acc.total_requests || 0) + 1;
       acc.last_used_at = now;
@@ -408,19 +421,13 @@ async function recordAccountUsage(id) {
  */
 async function recordAccountSuccess(id) {
   if (!id) return;
-  if (db.isConnected) {
-    try {
-      await db.query(
-        'UPDATE ezytm_accounts SET success_requests = success_requests + 1, last_error = NULL WHERE id = $1',
-        [id]
-      );
-      return;
-    } catch (e) {}
-  }
-
+  await queryDb(
+    'UPDATE ezytm_accounts SET success_requests = success_requests + 1, last_error = NULL WHERE id = $1 OR username = $1',
+    [id]
+  );
   try {
     const accounts = readAccountsFromFile();
-    const acc = accounts.find(a => a.id === id);
+    const acc = accounts.find(a => a.id === id || a.username === id);
     if (acc) {
       acc.success_requests = (acc.success_requests || 0) + 1;
       acc.last_error = null;
@@ -438,20 +445,13 @@ async function recordAccountFailure(id, errorMsg) {
   if (sanitizedErr.includes('locator.waitFor') || sanitizedErr.includes('Timeout')) {
     sanitizedErr = 'EzyTM Login Timeout / Portal Delay';
   }
-
-  if (db.isConnected) {
-    try {
-      await db.query(
-        'UPDATE ezytm_accounts SET failed_requests = failed_requests + 1, last_error = $2 WHERE id = $1',
-        [id, sanitizedErr]
-      );
-      return;
-    } catch (e) {}
-  }
-
+  await queryDb(
+    'UPDATE ezytm_accounts SET failed_requests = failed_requests + 1, last_error = $2 WHERE id = $1 OR username = $1',
+    [id, sanitizedErr]
+  );
   try {
     const accounts = readAccountsFromFile();
-    const acc = accounts.find(a => a.id === id);
+    const acc = accounts.find(a => a.id === id || a.username === id);
     if (acc) {
       acc.failed_requests = (acc.failed_requests || 0) + 1;
       acc.last_error = sanitizedErr;

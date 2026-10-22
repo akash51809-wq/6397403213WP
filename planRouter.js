@@ -31,13 +31,35 @@ async function checkAndDeductPlanHit(auth, res, mobileNo = null) {
     } catch (e) {}
   }
 
-  const isAdmin = appUser && (appUser.role === 'admin' || String(appUser.userId).toUpperCase() === 'ADMIN');
+  // 1. Direct Admin Bypass check: Checks auth.user (Master token / 8840457632) and appUser
+  const adminMobile = (process.env.ADMIN_PHONE || process.env.PLANAPI_USERNAME || '8840457632').replace(/\D/g, '').slice(-10);
+  const authUserMobile = String(auth?.user?.mobile || '').replace(/\D/g, '').slice(-10);
+  const appUserMobile = String(appUser?.mobile || '').replace(/\D/g, '').slice(-10);
+
+  const isAdmin = (
+    auth?.user?.role === 'admin' ||
+    String(auth?.user?.id || '').toUpperCase().includes('ADMIN') ||
+    authUserMobile === adminMobile ||
+    authUserMobile === '8840457632' ||
+    appUser?.role === 'admin' ||
+    String(appUser?.userId || '').toUpperCase() === 'ADMIN' ||
+    appUserMobile === adminMobile ||
+    appUserMobile === '8840457632'
+  );
+
   if (isAdmin) return true;
 
-  // Deduct from plan hit quota
+  // 2. Active Subscription check for regular users
+  const hasActivePlan = appUser && (
+    (appUser.planApiExpiresAt && new Date(appUser.planApiExpiresAt).getTime() > Date.now()) ||
+    (appUser.planExpiresAt && new Date(appUser.planExpiresAt).getTime() > Date.now()) ||
+    (appUser.planApiPlan && !appUser.planApiExpiresAt)
+  );
+
+  // 3. Deduct from plan hit quota
   const userId = auth?.user?.id || appUser?.userId || appUser?.id || appUser?.mobile;
   const hitCheck = await deductUserHit(userId);
-  if (!hitCheck.allowed) {
+  if (!hitCheck.allowed && !hasActivePlan) {
     res.status(200).json({
       "ERROR": "4",
       "STATUS": "4",

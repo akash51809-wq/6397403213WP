@@ -471,7 +471,24 @@ async function initTables(pool) {
       "is_online" INT DEFAULT 0,
       "last_seen_at" BIGINT,
       "created_at" BIGINT
-    );`
+    );`,
+
+    // 18. ezytm_accounts (Plan API / EzyTM credentials rotation pool)
+    `CREATE TABLE IF NOT EXISTS ezytm_accounts (
+      id VARCHAR(100) PRIMARY KEY,
+      username VARCHAR(100) NOT NULL UNIQUE,
+      password VARCHAR(100) NOT NULL,
+      label VARCHAR(255) DEFAULT 'EzyTM Account',
+      status VARCHAR(20) DEFAULT 'Active',
+      total_requests INTEGER DEFAULT 0,
+      success_requests INTEGER DEFAULT 0,
+      failed_requests INTEGER DEFAULT 0,
+      last_used_at TIMESTAMP WITH TIME ZONE,
+      last_error TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_ezytm_accounts_status ON ezytm_accounts(status);`
   ];
 
   for (const stmt of statements) {

