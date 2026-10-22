@@ -344,6 +344,66 @@ router.post('/api/recharge/query', async (req, res) => {
   }
 });
 
+// Admin: Manage EzyTM Accounts Pool (Rotation Pool)
+const ezytmAccountService = require('./plan API/services/ezytmAccountService');
+
+function checkIsAdminUser(req, res) {
+  const isAdmin = req.user && (req.user.role === 'admin' || String(req.user.userId).toUpperCase() === 'ADMIN');
+  if (!isAdmin) {
+    res.status(403).json({ success: false, message: 'Admin access required.' });
+    return false;
+  }
+  return true;
+}
+
+router.get(['/api/settings/ezytm', '/api/admin/ezytm-accounts'], authRequired, async (req, res) => {
+  if (!checkIsAdminUser(req, res)) return;
+  try {
+    const accounts = await ezytmAccountService.getAllAccounts();
+    res.json({ success: true, accounts, data: accounts });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post(['/api/settings/ezytm', '/api/admin/ezytm-accounts'], authRequired, async (req, res) => {
+  if (!checkIsAdminUser(req, res)) return;
+  try {
+    const username = String(req.body.username || req.body.userId || '').trim();
+    const password = String(req.body.password || '').trim();
+    const label = req.body.label ? String(req.body.label).trim() : `EzyTM (${username})`;
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'User ID (Mobile No) and Password are required.' });
+    }
+
+    const account = await ezytmAccountService.addAccount({ username, password, label });
+    res.json({ success: true, message: 'EzyTM Account added to rotation pool successfully!', account });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.all(['/api/settings/ezytm/:id/toggle', '/api/admin/ezytm-accounts/:id/toggle'], authRequired, async (req, res) => {
+  if (!checkIsAdminUser(req, res)) return;
+  try {
+    const updated = await ezytmAccountService.toggleAccountStatus(req.params.id);
+    res.json({ success: true, message: 'EzyTM Account status updated!', account: updated });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.delete(['/api/settings/ezytm/:id', '/api/admin/ezytm-accounts/:id'], authRequired, async (req, res) => {
+  if (!checkIsAdminUser(req, res)) return;
+  try {
+    await ezytmAccountService.deleteAccount(req.params.id);
+    res.json({ success: true, message: 'EzyTM Account removed from rotation pool.' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // Available Hit Packs & Pricing
 router.get('/api/plans/pricing', (req, res) => {
   res.json({

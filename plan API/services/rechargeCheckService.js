@@ -36,8 +36,9 @@ const OPERATOR_NAMES = {
   '29': 'Videocon d2h'
 };
 
-let cachedAuthCookie = '';
-let lastAuthLoginTime = 0;
+const ezytmAccountService = require('./ezytmAccountService');
+
+const accountCookieMap = new Map();
 
 function parseSetCookie(headers) {
   if (typeof headers.getSetCookie === 'function') {
@@ -49,13 +50,14 @@ function parseSetCookie(headers) {
   return arr.map(c => c.split(';')[0].trim()).join('; ');
 }
 
-async function getAuthCookie() {
-  if (cachedAuthCookie && (Date.now() - lastAuthLoginTime < 15 * 60 * 1000)) {
-    return cachedAuthCookie;
-  }
+async function getAuthCookieForAccount(account) {
+  const username = (account && account.username) || process.env.PLANAPI_USERNAME || '8840457632';
+  const password = (account && account.password) || process.env.PLANAPI_PASSWORD || '123456';
 
-  const username = process.env.PLANAPI_USERNAME || '8840457632';
-  const password = process.env.PLANAPI_PASSWORD || '123456';
+  const cached = accountCookieMap.get(username);
+  if (cached && (Date.now() - cached.lastAuthLoginTime < 15 * 60 * 1000)) {
+    return cached.cookie;
+  }
 
   const loginGet = await fetch('https://planapi.in/Login.aspx', {
     headers: {
@@ -92,18 +94,20 @@ async function getAuthCookie() {
   });
 
   const postCookie = parseSetCookie(loginPost.headers);
-  cachedAuthCookie = [getCookie, postCookie].filter(Boolean).join('; ');
-  lastAuthLoginTime = Date.now();
-  return cachedAuthCookie;
+  const fullCookie = [getCookie, postCookie].filter(Boolean).join('; ');
+  accountCookieMap.set(username, { cookie: fullCookie, lastAuthLoginTime: Date.now() });
+  return fullCookie;
 }
 
 /**
  * Fast direct HTTP scraper for https://planapi.in/RechargeCheck.aspx
  * Bypasses heavy Chromium process for instant response (~1.5s) on both local and Render
+ * Automatically rotates 1-by-1 across all active saved EzyTM accounts
  */
 async function scrapeLastRechargeHttp(mobile, opCode = '2') {
   const cleanMobile = String(mobile).trim().replace(/\D/g, '');
-  let cookie = await getAuthCookie();
+  const account = await ezytmAccountService.getNextActiveAccount();
+  let cookie = await getAuthCookieForAccount(account);
 
   let rcGet = await fetch('https://planapi.in/RechargeCheck.aspx', {
     headers: {
@@ -114,8 +118,8 @@ async function scrapeLastRechargeHttp(mobile, opCode = '2') {
 
   let rcHtml = await rcGet.text();
   if (rcHtml.includes('Login.aspx') || rcGet.status === 302) {
-    cachedAuthCookie = '';
-    cookie = await getAuthCookie();
+    accountCookieMap.delete(account.username);
+    cookie = await getAuthCookieForAccount(account);
     rcGet = await fetch('https://planapi.in/RechargeCheck.aspx', {
       headers: {
         'Cookie': cookie,
@@ -163,8 +167,12 @@ async function scrapeLastRechargeHttp(mobile, opCode = '2') {
   const operator = opMatch ? opMatch[1].trim() : (OPERATOR_NAMES[String(opCode)] || 'Airtel');
 
   if (!amount && !lastRechargeDate && !expiryDate) {
+    ezytmAccountService.recordAccountFailure(account.id, 'No recharge records returned').catch(() => {});
     throw new Error('No recharge records returned for ' + cleanMobile);
   }
+
+  // Record success on the rotating account node
+  ezytmAccountService.recordAccountSuccess(account.id).catch(() => {});
 
   return {
     Mobile: mobMatch ? mobMatch[1].trim() : cleanMobile,

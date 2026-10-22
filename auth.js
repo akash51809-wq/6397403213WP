@@ -3778,6 +3778,53 @@ router.post('/api/settings/demo', authRequired, adminRequired, async (req, res) 
   }
 });
 
+// 23. Admin: Manage EzyTM Accounts Pool (Rotation Pool)
+const ezytmAccountService = require('./plan API/services/ezytmAccountService');
+
+router.get(['/api/settings/ezytm', '/api/admin/ezytm-accounts'], authRequired, adminRequired, async (req, res) => {
+  try {
+    const accounts = await ezytmAccountService.getAllAccounts();
+    res.json({ success: true, accounts, data: accounts });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post(['/api/settings/ezytm', '/api/admin/ezytm-accounts'], authRequired, adminRequired, async (req, res) => {
+  try {
+    const username = String(req.body.username || req.body.userId || '').trim();
+    const password = String(req.body.password || '').trim();
+    const label = req.body.label ? String(req.body.label).trim() : `EzyTM (${username})`;
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'User ID (Mobile No) and Password are required.' });
+    }
+
+    const account = await ezytmAccountService.addAccount({ username, password, label });
+    res.json({ success: true, message: 'EzyTM Account added to rotation pool successfully!', account });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+router.all(['/api/settings/ezytm/:id/toggle', '/api/admin/ezytm-accounts/:id/toggle'], authRequired, adminRequired, async (req, res) => {
+  try {
+    const updated = await ezytmAccountService.toggleAccountStatus(req.params.id);
+    res.json({ success: true, message: 'EzyTM Account status updated!', account: updated });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+router.delete(['/api/settings/ezytm/:id', '/api/admin/ezytm-accounts/:id'], authRequired, adminRequired, async (req, res) => {
+  try {
+    await ezytmAccountService.deleteAccount(req.params.id);
+    res.json({ success: true, message: 'EzyTM Account removed from rotation pool.' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = { 
   router, 
   authRequired, 
