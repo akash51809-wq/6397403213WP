@@ -30,11 +30,11 @@ body:before{background-image:linear-gradient(rgba(30,58,45,.025) 1px,transparent
 .sidebar .nav{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:4px;padding:2px 2px 4px 0}
 .sidebar .nav::-webkit-scrollbar{width:4px}
 .sidebar .nav::-webkit-scrollbar-thumb{background:rgba(30,58,45,.14);border-radius:4px}
-.nav a{display:flex;align-items:center;gap:11px;min-height:40px;padding:8px 12px;border-radius:12px;color:#718078;font-size:13px;font-weight:600;text-decoration:none;border:1px solid transparent;transition:all .18s ease;white-space:nowrap}
+.nav a{display:flex;align-items:center;gap:11px;min-height:40px;padding:8px 12px;border-radius:12px;color:#718078;font-size:13px;font-weight:600;text-decoration:none;border:1px solid transparent;transition:color .15s ease, background-color .15s ease, border-color .15s ease, transform .15s ease;white-space:nowrap}
 .nav a span{width:22px;text-align:center;color:#8a9690;font-size:14px;flex-shrink:0}
 .nav a b{font-size:13px;font-weight:600}
 .nav a:hover{color:#17372a;background:rgba(22,167,101,.07);border-color:rgba(22,167,101,.12);transform:translateX(2px)}
-.nav a.active{color:#fff!important;background:linear-gradient(145deg,#27bd7b,#119b62)!important;border-color:rgba(10,137,83,.22)!important;box-shadow:0 7px 0 #0c754a,0 15px 25px rgba(22,167,101,.18),inset 0 1px rgba(255,255,255,.32)!important;font-weight:700;transform:none}
+.nav a.active{color:#fff!important;background:linear-gradient(145deg,#27bd7b,#119b62)!important;border-color:rgba(10,137,83,.22)!important;box-shadow:0 7px 0 #0c754a,0 15px 25px rgba(22,167,101,.18),inset 0 1px rgba(255,255,255,.32)!important;font-weight:700;transform:none;transition:none!important}
 .nav a.active span{color:#fff!important}
 .nav a.active b{color:#fff!important;font-weight:700}
 

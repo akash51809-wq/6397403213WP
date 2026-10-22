@@ -190,20 +190,44 @@ export function AuthProvider({ children }) {
     try {
       if (isAdmin) {
         const s = await api('/api/status')
-        setStatus(s)
-        if (s.status === 'connected' || s.ready) {
+        setStatus(prev => {
+          if (
+            prev &&
+            prev.status === s?.status &&
+            prev.number === s?.number &&
+            prev.ready === s?.ready &&
+            prev.profileName === s?.profileName &&
+            prev.profilePicUrl === s?.profilePicUrl
+          ) {
+            return prev
+          }
+          return s
+        })
+        if (s?.status === 'connected' || s?.ready) {
           setQr(null)
         }
       } else {
         const d = await api('/api/user/whatsapp/status')
         const s = {
-          status: d.status || 'waiting',
-          number: d.number,
-          profileName: d.profileName || 'My WhatsApp',
-          profilePicUrl: d.profilePicUrl || null,
-          ready: d.ready
+          status: d?.status || 'waiting',
+          number: d?.number,
+          profileName: d?.profileName || 'My WhatsApp',
+          profilePicUrl: d?.profilePicUrl || null,
+          ready: d?.ready
         }
-        setStatus(s)
+        setStatus(prev => {
+          if (
+            prev &&
+            prev.status === s.status &&
+            prev.number === s.number &&
+            prev.profileName === s.profileName &&
+            prev.profilePicUrl === s.profilePicUrl &&
+            prev.ready === s.ready
+          ) {
+            return prev
+          }
+          return s
+        })
         if (s.status === 'connected' || s.ready) {
           setQr(null)
         }
@@ -219,19 +243,21 @@ export function AuthProvider({ children }) {
     try {
       if (isAdmin) {
         const d = await api('/api/whatsapp/qr')
-        if (d.status === 'connected') {
+        if (d?.status === 'connected') {
           setQr(null)
           loadStatus()
         } else {
-          setQr(d.status === 'qr' ? d.qr : null)
+          const nextQr = d?.status === 'qr' ? d.qr : null
+          setQr(prev => prev === nextQr ? prev : nextQr)
         }
       } else {
         const d = await api('/api/user/whatsapp/qr')
-        if (d.status === 'connected') {
+        if (d?.status === 'connected') {
           setQr(null)
           loadStatus()
         } else {
-          setQr(d.status === 'waiting' || d.status === 'qr' ? d.qr : null)
+          const nextQr = (d?.status === 'waiting' || d?.status === 'qr') ? d.qr : null
+          setQr(prev => prev === nextQr ? prev : nextQr)
         }
       }
     } catch (e) {
@@ -246,7 +272,7 @@ export function AuthProvider({ children }) {
       if (isAdmin) {
         await api('/api/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: true }) })
       } else {
-        await api('/api/user/whatsapp/connect', { method: 'POST' })
+        await api('/api/user/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: true }) })
       }
       notify('WhatsApp session शुरू हो रहा है... QR कोड लोड हो रहा है...')
       await loadQr()

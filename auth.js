@@ -1508,8 +1508,19 @@ router.post('/api/user/whatsapp/connect', authRequired, async (req, res) => {
       });
     }
 
-    const { startUserSession } = require('./userSessions');
-    const result = await startUserSession(req.user.userId);
+    const forceNew = Boolean(req.body?.force);
+    const { startUserSession, getUserQR } = require('./userSessions');
+    await startUserSession(req.user.userId, forceNew);
+    let result = await getUserQR(req.user.userId);
+    if (!result?.qr && result?.status !== 'connected') {
+      let waited = 0;
+      while (waited < 2500) {
+        await new Promise(r => setTimeout(r, 200));
+        waited += 200;
+        result = await getUserQR(req.user.userId);
+        if (result?.qr || result?.status === 'connected') break;
+      }
+    }
     res.json({ success: true, message: 'WhatsApp session started.', ...result });
   } catch (error) {
     console.error('User WhatsApp connect error:', error);
@@ -1734,8 +1745,20 @@ router.get('/api/devices', authRequired, async (req, res) => {
 
       let qr = null;
       if (!isConn) {
-        const qrRes = await getUserQR(uKey).catch(() => null);
+        let qrRes = await getUserQR(uKey).catch(() => null);
         qr = qrRes?.qr || null;
+        if (!qr && session?.status === 'connecting') {
+          let waited = 0;
+          while (waited < 1500) {
+            await new Promise(r => setTimeout(r, 200));
+            waited += 200;
+            qrRes = await getUserQR(uKey).catch(() => null);
+            if (qrRes?.qr) {
+              qr = qrRes.qr;
+              break;
+            }
+          }
+        }
       }
 
       slots.push({
@@ -1814,15 +1837,16 @@ router.post('/api/devices/connect', authRequired, async (req, res) => {
     }
 
     // User session connect
+    const forceNew = Boolean(req.body?.force);
     const uKey = slot === 1 ? req.user.userId : `${req.user.userId}_${slot}`;
-    await startUserSession(uKey);
+    await startUserSession(uKey, forceNew);
     let qrRes = null;
     let waited = 0;
-    while (waited < 2500) {
+    while (waited < 3000) {
       qrRes = await getUserQR(uKey).catch(() => null);
       if (qrRes?.qr) break;
-      await new Promise(r => setTimeout(r, 250));
-      waited += 250;
+      await new Promise(r => setTimeout(r, 200));
+      waited += 200;
     }
 
     res.json({

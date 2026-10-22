@@ -59,11 +59,13 @@ test('5. Frontend: AuthContext connect and disconnect support admin and standard
   assert.ok(authContextContent.includes('/api/whatsapp/disconnect'), 'AuthContext disconnectUserWhatsApp must call /api/whatsapp/disconnect for admin');
 });
 
-test('6. userSessions.js: Fast QR scanning configuration (syncFullHistory: false, qrTimeout, getMessage)', async (t) => {
+test('6. userSessions.js: Fast QR scanning configuration (syncFullHistory: false, qrTimeout, getMessage, Desktop Browser)', async (t) => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'userSessions.js'), 'utf-8');
   assert.ok(content.includes('syncFullHistory: false'), 'userSessions.js must have syncFullHistory: false to prevent mobile pairing timeouts');
-  assert.ok(content.includes('qrTimeout: 45000'), 'userSessions.js must have sufficient qrTimeout');
+  assert.ok(content.includes('qrTimeout: 60000') || content.includes('qrTimeout: 45000'), 'userSessions.js must have sufficient qrTimeout');
   assert.ok(content.includes('getMessage: async (key)'), 'userSessions.js must provide getMessage for retry receipt handling');
+  assert.ok(content.includes("Browsers.macOS('Desktop')"), 'userSessions.js must use official desktop browser to avoid Try again later');
+  assert.ok(content.includes('clearUserCredentials'), 'userSessions.js must export clearUserCredentials for fresh pairing');
 });
 
 test('7. userSessions.js: Non-blocking connection update & async DP fetch', async (t) => {

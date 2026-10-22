@@ -3,12 +3,10 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import api from '../../services/api'
 
-export function Sidebar() {
+export const Sidebar = React.memo(function Sidebar() {
   const {
     currentUser,
     isAdmin,
-    status,
-    stats,
     setSidebarOpen,
     sidebarCollapsed,
     toggleSidebarCollapsed,
@@ -21,8 +19,6 @@ export function Sidebar() {
   const isPlanApiActive = location.pathname.startsWith('/plans') || location.pathname.startsWith('/services/plan-api') || location.pathname === '/plan-api'
   const isGstActive = location.pathname.startsWith('/gst') || location.pathname.startsWith('/services/gst')
   const closeMobile = () => setSidebarOpen(false)
-
-  const isConnected = status?.status === 'connected'
 
   const [smsStats, setSmsStats] = useState({ activeDevicesCount: 0, totalSms: 0 })
   const [planStats, setPlanStats] = useState({ remainingHits: 100 })
@@ -437,6 +433,6 @@ export function Sidebar() {
       </nav>
     </aside>
   )
-}
+})
 
 export default Sidebar

@@ -85,9 +85,12 @@ export function DevicePage() {
       notify(`Device Slot 0${slotId}: QR कोड लोड हो रहा है...`)
       const res = await api('/api/devices/connect', {
         method: 'POST',
-        body: JSON.stringify({ slot: slotId })
+        body: JSON.stringify({ slot: slotId, force: true })
       })
       if (res && res.success) {
+        if (res.qr) {
+          setDevices(prev => prev.map(d => d.slot === slotId ? { ...d, qr: res.qr, status: 'waiting' } : d))
+        }
         await fetchDevices()
         if (loadStatus) loadStatus()
         if (loadQr) loadQr()
@@ -95,10 +98,7 @@ export function DevicePage() {
     } catch (err) {
       notify(`Slot 0${slotId} connect error: ` + (err.message || 'Error'))
     } finally {
-      setTimeout(() => {
-        setConnectingSlots(prev => ({ ...prev, [slotId]: false }))
-        fetchDevices()
-      }, 1000)
+      setConnectingSlots(prev => ({ ...prev, [slotId]: false }))
     }
   }
 
@@ -163,7 +163,8 @@ export function DevicePage() {
         {displaySlots.map((dev) => {
           const sId = dev.slot
           const isSlotConnected = dev.status === 'connected' || dev.ready
-          const isSlotConnecting = Boolean(connectingSlots[sId]) || dev.status === 'connecting'
+          const slotQr = dev.qr || (sId === 1 ? qr : null)
+          const isSlotConnecting = Boolean(connectingSlots[sId]) || (dev.status === 'connecting' && !slotQr)
           const isSlotDisconnecting = Boolean(disconnectingSlots[sId])
           const displayName = dev.profileName || (isAdmin ? `Admin Device 0${sId}` : `Device 0${sId}`)
           const initial = (displayName.replace(/[^a-zA-Z0-9]/g, '') || 'W')[0].toUpperCase()
@@ -246,10 +247,10 @@ export function DevicePage() {
                 </article>
               ) : (
                 <article className="card device-card qr-card">
-                  {dev.qr ? (
+                  {slotQr ? (
                     <div className="qr-active-box">
                       <img
-                        src={dev.qr}
+                        src={slotQr}
                         alt={`Scan WhatsApp QR Slot 0${sId}`}
                       />
                       <strong>Scan with WhatsApp</strong>
@@ -265,7 +266,7 @@ export function DevicePage() {
 
                   <div className="qr-slot">
                     <span>DEVICE SLOT 0{sId}</span>
-                    <b>{isSlotConnecting ? 'Connecting...' : (dev.qr ? 'Scan Ready' : 'Available')}</b>
+                    <b>{isSlotConnecting ? 'Connecting...' : (slotQr ? 'Scan Ready' : 'Available')}</b>
                   </div>
 
                   <button
@@ -274,7 +275,7 @@ export function DevicePage() {
                     onClick={() => handleConnect(sId)}
                     disabled={isSlotConnecting}
                   >
-                    {isSlotConnecting ? 'Connecting...' : (dev.qr ? '↻ Refresh QR' : 'Show QR')}
+                    {isSlotConnecting ? 'Connecting...' : (slotQr ? '↻ Refresh QR' : 'Show QR')}
                   </button>
                 </article>
               )}

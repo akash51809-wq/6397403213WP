@@ -12,7 +12,28 @@ const sessions = new Map();
 // Per-userId lock: prevents concurrent startUserSession() calls from creating duplicate sockets
 const startingSessionIds = new Set();
 
-async function startUserSession(userId) {
+async function clearUserCredentials(userId) {
+    const isAdminSlot = String(userId || '').startsWith('admin_');
+    const sessionId = isAdminSlot ? userId : `user-${userId}`;
+    clearSessionCache(sessionId);
+    try {
+        const { connection } = require('./db');
+        if (connection?.pool) {
+            await connection.pool.query(
+                `DELETE FROM session_auth WHERE id = $1 OR id = $2 OR id LIKE $3`,
+                [sessionId, `${sessionId}_creds.json`, `${sessionId}_%`]
+            ).catch(() => {});
+        }
+        const SessionAuth = require('./models/SessionAuth');
+        const prefix = isAdminSlot ? `^${userId}_` : `^user-${userId}_`;
+        await SessionAuth.deleteMany({ id: { $regex: prefix } }).catch(() => {});
+        console.log(`[UserSession] Cleared credentials for ${sessionId}`);
+    } catch (e) {
+        console.warn(`[UserSession ${userId}] Clear credentials notice:`, e.message);
+    }
+}
+
+async function startUserSession(userId, forceNew = false) {
     const normalizedUserId = String(userId || '').trim();
     const isAdminSlot = normalizedUserId.startsWith('admin_');
     if (!normalizedUserId || normalizedUserId.toUpperCase() === 'ADMIN') {
@@ -100,6 +121,9 @@ async function startUserSession(userId) {
     try {
 
     const sessionId = isAdminSlot ? normalizedUserId : `user-${userId}`;
+    if (forceNew) {
+        await clearUserCredentials(userId);
+    }
     const { state, saveCreds } = await usePgAuthState(sessionId);
 
     console.log(`[UserSession] Starting session for ${isAdminSlot ? 'Admin slot' : 'user'} ${userId}`);
@@ -109,13 +133,13 @@ async function startUserSession(userId) {
         version,
         auth: state,
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome'),
+        browser: Browsers.macOS('Desktop'),
         keepAliveIntervalMs: 25000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: true,
         syncFullHistory: false,
-        qrTimeout: 45000,
+        qrTimeout: 60000,
         getMessage: async (key) => {
             try {
                 const indexModule = require('./index');
@@ -975,6 +999,7 @@ module.exports = {
     sessions,
     startUserSession,
     stopUserSession,
+    clearUserCredentials,
     getUserSession,
     getUserQR,
     sendUserMessage,
