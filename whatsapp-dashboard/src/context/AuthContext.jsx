@@ -335,6 +335,19 @@ export function AuthProvider({ children }) {
       try {
         const payload = JSON.parse(e.data || '{}')
         if (payload.type === 'connection_status' || payload.type === 'qr' || payload.type === 'refresh') {
+          if (payload.data?.status === 'connected') {
+            setQr(null)
+            setStatus(s => ({
+              ...s,
+              status: 'connected',
+              number: payload.data.number || s.number,
+              profileName: payload.data.profileName || s.profileName,
+              profilePicUrl: payload.data.profilePicUrl || s.profilePicUrl,
+              ready: true
+            }))
+          } else if (payload.data?.qr) {
+            setQr(payload.data.qr)
+          }
           loadStatus()
           loadQr()
         }

@@ -1389,8 +1389,18 @@ router.get('/api/user/whatsapp/status', authRequired, async (req, res) => {
         const cleanNum = (session.connectedNumber || rawId.split(':')[0].split('@')[0]).replace(/\D/g, '');
         const jid = cleanNum ? `${cleanNum}@s.whatsapp.net` : rawId;
         if (jid && typeof session.socket.profilePictureUrl === 'function') {
-          profilePicUrl = await session.socket.profilePictureUrl(jid, 'image').catch(() => null);
-          session.profilePicUrl = profilePicUrl;
+          // Asynchronously fetch profile picture in background without blocking status response
+          session.socket.profilePictureUrl(jid, 'image')
+            .then(dp => {
+              if (dp) {
+                session.profilePicUrl = dp;
+                WhatsAppSession.updateOne(
+                  { $or: [{ ownerUserId: req.user.userId }, { sessionId: `user-${req.user.userId}` }] },
+                  { profilePicUrl: dp, updatedAt: new Date() }
+                ).catch(() => {});
+              }
+            })
+            .catch(() => {});
         }
       } catch (e) {}
     }
@@ -1452,7 +1462,16 @@ router.get('/api/user/whatsapp/qr', authRequired, async (req, res) => {
     if (!session || session.status === 'disconnected') {
       await startUserSession(req.user.userId).catch(() => {});
     }
-    const result = await getUserQR(req.user.userId);
+    let result = await getUserQR(req.user.userId);
+    if (!result?.qr && result?.status !== 'connected') {
+      let waited = 0;
+      while (waited < 2000) {
+        await new Promise(r => setTimeout(r, 200));
+        waited += 200;
+        result = await getUserQR(req.user.userId);
+        if (result?.qr || result?.status === 'connected') break;
+      }
+    }
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('User WhatsApp QR error:', error);

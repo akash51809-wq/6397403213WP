@@ -114,7 +114,21 @@ async function startUserSession(userId) {
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: true,
-        syncFullHistory: true
+        syncFullHistory: false,
+        qrTimeout: 45000,
+        getMessage: async (key) => {
+            try {
+                const indexModule = require('./index');
+                if (indexModule && typeof indexModule.getIncomingMessages === 'function') {
+                    const all = indexModule.getIncomingMessages(userId);
+                    const found = Array.isArray(all) ? all.find(m => m.id === key?.id) : null;
+                    if (found) {
+                        return { conversation: found.message };
+                    }
+                }
+            } catch (e) {}
+            return undefined;
+        }
     });
 
     const sessionData = {
@@ -237,27 +251,20 @@ async function startUserSession(userId) {
             currentSession.connectedNumber = phoneNum;
             currentSession.profileName = socket.user?.name || socket.user?.notify || (phoneNum ? `+${phoneNum}` : null);
             
-            // Fetch real WhatsApp Profile Picture (DP)
-            let profilePicUrl = null;
-            try {
-                const jid = phoneNum ? `${phoneNum}@s.whatsapp.net` : rawId;
-                if (jid && typeof socket.profilePictureUrl === 'function') {
-                    profilePicUrl = await socket.profilePictureUrl(jid, 'image').catch(() => null);
-                }
-            } catch (e) {}
-            currentSession.profilePicUrl = profilePicUrl;
+            currentSession.profilePicUrl = null;
 
+            // Immediately mark as connected in DB (non-blocking, fast)
             await WhatsAppSession.updateOne(
                 { $or: [{ ownerUserId: userId }, { sessionId: sessionId }] },
                 { 
                     status: 'connected', 
                     phone: phoneNum,
-                    profilePicUrl: profilePicUrl,
                     lastConnectedAt: new Date(),
                     updatedAt: new Date() 
                 }
-            );
+            ).catch(() => {});
 
+            // Instantly notify frontend via SSE that device is connected (0ms delay)
             try {
                 const { broadcastIncomingEvent } = require('./index');
                 if (typeof broadcastIncomingEvent === 'function') {
@@ -265,7 +272,7 @@ async function startUserSession(userId) {
                         status: 'connected', 
                         number: phoneNum,
                         profileName: currentSession.profileName,
-                        profilePicUrl: currentSession.profilePicUrl,
+                        profilePicUrl: null,
                         userId 
                     }, userId, phoneNum);
                 }
@@ -280,6 +287,33 @@ async function startUserSession(userId) {
             } catch (qErr) {
                 console.warn(`[UserSession ${userId}] Queue resume notice:`, qErr.message);
             }
+
+            // Asynchronously fetch Profile Picture (DP) in background without blocking pairing or UI
+            (async () => {
+                try {
+                    const jid = phoneNum ? `${phoneNum}@s.whatsapp.net` : rawId;
+                    if (jid && typeof socket.profilePictureUrl === 'function') {
+                        const dp = await socket.profilePictureUrl(jid, 'image').catch(() => null);
+                        if (dp) {
+                            currentSession.profilePicUrl = dp;
+                            await WhatsAppSession.updateOne(
+                                { $or: [{ ownerUserId: userId }, { sessionId: sessionId }] },
+                                { profilePicUrl: dp, updatedAt: new Date() }
+                            ).catch(() => {});
+                            const { broadcastIncomingEvent } = require('./index');
+                            if (typeof broadcastIncomingEvent === 'function') {
+                                broadcastIncomingEvent('connection_status', { 
+                                    status: 'connected', 
+                                    number: phoneNum,
+                                    profileName: currentSession.profileName,
+                                    profilePicUrl: dp,
+                                    userId 
+                                }, userId, phoneNum);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            })();
         }
     });
 

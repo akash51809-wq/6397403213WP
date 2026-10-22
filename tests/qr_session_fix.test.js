@@ -58,3 +58,26 @@ test('5. Frontend: AuthContext connect and disconnect support admin and standard
   assert.ok(authContextContent.includes('/api/whatsapp/connect'), 'AuthContext connectUserWhatsApp must call /api/whatsapp/connect for admin');
   assert.ok(authContextContent.includes('/api/whatsapp/disconnect'), 'AuthContext disconnectUserWhatsApp must call /api/whatsapp/disconnect for admin');
 });
+
+test('6. userSessions.js: Fast QR scanning configuration (syncFullHistory: false, qrTimeout, getMessage)', async (t) => {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'userSessions.js'), 'utf-8');
+  assert.ok(content.includes('syncFullHistory: false'), 'userSessions.js must have syncFullHistory: false to prevent mobile pairing timeouts');
+  assert.ok(content.includes('qrTimeout: 45000'), 'userSessions.js must have sufficient qrTimeout');
+  assert.ok(content.includes('getMessage: async (key)'), 'userSessions.js must provide getMessage for retry receipt handling');
+});
+
+test('7. userSessions.js: Non-blocking connection update & async DP fetch', async (t) => {
+  const content = fs.readFileSync(path.join(__dirname, '..', 'userSessions.js'), 'utf-8');
+  assert.ok(content.includes("status: 'connected'"), 'status must be set to connected');
+  assert.ok(content.includes("broadcastIncomingEvent('connection_status'"), 'connection_status must be broadcast immediately');
+  assert.ok(content.includes('socket.profilePictureUrl(jid, \'image\')'), 'profilePictureUrl must be fetched asynchronously in background');
+});
+
+test('8. auth.js: Fast status response and QR generation wait loop', async (t) => {
+  const authContent = fs.readFileSync(path.join(__dirname, '..', 'auth.js'), 'utf-8');
+  assert.ok(authContent.includes('waited < 2000'), 'auth.js must briefly wait for QR generation on user QR endpoint');
+  assert.ok(
+    !authContent.includes('profilePicUrl = await session.socket.profilePictureUrl'),
+    'auth.js status endpoint must not block awaiting profilePictureUrl'
+  );
+});
