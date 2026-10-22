@@ -676,10 +676,10 @@ router.all([
   const clientIp = getClientIp(req);
   const params = { ...req.query, ...req.body };
 
-  const apiUserId = params.apimember_id || params.ApiUserID || params.apiuserid || params.userMobile || params.username;
-  const token = params.api_password || params.token || params.Token || params.password;
-  const opCode = params.Opcode || params.opcode || params.operator_code || params.operatorcode || params.OpCode || '2';
-  const mobileNo = params.mobile_no || params.Mobileno || params.mobileno || params.mobile || params.MobileNo || params.VC || params.vc || params.number;
+  const apiUserId = params.apimember_id || params.ApiUserID || params.apiuserid || params.userMobile || params.username || params.member_id || params.MemberId;
+  const token = params.api_password || params.token || params.Token || params.password || params.Password || params.api_token || params.apiToken;
+  const opCode = params.Opcode || params.opcode || params.operator_code || params.operatorcode || params.OpCode || params.opCode || '2';
+  const mobileNo = params.mobile_no || params.Mobileno || params.mobileno || params.mobile || params.MobileNo || params.Mobile || params.VC || params.vc || params.number || params.Number;
 
   const auth = await authenticateApiRequest(apiUserId, token, clientIp);
   if (!auth.authenticated) {

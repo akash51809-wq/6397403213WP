@@ -182,7 +182,7 @@ function normalizeRechargeResult(rawResult, cleanNumber, opCode) {
   }
 
   const rawData = rawResult.DATA || rawResult.data || rawResult || {};
-  const opName = rawData.Operator || rawData.operator || OPERATOR_NAMES[String(opCode)] || 'Airtel';
+  const opName = rawData["Operator Name"] || rawData.Operator || rawData.operator || OPERATOR_NAMES[String(opCode)] || 'Airtel';
 
   const rawAmount = (rawData.Amount !== undefined && rawData.Amount !== '' && rawData.Amount !== null)
     ? rawData.Amount
@@ -195,58 +195,34 @@ function normalizeRechargeResult(rawResult, cleanNumber, opCode) {
           : (rawData.Monthly !== '0' && rawData.Monthly !== '0.00' ? rawData.Monthly : ''))));
 
   const amount = String(rawAmount || '').replace(/[^\d.]/g, '');
-  const lastDate = rawData["Last Recharge Date"] || rawData.lastRechargeDate || rawData.LastRechargeDate || rawData.RechargeDate || rawData.date || '';
-  const nextDate = rawData["Next Recharge Date"] || rawData.nextRechargeDate || rawData.ExpiryDate || rawData["Expiry Date"] || rawData.expiryDate || rawData.duedate || '';
-  const plan = rawData.Plan || rawData.plan || (amount ? `₹${parseFloat(amount) || amount} Plan` : '');
-  const mob = rawData.Mobile || rawData.mobile || rawData.Mobile_No || rawData.MOBILENO || rawData.Rmn || (cleanNumber.length >= 10 ? cleanNumber.slice(-10) : cleanNumber);
+  const lastDate = rawData["Last Recharge Date"] || rawData.LastRechargeDate || rawData.lastRechargeDate || rawData.RechargeDate || rawData.date || '';
+  const expiryDate = rawData["Expiry Date"] || rawData.ExpiryDate || rawData.expiryDate || rawData["Next Recharge Date"] || rawData.nextRechargeDate || rawData.duedate || '';
+  const mob = rawData["Mobile No"] || rawData.Mobile || rawData.mobile || rawData.Mobile_No || rawData.MOBILENO || (cleanNumber.length >= 10 ? cleanNumber.slice(-10) : cleanNumber);
 
-  const dataObj = {
-    Mobile: mob,
-    mobile: mob,
-    Mobile_No: mob,
-    Operator: opName,
-    operator: opName,
-    OpCode: String(opCode || '2'),
-    Amount: amount,
-    amount: amount,
-    lastRechargeAmount: amount,
-    RechargeAmount: amount,
-    RechargeDate: lastDate,
-    "Last Recharge Date": lastDate,
-    lastRechargeDate: lastDate,
-    LastRechargeDate: lastDate,
-    ExpiryDate: nextDate,
-    "Expiry Date": nextDate,
-    expiryDate: nextDate,
-    "Next Recharge Date": nextDate,
-    nextRechargeDate: nextDate,
-    Plan: plan,
-    plan: plan,
-    VC: mob,
-    Balance: amount,
-    Monthly: amount
+  // Exact 5 limited fields as requested by user / EzyTM format
+  const limitedData = {
+    "Operator Name": opName,
+    "Amount": amount,
+    "Mobile No": mob,
+    "Expiry Date": expiryDate,
+    "Last Recharge Date": lastDate
   };
 
   return {
     error: "0",
-    ERROR: "0",
     status: "1",
-    STATUS: "1",
-    Mobile: mob,
-    Mobile_No: mob,
-    MOBILENO: mob,
+    "Operator Name": opName,
+    "Amount": amount,
+    "Mobile No": mob,
+    "Expiry Date": expiryDate,
+    "Last Recharge Date": lastDate,
     Operator: opName,
-    OpCode: String(opCode || '2'),
     Amount: amount,
-    RechargeAmount: amount,
-    LastRechargeAmount: amount,
-    RechargeDate: lastDate,
+    Mobile: mob,
+    ExpiryDate: expiryDate,
     LastRechargeDate: lastDate,
-    ExpiryDate: nextDate,
-    NextRechargeDate: nextDate,
-    DATA: dataObj,
-    Message: rawResult.Message || "Offer Successfully Checked",
-    MESSAGE: rawResult.Message || "Offer Successfully Checked"
+    DATA: limitedData,
+    Message: rawResult.Message || "Offer Successfully Checked"
   };
 }
 

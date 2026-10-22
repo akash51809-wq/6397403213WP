@@ -2,65 +2,60 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const { fetchLastRechargeDetails } = require('../plan API/services/rechargeCheckService');
+const { authenticateApiRequest } = require('../plan API/services/clientService');
 const planRouter = require('../planRouter');
 
-test('Plan API Last Recharge Check - Service & Route Verification', async (t) => {
-  await t.test('1. fetchLastRechargeDetails normalizes both camelCase and planapi.in keys', async () => {
-    const testNumber = '8127285272';
+test('Plan API Last Recharge Check - Limited EzyTM Format & Auth Verification', async (t) => {
+  await t.test('1. fetchLastRechargeDetails returns strictly limited 5 fields matching EzyTM', async () => {
+    const testNumber = '7202019040';
     const result = await fetchLastRechargeDetails(testNumber, '2');
 
     assert.ok(result, 'Result should exist');
     assert.equal(result.error, '0', 'error code should be 0');
-    assert.equal(result.ERROR, '0', 'ERROR code should be 0');
     assert.equal(result.status, '1', 'status should be 1');
-    assert.equal(result.STATUS, '1', 'STATUS should be 1');
     assert.ok(result.DATA, 'DATA should exist');
 
-    // Check planapi.in keys
-    assert.ok(result.DATA["Last Recharge Date"], '"Last Recharge Date" must be present');
-    assert.ok(result.DATA["Next Recharge Date"], '"Next Recharge Date" must be present');
-    assert.ok(result.DATA.Balance, 'Balance must be present');
-    assert.ok(result.DATA.Monthly, 'Monthly must be present');
-    assert.ok(result.DATA.Plan, 'Plan must be present');
-    assert.ok(result.DATA.Operator, 'Operator must be present');
+    // Check exact 5 EzyTM response keys
+    assert.equal(result["Operator Name"], 'Airtel');
+    assert.equal(result["Amount"], '199');
+    assert.equal(result["Mobile No"], '7202019040');
+    assert.equal(result["Expiry Date"], '2026-11-18');
+    assert.equal(result["Last Recharge Date"], '2026/10/22');
 
-    // Check frontend camelCase keys
-    assert.ok(result.DATA.lastRechargeDate, 'lastRechargeDate must be present');
-    assert.ok(result.DATA.expiryDate, 'expiryDate must be present');
-    assert.ok(result.DATA.lastRechargeAmount, 'lastRechargeAmount must be present');
-    assert.ok(result.DATA.amount, 'amount must be present');
-    assert.ok(result.DATA.operator, 'operator must be present');
-    assert.ok(result.DATA.mobile, 'mobile must be present');
+    // Check DATA contains exact 5 fields
+    assert.equal(result.DATA["Operator Name"], 'Airtel');
+    assert.equal(result.DATA["Amount"], '199');
+    assert.equal(result.DATA["Mobile No"], '7202019040');
+    assert.equal(result.DATA["Expiry Date"], '2026-11-18');
+    assert.equal(result.DATA["Last Recharge Date"], '2026/10/22');
+
+    // Ensure unwanted DTH / raw bloated fields are NOT in DATA
+    assert.equal(result.DATA.Balance, undefined);
+    assert.equal(result.DATA.Monthly, undefined);
+    assert.equal(result.DATA.VC, undefined);
+    assert.equal(result.DATA.Address, undefined);
   });
 
   await t.test('2. fetchLastRechargeDetails for 8127285272 matches live https://planapi.in/RechargeCheck.aspx', async () => {
     const result = await fetchLastRechargeDetails('8127285272', '2');
     assert.ok(result, 'Result should exist');
     assert.equal(result.error, '0');
-    assert.equal(result.DATA.mobile, '8127285272');
-    assert.equal(result.DATA.Operator, 'Airtel');
-    assert.equal(result.DATA.Amount, '199');
-    assert.equal(result.DATA.lastRechargeAmount, '199');
-    assert.equal(result.DATA["Last Recharge Date"], '2026/10/19');
-    assert.equal(result.DATA["Next Recharge Date"], '2026-11-15');
+    assert.equal(result["Operator Name"], 'Airtel');
+    assert.equal(result["Amount"], '199');
+    assert.equal(result["Mobile No"], '8127285272');
+    assert.equal(result["Expiry Date"], '2026-11-15');
+    assert.equal(result["Last Recharge Date"], '2026/10/19');
+    assert.equal(result.DATA["Operator Name"], 'Airtel');
+    assert.equal(result.DATA["Amount"], '199');
   });
 
-  await t.test('3. fetchLastRechargeDetails for 7897955117 matches live https://planapi.in/RechargeCheck.aspx', async () => {
-    const result = await fetchLastRechargeDetails('7897955117', '2');
-    assert.ok(result, 'Result should exist');
-    assert.equal(result.error, '0');
-    assert.equal(result.DATA.mobile, '7897955117');
-    assert.equal(result.DATA.Operator, 'Airtel');
-    assert.equal(result.DATA.Amount, '199');
-    assert.equal(result.DATA.lastRechargeAmount, '199');
-    assert.equal(result.DATA["Last Recharge Date"], '2026/10/19');
-    assert.equal(result.DATA["Next Recharge Date"], '2026-11-15');
-    // Ensure no DTH-specific empty fields leaked
-    assert.equal(result.DATA.Address, undefined);
-    assert.equal(result.DATA.City, undefined);
+  await t.test('3. authenticateApiRequest verifies 8840457632 with tok_0b8f94d2a4aea41fcb981e773767339e', async () => {
+    const auth = await authenticateApiRequest('8840457632', 'tok_0b8f94d2a4aea41fcb981e773767339e', '127.0.0.1');
+    assert.ok(auth, 'Auth result should exist');
+    assert.equal(auth.authenticated, true, 'User 8840457632 must authenticate successfully');
   });
 
-  await t.test('4. Express routing supports /RechargeCheck.aspx and /api/Mobile/RechargeCheck', async () => {
+  await t.test('4. Express route /RechargeCheck.aspx with user credentials returns 200 and limited fields', async () => {
     const app = express();
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
@@ -77,16 +72,25 @@ test('Plan API Last Recharge Check - Service & Route Verification', async (t) =>
       assert.equal(unauthJson.error, '3', 'Unauthenticated request must return error 3');
       assert.equal(unauthJson.Message, 'Authentication failed');
 
-      // Test 2: Invalid number format -> with dummy auth
-      const invalidNumRes = await fetch(`${baseUrl}/RechargeCheck.aspx?ApiUserID=admin&token=dummy&mobile_no=123&Opcode=2`);
-      const invalidJson = await invalidNumRes.json();
-      // Even if auth fails or number is invalid, it returns error code
-      assert.ok(['2', '3'].includes(invalidJson.error), 'Must return validation or auth error');
+      // Test 2: Live user call with 8840457632 and token for 7202019040
+      const liveUrl = `${baseUrl}/RechargeCheck.aspx?apimember_id=8840457632&api_password=tok_0b8f94d2a4aea41fcb981e773767339e&mobile_no=7202019040&Opcode=2`;
+      const liveRes = await fetch(liveUrl);
+      assert.equal(liveRes.status, 200);
+      const liveJson = await liveRes.json();
+      assert.equal(liveJson.error, '0');
+      assert.equal(liveJson["Operator Name"], 'Airtel');
+      assert.equal(liveJson["Amount"], '199');
+      assert.equal(liveJson["Mobile No"], '7202019040');
+      assert.equal(liveJson["Expiry Date"], '2026-11-18');
+      assert.equal(liveJson["Last Recharge Date"], '2026/10/22');
+      assert.equal(liveJson.DATA["Operator Name"], 'Airtel');
+      assert.equal(liveJson.DATA["Amount"], '199');
 
-      // Test 3: Route existence on /api/Mobile/RechargeCheck
-      const aliasRes = await fetch(`${baseUrl}/api/Mobile/RechargeCheck?mobile_no=9840123456&Opcode=2`);
+      // Test 3: Alias route /api/Mobile/RechargeCheck
+      const aliasRes = await fetch(`${baseUrl}/api/Mobile/RechargeCheck?apimember_id=8840457632&api_password=tok_0b8f94d2a4aea41fcb981e773767339e&mobile_no=7202019040&Opcode=2`);
       const aliasJson = await aliasRes.json();
-      assert.equal(aliasJson.error, '3', '/api/Mobile/RechargeCheck route must exist and handle request');
+      assert.equal(aliasJson.error, '0');
+      assert.equal(aliasJson["Operator Name"], 'Airtel');
     } finally {
       if (typeof server.closeAllConnections === 'function') {
         server.closeAllConnections();
@@ -101,4 +105,3 @@ test('Plan API Last Recharge Check - Service & Route Verification', async (t) =>
     }
   });
 });
-
