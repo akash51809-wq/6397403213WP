@@ -17,9 +17,9 @@ async function clearUserCredentials(userId) {
     const sessionId = isAdminSlot ? userId : `user-${userId}`;
     clearSessionCache(sessionId);
     try {
-        const { connection } = require('./db');
-        if (connection?.pool) {
-            await connection.pool.query(
+        const { query } = require('./db');
+        if (typeof query === 'function') {
+            await query(
                 `DELETE FROM session_auth WHERE id = $1 OR id = $2 OR id LIKE $3`,
                 [sessionId, `${sessionId}_creds.json`, `${sessionId}_%`]
             ).catch(() => {});

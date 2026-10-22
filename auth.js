@@ -1862,6 +1862,63 @@ router.post('/api/devices/connect', authRequired, async (req, res) => {
   }
 });
 
+router.post('/api/devices/pairing-code', authRequired, async (req, res) => {
+  try {
+    const slot = parseInt(req.body?.slot || 1, 10);
+    const rawPhone = String(req.body?.phoneNumber || '').replace(/\D/g, '');
+    if (!rawPhone || rawPhone.length < 10) {
+      return res.status(400).json({ success: false, message: 'कृपया 10 अंकों का वैध मोबाइल नंबर दर्ज करें।' });
+    }
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : (rawPhone.startsWith('91') && rawPhone.length === 12 ? rawPhone : rawPhone);
+    const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const { getUserSession, startUserSession } = require('./userSessions');
+
+    let sock = null;
+    if (isRoleAdmin && slot === 1) {
+      const indexMod = require('./index');
+      sock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : global.__waAdminSocket;
+      if (!sock || typeof sock.requestPairingCode !== 'function') {
+        if (typeof indexMod.startBot === 'function') await indexMod.startBot(true);
+        let waited = 0;
+        while (waited < 3500) {
+          sock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : global.__waAdminSocket;
+          if (sock && typeof sock.requestPairingCode === 'function') break;
+          await new Promise(r => setTimeout(r, 200));
+          waited += 200;
+        }
+      }
+    } else {
+      const uKey = isRoleAdmin ? `admin_${slot}` : (slot === 1 ? req.user.userId : `${req.user.userId}_${slot}`);
+      let session = getUserSession(uKey);
+      if (!session?.socket || typeof session.socket.requestPairingCode !== 'function') {
+        await startUserSession(uKey, true);
+        let waited = 0;
+        while (waited < 3500) {
+          session = getUserSession(uKey);
+          if (session?.socket && typeof session.socket.requestPairingCode === 'function') break;
+          await new Promise(r => setTimeout(r, 200));
+          waited += 200;
+        }
+      }
+      sock = session?.socket;
+    }
+
+    if (!sock || typeof sock.requestPairingCode !== 'function') {
+      return res.status(500).json({ success: false, message: 'WhatsApp सॉकेट तैयार नहीं हो सका। कृपया 2 सेकंड बाद पुनः प्रयास करें।' });
+    }
+
+    const code = await sock.requestPairingCode(cleanPhone);
+    res.json({
+      success: true,
+      code,
+      message: 'Pairing code सफलतापूर्वक प्राप्त हो गया।'
+    });
+  } catch (err) {
+    console.error('Request pairing code error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Pairing code failed' });
+  }
+});
+
 router.post('/api/devices/disconnect', authRequired, async (req, res) => {
   try {
     const slot = parseInt(req.body?.slot || 1, 10);

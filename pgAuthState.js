@@ -254,8 +254,16 @@ async function usePgAuthState(sessionId) {
     throw new Error(`[SessionAuth] Failed to load session credentials from PostgreSQL: ${err.message}`);
   }
 
-  if (!creds) {
-    console.log(`[SessionAuth] Initializing fresh credentials for session: ${normalizedSessionId}`);
+  const isLinked = Boolean(creds && (creds.registered === true || creds.me?.id));
+  if (!isLinked) {
+    console.log(`[SessionAuth] Initializing fresh credentials for unlinked session: ${normalizedSessionId}`);
+    try {
+      await query(
+        `DELETE FROM session_auth WHERE id = $1 OR id = $2 OR id LIKE $3`,
+        [normalizedSessionId, `${normalizedSessionId}_creds.json`, `${normalizedSessionId}_%`]
+      );
+      sessionCache.clear();
+    } catch (e) {}
     creds = initAuthCreds();
     await writeData(creds, 'creds.json');
   }

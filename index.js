@@ -1283,9 +1283,9 @@ async function clearAdminWhatsAppCredentials() {
         });
 
         // 2. Direct SQL cleanup ensuring canonical 'admin' and 'admin_creds.json' structure is wiped
-        const { connection } = require('./db');
-        if (connection?.pool) {
-            await connection.pool.query(
+        const { query } = require('./db');
+        if (typeof query === 'function') {
+            await query(
                 `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id LIKE 'admin_%'`
             ).catch(() => {});
         }

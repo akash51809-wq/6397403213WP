@@ -22,6 +22,36 @@ export function DevicePage() {
   const [allowedDevicesCount, setAllowedDevicesCount] = useState(isAdmin ? 4 : (planInfo?.allowedDevices || 1))
   const [connectingSlots, setConnectingSlots] = useState({})
   const [disconnectingSlots, setDisconnectingSlots] = useState({})
+  const [pairingPhone, setPairingPhone] = useState({})
+  const [pairingCode, setPairingCode] = useState({})
+  const [loadingPairingCode, setLoadingPairingCode] = useState({})
+  const [showPairingInput, setShowPairingInput] = useState({})
+
+  const handleRequestPairingCode = async (slotId) => {
+    const phone = pairingPhone[slotId] || ''
+    if (!phone || phone.replace(/\D/g, '').length < 10) {
+      notify('कृपया 10 अंकों का वैध मोबाइल नंबर दर्ज करें।')
+      return
+    }
+    setLoadingPairingCode(prev => ({ ...prev, [slotId]: true }))
+    try {
+      notify(`Device Slot 0${slotId}: Pairing Code तैयार हो रहा है...`)
+      const res = await api('/api/devices/pairing-code', {
+        method: 'POST',
+        body: JSON.stringify({ slot: slotId, phoneNumber: phone })
+      })
+      if (res && res.success && res.code) {
+        setPairingCode(prev => ({ ...prev, [slotId]: res.code }))
+        notify(`Pairing Code: ${res.code}`)
+      } else {
+        notify(res?.message || 'Pairing code error')
+      }
+    } catch (err) {
+      notify(err.message || 'Pairing code failed')
+    } finally {
+      setLoadingPairingCode(prev => ({ ...prev, [slotId]: false }))
+    }
+  }
 
   const onConnect = () => {
     connectUserWhatsApp()
@@ -277,9 +307,78 @@ export function DevicePage() {
                     className="btn primary"
                     onClick={() => handleConnect(sId)}
                     disabled={isSlotConnecting}
+                    style={{ width: '100%' }}
                   >
-                    {isSlotConnecting ? 'Connecting...' : (slotQr ? '↻ Refresh QR' : 'Show QR')}
+                    {isSlotConnecting ? 'Connecting...' : (slotQr ? '↻ Generate Fresh QR' : 'Show QR')}
                   </button>
+
+                  <div style={{ marginTop: 10, textAlign: 'center', width: '100%' }}>
+                    {!showPairingInput[sId] ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowPairingInput(prev => ({ ...prev, [sId]: true }))}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#16a765',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        📱 Scan nahi ho raha? Number se link karein (Pairing Code)
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            type="tel"
+                            placeholder="WhatsApp Number (e.g. 9876543210)"
+                            value={pairingPhone[sId] || ''}
+                            onChange={(e) => setPairingPhone(prev => ({ ...prev, [sId]: e.target.value }))}
+                            style={{
+                              flex: 1,
+                              padding: '6px 10px',
+                              borderRadius: 8,
+                              border: '1px solid #cbd5e1',
+                              fontSize: 12,
+                              color: '#183126',
+                              background: '#fff'
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={loadingPairingCode[sId]}
+                            onClick={() => handleRequestPairingCode(sId)}
+                            style={{ padding: '6px 12px', fontSize: 12, fontWeight: 700 }}
+                          >
+                            {loadingPairingCode[sId] ? '...' : 'Get Code'}
+                          </button>
+                        </div>
+                        {pairingCode[sId] && (
+                          <div style={{
+                            background: '#ecfdf5',
+                            border: '1px solid #10b981',
+                            borderRadius: 8,
+                            padding: '8px 10px',
+                            color: '#065f46',
+                            fontSize: 12,
+                            textAlign: 'center'
+                          }}>
+                            <div>WhatsApp Pairing Code:</div>
+                            <strong style={{ fontSize: 18, letterSpacing: 3, display: 'block', margin: '4px 0', color: '#047857' }}>
+                              {pairingCode[sId]}
+                            </strong>
+                            <small style={{ color: '#047857', fontSize: 10 }}>
+                              WhatsApp &gt; Linked Devices &gt; Link with phone number instead
+                            </small>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </article>
               )}
             </React.Fragment>
