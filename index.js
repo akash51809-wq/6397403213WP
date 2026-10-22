@@ -4089,7 +4089,7 @@ async function startBot(forceNew = false) {
             version,
             auth: state,
             printQRInTerminal: false,
-            browser: Browsers.macOS('Desktop'),
+            browser: Browsers.macOS('Chrome'),
             syncFullHistory: false,
             keepAliveIntervalMs: 25000,
             connectTimeoutMs: 60000,

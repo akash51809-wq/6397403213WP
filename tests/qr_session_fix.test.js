@@ -64,7 +64,7 @@ test('6. userSessions.js: Fast QR scanning configuration (syncFullHistory: false
   assert.ok(content.includes('syncFullHistory: false'), 'userSessions.js must have syncFullHistory: false to prevent mobile pairing timeouts');
   assert.ok(content.includes('qrTimeout: 60000') || content.includes('qrTimeout: 45000'), 'userSessions.js must have sufficient qrTimeout');
   assert.ok(content.includes('getMessage: async (key)'), 'userSessions.js must provide getMessage for retry receipt handling');
-  assert.ok(content.includes("Browsers.macOS('Desktop')"), 'userSessions.js must use official desktop browser to avoid Try again later');
+  assert.ok(content.includes("Browsers.macOS('Chrome')") || content.includes("Browsers.macOS('Desktop')"), 'userSessions.js must use official desktop browser to avoid Try again later');
   assert.ok(content.includes('clearUserCredentials'), 'userSessions.js must export clearUserCredentials for fresh pairing');
 });
 

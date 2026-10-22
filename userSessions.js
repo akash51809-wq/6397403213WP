@@ -133,7 +133,7 @@ async function startUserSession(userId, forceNew = false) {
         version,
         auth: state,
         printQRInTerminal: false,
-        browser: Browsers.macOS('Desktop'),
+        browser: Browsers.macOS('Chrome'),
         keepAliveIntervalMs: 25000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
