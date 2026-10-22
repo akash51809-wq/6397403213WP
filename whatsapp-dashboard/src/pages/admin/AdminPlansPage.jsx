@@ -15,7 +15,6 @@ const DEFAULT_PLAN_COLORS = [
 const ADMIN_SERVICES = [
   { id: 'whatsapp', label: 'WhatsApp', icon: '💬', color: '#10b981', softBg: '#f0fdf4' },
   { id: 'sms', label: 'SMS Gateway', icon: '📱', color: '#0284c7', softBg: '#f0f9ff' },
-  { id: 'plan', label: 'Plan API', icon: '⚡', color: '#ea580c', softBg: '#fff7ed' },
   { id: 'gst', label: 'GST', icon: '🏛️', color: '#7c3aed', softBg: '#faf5ff' },
 ]
 
@@ -114,7 +113,6 @@ export default function AdminPlansPage({ notify: propNotify }) {
     const serviceDefaultColors = {
       whatsapp: '#10b981',
       sms: '#0284c7',
-      plan: '#ea580c',
       gst: '#7c3aed'
     }
 
@@ -122,9 +120,9 @@ export default function AdminPlansPage({ notify: propNotify }) {
       ...emptyForm,
       service: selectedService,
       headerColor: serviceDefaultColors[selectedService] || '#4f75f2',
-      price: selectedService === 'gst' ? 1.0 : (selectedService === 'plan' ? 499 : (selectedService === 'sms' ? 199 : 99)),
+      price: selectedService === 'gst' ? 1.0 : (selectedService === 'sms' ? 199 : 99),
       dailyLimit: selectedService === 'whatsapp' ? '500/Day' : '',
-      hits: selectedService === 'plan' ? 10000 : 0,
+      hits: 0,
       pricePerHit: selectedService === 'gst' ? 1.0 : 0,
       sortOrder: plans.filter(p => (p.service || 'whatsapp').toLowerCase() === selectedService).length + 1
     })
@@ -602,12 +600,6 @@ export default function AdminPlansPage({ notify: propNotify }) {
                             <th style={{ fontWeight: 700 }}>Outgoing SMS</th>
                           </>
                         )}
-                        {selectedService === 'plan' && (
-                          <>
-                            <th style={{ fontWeight: 700 }}>Hits Quota</th>
-                            <th style={{ fontWeight: 700 }}>API Access</th>
-                          </>
-                        )}
                         {selectedService === 'gst' && (
                           <>
                             <th style={{ fontWeight: 700 }}>Price Per Hit</th>
@@ -713,22 +705,6 @@ export default function AdminPlansPage({ notify: propNotify }) {
                               <td>
                                 <span className={`badge ${p.outgoingAllowed !== false ? 'badge-success-light' : 'badge-danger-light'}`} style={{ fontSize: 11, padding: '4px 8px' }}>
                                   {p.outgoingAllowed !== false ? '✓ Outgoing Allowed' : '✕ Disallowed'}
-                                </span>
-                              </td>
-                            </>
-                          )}
-
-                          {/* Plan API Columns */}
-                          {selectedService === 'plan' && (
-                            <>
-                              <td>
-                                <span className="badge badge-warning-light" style={{ fontSize: 12, padding: '4px 8px', fontWeight: 700 }}>
-                                  🎯 {Number(p.hits || 0).toLocaleString()} Hits
-                                </span>
-                              </td>
-                              <td>
-                                <span className={`badge ${p.apiAccess ? 'badge-success-light' : 'badge-danger-light'}`} style={{ fontSize: 11, padding: '4px 8px' }}>
-                                  {p.apiAccess ? '✓ REST API Enabled' : '✕ API Disabled'}
                                 </span>
                               </td>
                             </>
@@ -842,7 +818,7 @@ export default function AdminPlansPage({ notify: propNotify }) {
                       className="form-control" 
                       value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder={selectedService === 'gst' ? 'e.g. GST Standard Pay-per-hit' : (selectedService === 'plan' ? 'e.g. 10k Hits Plan' : 'e.g. Startup, Business')}
+                      placeholder={selectedService === 'gst' ? 'e.g. GST Standard Pay-per-hit' : 'e.g. Startup, Business'}
                       required
                       style={{ height: 42, borderRadius: 8 }}
                     />
@@ -1079,78 +1055,6 @@ export default function AdminPlansPage({ notify: propNotify }) {
                             <span style={{ fontSize: 13, fontWeight: 600 }}>Outgoing SMS Allowed</span>
                           </label>
                           <small className="text-muted d-block" style={{ marginLeft: 22, fontSize: 11 }}>Allow sending SMS outbox via connected device</small>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* PLAN API SPECIFIC PARAMETERS */}
-                {selectedService === 'plan' && (
-                  <>
-                    <div className="row g-3 mb-3">
-                      <div className="col-md-6">
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                          Number of Hits (कुल हिट्स संख्या) *
-                        </label>
-                        <input 
-                          type="number" 
-                          className="form-control" 
-                          value={form.hits}
-                          onChange={e => setForm(f => ({ ...f, hits: Number(e.target.value) || 0 }))}
-                          placeholder="e.g. 10000, 50000"
-                          min="1"
-                          required
-                          style={{ height: 42, borderRadius: 8 }}
-                        />
-                      </div>
-                      <div className="col-md-6">
-                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                          Validity in Days (वैधता दिन)
-                        </label>
-                        <input 
-                          type="number" 
-                          className="form-control" 
-                          value={form.validityDays}
-                          disabled={form.isUnlimitedValidity}
-                          onChange={e => setForm(f => ({ ...f, validityDays: Number(e.target.value) || 30, validity: `${e.target.value} Days` }))}
-                          placeholder={form.isUnlimitedValidity ? 'Unlimited' : '30'}
-                          min="1"
-                          style={{ height: 42, borderRadius: 8 }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="card p-3 mb-3" style={{ borderRadius: 12, background: 'var(--zd-border-subtle, rgba(0,0,0,0.02))', border: '1px solid var(--zd-border, #eef2f6)' }}>
-                      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 12, color: 'inherit' }}>
-                        ⚡ Plan API Access &amp; Validity Rule
-                      </label>
-                      <div className="row g-3">
-                        <div className="col-sm-6">
-                          <label className="custom-control custom-checkbox d-flex align-items-center" style={{ gap: 8, cursor: 'pointer', margin: 0 }}>
-                            <input 
-                              type="checkbox" 
-                              checked={form.isUnlimitedValidity}
-                              onChange={e => setForm(f => ({ 
-                                ...f, 
-                                isUnlimitedValidity: e.target.checked,
-                                validity: e.target.checked ? 'Unlimited' : `${f.validityDays} Days`
-                              }))}
-                            />
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>Unlimited Validity (लाइफटाइम वैधता)</span>
-                          </label>
-                          <small className="text-muted d-block" style={{ marginLeft: 22, fontSize: 11 }}>Hits never expire until consumed</small>
-                        </div>
-                        <div className="col-sm-6">
-                          <label className="custom-control custom-checkbox d-flex align-items-center" style={{ gap: 8, cursor: 'pointer', margin: 0 }}>
-                            <input 
-                              type="checkbox" 
-                              checked={form.apiAccess}
-                              onChange={e => setForm(f => ({ ...f, apiAccess: e.target.checked }))}
-                            />
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>API Access Allowed</span>
-                          </label>
-                          <small className="text-muted d-block" style={{ marginLeft: 22, fontSize: 11 }}>Access to Mobile, DTH, R-offer endpoints</small>
                         </div>
                       </div>
                     </div>

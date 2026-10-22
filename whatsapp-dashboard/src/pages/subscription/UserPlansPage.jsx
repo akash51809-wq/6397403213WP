@@ -23,14 +23,6 @@ const SERVICES = [
     desc: 'Turn Android devices into dedicated SMS gateways with Dual-SIM routing & fast OTP delivery.'
   },
   {
-    id: 'plan',
-    label: 'Plan API',
-    icon: '⚡',
-    color: '#ea580c',
-    softBg: '#fff7ed',
-    desc: 'Live prepaid/postpaid mobile recharge plans, special R-offers & DTH operator tariff API.'
-  },
-  {
     id: 'gst',
     label: 'GST Portal',
     icon: '🏛️',
@@ -136,47 +128,6 @@ const DEFAULT_PLANS = {
         'Outgoing Broadcast Outbox Allowed',
         'Detailed Delivery Reports',
         'Validity: 30 Days'
-      ]
-    }
-  ],
-  plan: [
-    {
-      planId: 'plan_api_basic',
-      name: 'Plan API Basic',
-      price: '499',
-      service: 'plan',
-      hits: 10000,
-      validity: '30 Days',
-      apiAccess: true,
-      badgeText: '10K Hits',
-      description: 'Mobile and DTH operator recharge plans, R-offer check & series lookup.',
-      features: [
-        '10,000 Hits Quota',
-        'Operator & Circle Lookup',
-        'Live Mobile Tariff & Plans',
-        'R-Offers & DTH Customer Info',
-        'REST API Secret Token Access',
-        'Validity: 30 Days'
-      ]
-    },
-    {
-      planId: 'plan_api_unlimited',
-      name: 'Plan API Unlimited Lifetime',
-      price: '999',
-      service: 'plan',
-      hits: 50000,
-      isUnlimitedValidity: true,
-      validity: 'Unlimited',
-      apiAccess: true,
-      badgeText: '⭐ Lifetime',
-      isPopular: true,
-      description: '50,000 API Hits with lifetime unlimited validity. Never expires until used.',
-      features: [
-        '50,000 API Hits',
-        'Unlimited Lifetime Validity',
-        'Full REST API & Endpoints',
-        'High-Speed Scraper Engine',
-        'Instant Token Regeneration'
       ]
     }
   ],

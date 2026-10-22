@@ -27,10 +27,10 @@ export default function LandingPage() {
   const contactWhatsApp = companySettings?.contactWhatsApp || '8840457632'
   const contactEmail = companySettings?.contactEmail || 'support@easyrechargesolution.com'
   const contactAddress = companySettings?.contactAddress || 'Lucknow, Uttar Pradesh, India'
-  const heroTitle = companySettings?.heroTitle || 'One Powerful Portal. 4 Mission-Critical Services.'
-  const heroSubtitle = companySettings?.heroSubtitle || 'Scale WhatsApp automation, route high-speed Mobile SMS via Android SIMs, query live Telecom Recharge Plans, and verify GSTIN Taxpayers in milliseconds.'
+  const heroTitle = companySettings?.heroTitle || 'One Powerful Portal. 3 Mission-Critical Services.'
+  const heroSubtitle = companySettings?.heroSubtitle || 'Scale WhatsApp automation, route high-speed Mobile SMS via Android SIMs, and verify GSTIN Taxpayers in milliseconds.'
   const heroBadge = companySettings?.heroBadge || '⭐ RATED 4.9/5 BY 12,000+ INDIAN BUSINESSES & DEVELOPERS'
-  const footerAbout = companySettings?.footerAbout || 'Easy Recharge Solution is India\'s trusted developer-first cloud platform offering unified WhatsApp automation, Android SMS gateway, Telecom Plan intelligence, and GST compliance verification.'
+  const footerAbout = companySettings?.footerAbout || 'Easy Recharge Solution is India\'s trusted developer-first cloud platform offering unified WhatsApp automation, Android SMS gateway, and GST compliance verification.'
 
   const cleanWhatsApp = contactWhatsApp.replace(/\D/g, '')
 
@@ -71,24 +71,6 @@ export default function LandingPage() {
       ],
       ctaText: 'Download Android APK →',
       ctaLink: '/sms/dashboard'
-    },
-    {
-      id: 'plan',
-      name: 'Telecom Plan API',
-      badge: '99.9% ACCURACY',
-      color: '#ea580c',
-      bgLight: '#fff7ed',
-      icon: '⚡',
-      title: 'Telecom Recharge & R-Offer Engine',
-      desc: 'Instant operator and circle detection by 10-digit mobile number. Real-time customized R-Offers for Airtel, Jio, VI, BSNL, and DTH customer accounts.',
-      features: [
-        'Ultra-Fast Operator & Circle Detection (20ms)',
-        'Live Segmented R-Offers for Jio, Airtel & VI',
-        'DTH Customer Account Verification & Balance',
-        'High-Throughput REST API with 99.99% Uptime'
-      ],
-      ctaText: 'Test Plan API →',
-      ctaLink: '/plans/dashboard'
     },
     {
       id: 'gst',
@@ -175,23 +157,6 @@ payload = {
 response = requests.post(url, json=payload, headers=headers)
 print(response.json())`
     },
-    plan: {
-      curl: `curl -X GET "${window.location.origin}/api/Mobile/OperatorFetchNew?Mobileno=9840123456&ApiUserID=YOUR_MOBILE&token=YOUR_TOKEN"`,
-      node: `const axios = require('axios');
-
-async function fetchOperator() {
-  const res = await axios.get('${window.location.origin}/api/Mobile/OperatorFetchNew', {
-    params: { Mobileno: '9840123456', ApiUserID: 'YOUR_MOBILE', token: 'YOUR_TOKEN' }
-  });
-  console.log(res.data);
-}`,
-      python: `import requests
-
-url = "${window.location.origin}/api/Mobile/OperatorFetchNew"
-params = {"Mobileno": "9840123456", "ApiUserID": "YOUR_MOBILE", "token": "YOUR_TOKEN"}
-response = requests.get(url, params=params)
-print(response.json())`
-    },
     gst: {
       curl: `curl -X POST "${window.location.origin}/api/gst/search" \\
   -H "Authorization: Bearer YOUR_API_TOKEN" \\
@@ -229,16 +194,12 @@ print(response.json())`
       a: 'You install our lightweight Android Gateway App (ERS SMS) on any Android mobile phone. The app connects securely via encrypted WebSockets to your portal. All OTPs and SMS messages are dispatched directly through your physical phone SIM cards (which typically come with unlimited SMS packs from Jio or Airtel), completely eliminating telecom third-party SMS aggregator fees!'
     },
     {
-      q: 'Can I use WhatsApp, SMS, Plan API, and GST from a single wallet balance?',
-      a: 'Yes, absolutely! Easy Recharge Solution features a single unified wallet. You add funds once, and you can purchase WhatsApp subscriptions, send SMS, query live Telecom recharge plans, and pay for GST lookups on a pay-per-hit model directly from your available balance.'
+      q: 'Can I use WhatsApp, SMS, and GST from a single wallet balance?',
+      a: 'Yes, absolutely! Easy Recharge Solution features a single unified wallet. You add funds once, and you can purchase WhatsApp subscriptions, send SMS, and pay for GST lookups on a pay-per-hit model directly from your available balance.'
     },
     {
       q: 'Do you offer a free demo or trial validity upon signup?',
       a: 'Yes! Every new user who registers with their WhatsApp number receives automatic trial validity (configured by admin) so you can test live QR scanning, message sending, and API lookups immediately.'
-    },
-    {
-      q: 'How fast is the Telecom Operator Lookup and Plan API?',
-      a: 'Our Plan API engine operates at ultra-low latency (~20ms response time). It connects directly to live operator series data to instantly detect circle and operator for Airtel, Jio, VI, BSNL, and provides active R-Offers.'
     },
     {
       q: 'Is my data secure and isolated from other users?',
@@ -448,20 +409,6 @@ print(response.json())`
                   </span>
                 </div>
 
-                {/* Plan API Engine */}
-                <div className="lp-console-row">
-                  <div className="lp-console-left">
-                    <div className="lp-console-icon" style={{ background: '#ffedd5', color: '#ea580c' }}>⚡</div>
-                    <div className="lp-console-text">
-                      <strong>Telecom Plan API Engine</strong>
-                      <small>Operator &amp; Circle Detection</small>
-                    </div>
-                  </div>
-                  <span className="lp-console-badge" style={{ background: '#ffedd5', color: '#c2410c' }}>
-                    20ms Latency
-                  </span>
-                </div>
-
                 {/* GST Verification */}
                 <div className="lp-console-row">
                   <div className="lp-console-left">
@@ -497,10 +444,10 @@ print(response.json())`
           <div className="lp-section-header">
             <div className="lp-section-pill">✦ MULTI-SERVICE PLATFORM</div>
             <h2 className="lp-section-title">
-              Why Manage 4 Vendors When You Can Have One?
+              Why Manage Multiple Vendors When You Can Have One?
             </h2>
             <p className="lp-section-desc">
-              Unify your messaging, mobile SMS, recharge telecom intelligence, and business tax verification under a single balance and single developer token.
+              Unify your messaging, mobile SMS, and business tax verification under a single balance and single developer token.
             </p>
           </div>
 
@@ -759,25 +706,6 @@ print(response.json())`
               </Link>
             </div>
 
-            {/* Plan API Card */}
-            <div className="lp-price-card">
-              <h3 className="lp-price-plan-name">⚡ Telecom Plan API</h3>
-              <p className="lp-price-plan-desc">Operator detection, R-Offers &amp; DTH lookup</p>
-              <div className="lp-price-amount-box">
-                <span className="lp-price-amount">₹499</span>
-                <span className="lp-price-period">/ 10,000 Hits</span>
-              </div>
-              <ul className="lp-price-features">
-                <li className="lp-price-feature"><span>✓</span> 10,000 API Hits Balance</li>
-                <li className="lp-price-feature"><span>✓</span> All Circles &amp; Operators (Jio/Airtel/VI)</li>
-                <li className="lp-price-feature"><span>✓</span> Real-Time R-Offer Custom Tariff</li>
-                <li className="lp-price-feature"><span>✓</span> 20ms High-Throughput SLA</li>
-              </ul>
-              <Link to="/subscription?service=plan" className="lp-btn-primary" style={{ textAlign: 'center', justifyContent: 'center' }}>
-                <span>Get Plan API Quota</span>
-              </Link>
-            </div>
-
             {/* GST Verification Card */}
             <div className="lp-price-card">
               <h3 className="lp-price-plan-name">🏛️ GST Verification</h3>
@@ -913,7 +841,6 @@ print(response.json())`
               <ul className="lp-footer-links">
                 <li><Link to="/dashboard">WhatsApp Automation</Link></li>
                 <li><Link to="/sms/dashboard">Mobile SMS Gateway</Link></li>
-                <li><Link to="/plans/dashboard">Telecom Plan API</Link></li>
                 <li><Link to="/gst/dashboard">GSTIN Taxpayer Search</Link></li>
                 <li><Link to="/subscription">Subscription Plans</Link></li>
               </ul>
@@ -925,7 +852,6 @@ print(response.json())`
               <ul className="lp-footer-links">
                 <li><Link to="/api">WhatsApp REST API</Link></li>
                 <li><Link to="/sms/api-docs">Mobile SMS API Docs</Link></li>
-                <li><Link to="/plans/api-docs">Telecom Plan API Docs</Link></li>
                 <li><Link to="/gst/api-docs">GST Verification API</Link></li>
                 <li><Link to="/sms/webhook">Webhook Integrations</Link></li>
               </ul>

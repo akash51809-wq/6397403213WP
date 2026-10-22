@@ -8,7 +8,6 @@ const ALL_TABS = [
   { key: 'company',        icon: '▦',  label: 'Company',        adminOnly: true },
   { key: 'profile',        icon: '👤',  label: 'My Profile',     adminOnly: false },
   { key: 'api',            icon: '⚙',  label: 'API Setting',    adminOnly: false },
-  { key: 'ezytm',          icon: '📶',  label: 'Manage EzyTM',   adminOnly: true },
   { key: 'whatsapp',       icon: '◉',  label: 'WhatsApp',       adminOnly: false },
   { key: 'gdrive',         icon: '◈',  label: 'G Drive',        adminOnly: true },
   { key: 'gmail',          icon: '✉',  label: 'Gmail',          adminOnly: true },
@@ -734,287 +733,6 @@ function ApiTab({ notify }) {
         </div>
         <div className="api-actions">
           <button className="btn primary" onClick={save} disabled={saving} style={{ height: 46 }}>{saving ? 'Saving…' : 'Save'}</button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-// ─── Tab: Manage EzyTM (PlanAPI Rotation Pool) ─────────────────────────
-function EzytmTab({ notify }) {
-  const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [userId, setUserId] = useState('');
-  const [password, setPassword] = useState('');
-  const [visiblePassId, setVisiblePassId] = useState(null);
-
-  const fetchAccounts = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await apiGet('/api/settings/ezytm');
-      if (res && res.accounts) {
-        setAccounts(res.accounts);
-      }
-    } catch (e) {
-      notify(e.message || 'Error fetching EzyTM accounts', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [notify]);
-
-  useEffect(() => {
-    fetchAccounts();
-  }, [fetchAccounts]);
-
-  const handleSave = async (e) => {
-    if (e) e.preventDefault();
-    const cleanUser = String(userId).trim();
-    const cleanPass = String(password).trim();
-    if (!cleanUser || !cleanPass) {
-      notify('कृपया User ID (मोबाइल नंबर) और Password दोनों दर्ज करें।', 'error');
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const res = await apiPost('/api/settings/ezytm', {
-        username: cleanUser,
-        password: cleanPass
-      });
-      if (res && res.success) {
-        notify('EzyTM ID सफलतापूर्वक सेव हो गई!', 'success');
-        setUserId('');
-        setPassword('');
-        fetchAccounts();
-      } else {
-        notify((res && res.message) || 'ID सेव करने में विफलता।', 'error');
-      }
-    } catch (e) {
-      notify(e.message || 'ID सेव करने में त्रुटि।', 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleToggle = async (id) => {
-    try {
-      const res = await apiPost(`/api/settings/ezytm/${id}/toggle`, {});
-      if (res && res.success) {
-        notify(res.message || 'स्थिति अपडेट हो गई!', 'success');
-        fetchAccounts();
-      }
-    } catch (e) {
-      notify(e.message || 'स्थिति अपडेट करने में त्रुटि।', 'error');
-    }
-  };
-
-  const handleDelete = async (id, user) => {
-    if (!window.confirm(`क्या आप EzyTM ID "${user}" को हटाना चाहते हैं?`)) return;
-    try {
-      const res = await apiDelete(`/api/settings/ezytm/${id}`);
-      if (res && res.success) {
-        notify('EzyTM ID रोटेशन पूल से हटा दी गई!', 'success');
-        fetchAccounts();
-      }
-    } catch (e) {
-      notify(e.message || 'ID हटाने में त्रुटि।', 'error');
-    }
-  };
-
-  const activeCount = accounts.filter(a => a.status === 'Active').length;
-
-  return (
-    <article className="card" style={{ maxWidth: 880, margin: '0 auto' }}>
-      <div className="scard-head" style={{ padding: '16px 20px', borderBottom: '1px solid rgba(249,115,22,0.18)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8, color: '#ea580c' }}>
-              📶 Manage EzyTM / Plan API IDs
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: '#78867f' }}>
-              Add unlimited IDs. Active IDs automatically rotate 1-by-1 for every transaction verification.
-            </p>
-          </div>
-          <span className="badge" style={{
-            background: 'rgba(234, 88, 12, 0.12)',
-            color: '#ea580c',
-            border: '1px solid rgba(234, 88, 12, 0.28)',
-            padding: '5px 12px',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 800
-          }}>
-            🔄 {activeCount} Active in Rotation Pool
-          </span>
-        </div>
-      </div>
-
-      <div style={{ padding: '18px 20px' }}>
-        {/* Compact Add Form */}
-        <form onSubmit={handleSave} style={{
-          background: 'linear-gradient(145deg, #fffaf5, #fff5eb)',
-          border: '1px solid rgba(249,115,22,0.22)',
-          borderRadius: 12,
-          padding: '16px',
-          marginBottom: 20
-        }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, alignItems: 'end' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#431407', marginBottom: 5 }}>
-                USER ID / MOBILE NO. <span style={{ color: '#ea580c' }}>*</span>
-              </label>
-              <SInput
-                type="text"
-                value={userId}
-                onChange={v => setUserId(v)}
-                placeholder="e.g. 8840457632"
-                style={{ height: 40, fontSize: 13, fontWeight: 700 }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 800, color: '#431407', marginBottom: 5 }}>
-                LOGIN PASSWORD <span style={{ color: '#ea580c' }}>*</span>
-              </label>
-              <SInput
-                type="text"
-                value={password}
-                onChange={v => setPassword(v)}
-                placeholder="Enter EzyTM password"
-                style={{ height: 40, fontSize: 13, fontWeight: 700 }}
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="submit"
-                className="btn primary"
-                disabled={saving || !userId || !password}
-                style={{ height: 40, flex: 1, fontWeight: 800, fontSize: 13, background: '#ea580c', borderColor: '#ea580c' }}
-              >
-                {saving ? 'Saving...' : '💾 Save ID'}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        {/* Compact Accounts List Table */}
-        <div style={{
-          background: '#fff',
-          border: '1px solid rgba(0,0,0,0.08)',
-          borderRadius: 10,
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '10px 14px',
-            background: '#f9fafb',
-            borderBottom: '1px solid #e5e7eb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            <span style={{ fontSize: 12, fontWeight: 800, color: '#374151' }}>
-              SAVED EZYTM IDS ({accounts.length})
-            </span>
-            <button
-              type="button"
-              className="btn"
-              onClick={fetchAccounts}
-              disabled={loading}
-              style={{ fontSize: 11, padding: '3px 8px', height: 26 }}
-            >
-              🔄 Refresh
-            </button>
-          </div>
-
-          {loading && accounts.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>
-              Loading IDs pool...
-            </div>
-          ) : accounts.length === 0 ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>
-              No EzyTM ID added yet. Use the form above to add your first ID.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: '#f9fafb', color: '#6b7280', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>USER ID</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700 }}>PASSWORD</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'center' }}>STATUS</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'center' }}>REQUESTS</th>
-                    <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>ACTION</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accounts.map(acc => {
-                    const isVisible = visiblePassId === acc.id;
-                    const isActive = acc.status === 'Active';
-                    return (
-                      <tr key={acc.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 700, color: '#111827' }}>
-                          {acc.username}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>
-                          <span style={{ marginRight: 6, color: '#374151' }}>
-                            {isVisible ? acc.password : '••••••••'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setVisiblePassId(isVisible ? null : acc.id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#6b7280', padding: 2 }}
-                            title={isVisible ? 'Hide' : 'Show'}
-                          >
-                            {isVisible ? '🙈' : '👁️'}
-                          </button>
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleToggle(acc.id)}
-                            style={{
-                              padding: '2px 8px',
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                              border: isActive ? '1px solid #86efac' : '1px solid #fca5a5',
-                              background: isActive ? '#f0fdf4' : '#fef2f2',
-                              color: isActive ? '#15803d' : '#b91c1c'
-                            }}
-                          >
-                            {isActive ? '✓ Active' : '✕ Disabled'}
-                          </button>
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center', color: '#6b7280', fontWeight: 600 }}>
-                          <span style={{ color: '#15803d' }}>{acc.success_requests || 0}</span> / {acc.total_requests || 0}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(acc.id, acc.username)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: '#ef4444',
-                              fontSize: 14,
-                              padding: '2px 6px'
-                            }}
-                            title="Delete ID"
-                          >
-                            🗑️
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     </article>
@@ -2047,7 +1765,7 @@ export default function SettingsPage({ defaultTab = 'company' }) {
     if (isAdmin) {
       return defaultTab || 'company';
     }
-    return defaultTab === 'company' || defaultTab === 'gdrive' || defaultTab === 'gmail' || defaultTab === 'email-template' || defaultTab === 'system' || defaultTab === 'ezytm'
+    return defaultTab === 'company' || defaultTab === 'gdrive' || defaultTab === 'gmail' || defaultTab === 'email-template' || defaultTab === 'system'
       ? 'api'
       : defaultTab;
   };
@@ -2055,7 +1773,7 @@ export default function SettingsPage({ defaultTab = 'company' }) {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
-    if (!isAdmin && ['company', 'gdrive', 'gmail', 'email-template', 'system', 'ezytm'].includes(activeTab)) {
+    if (!isAdmin && ['company', 'gdrive', 'gmail', 'email-template', 'system'].includes(activeTab)) {
       setActiveTab('api');
     }
   }, [isAdmin, activeTab]);
@@ -2078,7 +1796,6 @@ export default function SettingsPage({ defaultTab = 'company' }) {
       {activeTab === 'company'        && <CompanyTab        notify={notify} />}
       {activeTab === 'profile'        && <ProfileTab        notify={notify} />}
       {activeTab === 'api'            && <ApiTab            notify={notify} />}
-      {activeTab === 'ezytm'          && <EzytmTab          notify={notify} />}
       {activeTab === 'whatsapp'       && <WhatsAppTab       notify={notify} />}
       {activeTab === 'gdrive'         && <GDriveTab         notify={notify} />}
       {activeTab === 'gmail'          && <GmailTab          notify={notify} />}
