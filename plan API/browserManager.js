@@ -522,31 +522,39 @@ class EzytmSessionPool {
   }
 
   /**
+   * Check if any pool session is already authenticated and in READY state
+   */
+  hasReadySession() {
+    if (!this.sessions || this.sessions.size === 0) return false;
+    for (const session of this.sessions.values()) {
+      if (session.sessionState === 'READY' && session.page && !session.page.isClosed()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Handle hot account mutations (Add, Update, Toggle, Delete)
    */
   async handleAccountChangeEvent(event, data) {
     try {
       if (event === 'add' && data && data.id) {
-        logger.info(`[Pool Hot-Add] Detected new EzyTM account [${data.label}]. Spawning session...`);
+        logger.info(`[Pool Hot-Add] Registered EzyTM account [${data.label}] in pool.`);
         const session = new EzytmAccountSession(data, this);
         this.sessions.set(data.id, session);
-        session.init().catch(e => logger.warn(`[Pool Hot-Add] Init error for ${data.label}: ${e.message}`));
       } else if ((event === 'update' || event === 'toggle') && data && data.id) {
         let session = this.sessions.get(data.id);
         if (session) {
-          logger.info(`[Pool Hot-Update] Updating session for [${data.label}] (Status: ${data.status})...`);
-          await session.updateCredentials(data.username, data.password, data.label, data.status);
+          session.updateCredentials(data.username, data.password, data.label, data.status).catch(() => {});
         } else if (data.status === 'Active') {
-          logger.info(`[Pool Hot-Update] Enabling session for [${data.label}]...`);
           session = new EzytmAccountSession(data, this);
           this.sessions.set(data.id, session);
-          session.init().catch(e => logger.warn(`[Pool Hot-Update] Init error for ${data.label}: ${e.message}`));
         }
       } else if (event === 'delete' && data) {
         const id = typeof data === 'string' ? data : data.id;
         const session = this.sessions.get(id);
         if (session) {
-          logger.info(`[Pool Hot-Delete] Closing and removing session ${id} from pool...`);
           this.sessions.delete(id);
           session.close().catch(() => {});
         }
@@ -779,6 +787,10 @@ class EzytmSessionPool {
     const cleanNumber = String(mobileOrVc).trim().replace(/\D/g, '');
     if (!cleanNumber || cleanNumber.length < 8) {
       throw new Error('Valid Mobile number or DTH VC number is required.');
+    }
+
+    if (!this.hasReadySession()) {
+      return null;
     }
 
     return await this.dispatchTask(async (page) => {
