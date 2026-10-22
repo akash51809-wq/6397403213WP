@@ -81,7 +81,7 @@ async function startUserSession(userId, forceNew = false) {
         if (currentSession.status === 'connected' && currentSession.socket) {
             // Verify the underlying WebSocket is actually open (ws.OPEN === 1)
             const wsState = currentSession.socket?.ws?.readyState;
-            if (wsState === undefined || wsState === 1) {
+            if (wsState === 1) {
                 // Socket looks alive — don't recreate
                 return {
                     status: currentSession.status,
@@ -95,7 +95,7 @@ async function startUserSession(userId, forceNew = false) {
         // If already connecting within the last 15 seconds AND socket appears alive, avoid resetting
         if (currentSession.status === 'connecting' && currentSession.connectingSince && (Date.now() - currentSession.connectingSince < 15000)) {
             const wsState = currentSession.socket?.ws?.readyState;
-            if (wsState === undefined || wsState === 1) {
+            if (wsState === 1) {
                 return {
                     status: 'connecting',
                     connectedNumber: currentSession.connectedNumber,
@@ -252,7 +252,12 @@ async function startUserSession(userId, forceNew = false) {
             } catch (e) {}
 
             if (shouldReconnect) {
-                setTimeout(() => startUserSession(userId), 3000);
+                const isRestart = statusCode === DisconnectReason.restartRequired || statusCode === 515;
+                if (isRestart) {
+                    setTimeout(() => startUserSession(userId), 500);
+                } else {
+                    setTimeout(() => startUserSession(userId), 3000);
+                }
             } else {
                 if (isLoggedOut) {
                     try {

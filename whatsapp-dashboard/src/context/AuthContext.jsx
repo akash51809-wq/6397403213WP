@@ -344,47 +344,68 @@ export function AuthProvider({ children }) {
     }
   }, [login])
 
-  // Polling status & qr
+  // Polling status & qr (only poll QR when not yet connected)
   useEffect(() => {
     if (!login) return
     loadStatus()
-    loadQr()
-    const t = setInterval(() => { loadStatus(); loadQr() }, 3500)
+    if (status?.status !== 'connected') {
+      loadQr()
+    }
+    const t = setInterval(() => {
+      loadStatus()
+      if (status?.status !== 'connected') {
+        loadQr()
+      }
+    }, 4000)
     return () => clearInterval(t)
-  }, [login, loadStatus, loadQr])
+  }, [login, loadStatus, loadQr, status?.status])
 
-  // Real-time EventSource listener
+  // Real-time EventSource listener (STABLE: only created once on login, never reconnecting in a loop)
+  const esHandlersRef = useRef({ loadStatus, loadQr, loadChats, loadMessages, loadReports, selected })
+  useEffect(() => {
+    esHandlersRef.current = { loadStatus, loadQr, loadChats, loadMessages, loadReports, selected }
+  })
+
   useEffect(() => {
     if (!login) return
     const es = new EventSource(`/api/incoming/events?token=${encodeURIComponent(login)}`)
     es.onmessage = (e) => {
       try {
         const payload = JSON.parse(e.data || '{}')
-        if (payload.type === 'connection_status' || payload.type === 'qr' || payload.type === 'refresh') {
+        if (payload.type === 'connected') {
+          // SSE handshake connection established — do not trigger heavy reloads
+          return
+        }
+        if (payload.type === 'connection_status' || payload.type === 'qr') {
           if (payload.data?.status === 'connected') {
             setQr(null)
             setStatus(s => ({
               ...s,
               status: 'connected',
-              number: payload.data.number || s.number,
-              profileName: payload.data.profileName || s.profileName,
-              profilePicUrl: payload.data.profilePicUrl || s.profilePicUrl,
+              number: payload.data.number || s?.number,
+              profileName: payload.data.profileName || s?.profileName,
+              profilePicUrl: payload.data.profilePicUrl || s?.profilePicUrl,
               ready: true
             }))
           } else if (payload.data?.qr) {
             setQr(payload.data.qr)
           }
-          loadStatus()
-          loadQr()
+          esHandlersRef.current.loadStatus()
+          if (payload.data?.status !== 'connected') {
+            esHandlersRef.current.loadQr()
+          }
+        } else if (payload.type === 'new_message' || payload.type === 'refresh' || payload.type === 'read_update') {
+          esHandlersRef.current.loadChats()
+          if (esHandlersRef.current.selected) {
+            esHandlersRef.current.loadMessages(esHandlersRef.current.selected.chatJid)
+          }
+          esHandlersRef.current.loadReports()
         }
       } catch {}
-      loadChats()
-      if (selected) loadMessages(selected.chatJid)
-      loadReports()
     }
     es.onerror = () => {}
     return () => es.close()
-  }, [login, selected, loadChats, loadMessages, loadStatus, loadQr, loadReports])
+  }, [login])
 
   // Inactivity Watcher (30 minutes non-use condition)
   // Only logs out the web browser panel. WhatsApp Baileys session & API message workers remain active 24/7 on the server.
@@ -458,7 +479,7 @@ export function AuthProvider({ children }) {
 
   const toggleSidebar = () => setSidebarOpen(prev => !prev)
 
-  const value = {
+  const value = useMemo(() => ({
     login,
     token: login,
     currentUser,
@@ -511,7 +532,38 @@ export function AuthProvider({ children }) {
     updateCompanySettings,
     planInfo,
     loadPlanInfo
-  }
+  }), [
+    login,
+    currentUser,
+    isAdmin,
+    theme,
+    status,
+    qr,
+    error,
+    toast,
+    connecting,
+    sidebarOpen,
+    sidebarCollapsed,
+    toggleSidebarCollapsed,
+    chats,
+    loadChats,
+    selected,
+    messages,
+    loadMessages,
+    chatFilter,
+    search,
+    reports,
+    reportStats,
+    loadReports,
+    stats,
+    loadStatus,
+    loadQr,
+    companySettings,
+    loadCompanySettings,
+    updateCompanySettings,
+    planInfo,
+    loadPlanInfo
+  ])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
