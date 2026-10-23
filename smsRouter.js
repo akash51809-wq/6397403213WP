@@ -507,6 +507,22 @@ router.get('/api/sms/outbox', (req, res) => {
 const path = require('path');
 const fs = require('fs');
 
+// App Version & In-App Auto-Update Check Endpoint
+router.get(['/api/sms/version', '/api/sms/app-version'], (req, res) => {
+  res.json({
+    success: true,
+    versionCode: 2,
+    versionName: '2.0.0',
+    appName: 'ERS mobile SMS',
+    apkUrl: '/download/ERS-SMS-Gateway.apk',
+    downloadUrl: `${req.protocol}://${req.get('host')}/download/ERS-SMS-Gateway.apk`,
+    minVersionCode: 1,
+    mandatory: false,
+    releaseDate: '2026-10-23',
+    releaseNotes: '• New 3D Futuristic Glassmorphism UI\n• Dedicated Outgoing SIM Selection (SIM1/SIM2/Both)\n• Dedicated Incoming Forwarding SIM Selection (SIM1/SIM2/Both)\n• SMS Sender ID Filter (All vs Custom)\n• Instant QR Pairing & 24x7 Lock-Screen Auto-Connect\n• Automatic In-App Updates'
+  });
+});
+
 router.get(['/api/sms/download-apk', '/download/ERS-SMS-Gateway.apk'], (req, res) => {
   const possiblePaths = [
     path.join(__dirname, 'whatsapp-dashboard', 'public', 'downloads', 'ERS-SMS-Gateway.apk'),

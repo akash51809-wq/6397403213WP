@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 3D Smartphone Device Shell (Outer Bevel Shadow) -->
+    <path
+        android:pathData="M37,20 L71,20 A8,8 0 0,1 79,28 L79,80 A8,8 0 0,1 71,88 L37,88 A8,8 0 0,1 29,80 L29,28 A8,8 0 0,1 37,20 Z"
+        android:fillColor="#040916" />
+
+    <!-- 3D Smartphone Body Gradient -->
+    <path
+        android:pathData="M37,21 L71,21 A7,7 0 0,1 78,28 L78,79 A7,7 0 0,1 71,86 L37,86 A7,7 0 0,1 30,79 L30,28 A7,7 0 0,1 37,21 Z"
+        android:fillColor="#0284C7" />
+
+    <!-- Smartphone Screen Inner Glass -->
+    <path
+        android:pathData="M33,26 L75,26 L75,76 L33,76 Z"
+        android:fillColor="#0A1128" />
+
+    <!-- 3D Golden SIM Card Chip Graphic -->
+    <path
+        android:pathData="M42,34 L62,34 A4,4 0 0,1 66,38 L66,54 A4,4 0 0,1 62,58 L42,58 A4,4 0 0,1 38,54 L38,38 A4,4 0 0,1 42,34 Z"
+        android:fillColor="#F59E0B" />
+
+    <!-- SIM Chip Interior Contact Cuts -->
+    <path
+        android:pathData="M41,37 L50,37 L50,44 L41,44 Z"
+        android:fillColor="#FDE68A" />
+    <path
+        android:pathData="M54,37 L63,37 L63,44 L54,44 Z"
+        android:fillColor="#FDE68A" />
+    <path
+        android:pathData="M41,48 L50,48 L50,55 L41,55 Z"
+        android:fillColor="#FDE68A" />
+    <path
+        android:pathData="M54,48 L63,48 L63,55 L54,55 Z"
+        android:fillColor="#FDE68A" />
+
+    <!-- Fast 3D SMS Chat Bubble Overlay -->
+    <path
+        android:pathData="M39,61 L69,61 A4,4 0 0,1 73,65 L73,73 A4,4 0 0,1 69,77 L49,77 L43,82 L44,77 L39,77 A4,4 0 0,1 35,73 L35,65 A4,4 0 0,1 39,61 Z"
+        android:fillColor="#10B981" />
+
+    <!-- SMS Signal Wave Left -->
+    <path
+        android:pathData="M23,46 A14,14 0 0,0 23,62"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M18,40 A22,22 0 0,0 18,68"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- SMS Signal Wave Right -->
+    <path
+        android:pathData="M85,46 A14,14 0 0,1 85,62"
+        android:strokeColor="#10B981"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M90,40 A22,22 0 0,1 90,68"
+        android:strokeColor="#10B981"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round" />
+
+    <!-- Dynamic 3D Lightning Zap Icon -->
+    <path
+        android:pathData="M55,63 L51,69 L55,69 L53,75 L59,68 L55,68 Z"
+        android:fillColor="#FFFFFF" />
+</vector>

@@ -79,7 +79,11 @@ class ScanQrActivity : AppCompatActivity() {
         }
 
         if (success) {
-            Toast.makeText(this, "QR कोड सफलतापूर्वक लिंक हुआ!", Toast.LENGTH_SHORT).show()
+            app.preferences.isServiceEnabled = true
+            // Instant connect & start 24x7 background foreground service
+            com.sms.gateway.service.GatewayForegroundService.startService(this)
+            app.socketManager.connect()
+            Toast.makeText(this, "QR कोड सफलतापूर्वक लिंक हुआ! सर्वर से कनेक्ट हो रहा है...", Toast.LENGTH_SHORT).show()
             setResult(Activity.RESULT_OK)
             finish()
         } else {

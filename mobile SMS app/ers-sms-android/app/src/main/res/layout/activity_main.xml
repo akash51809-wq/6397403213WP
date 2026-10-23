@@ -12,7 +12,7 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Header Bar -->
+        <!-- 3D Futuristic Header Bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -22,33 +22,52 @@
             android:paddingTop="20dp"
             android:paddingBottom="12dp">
 
+            <!-- App Logo Badge -->
+            <ImageView
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="ERS Logo" />
+
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:layout_marginStart="12dp"
                 android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="ERS SMS"
-                    android:textSize="24sp"
+                    android:text="@string/app_name"
+                    android:textSize="21sp"
                     android:textStyle="bold"
                     android:textColor="@color/text_primary" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="स्मार्ट एसएमएस गेटवे"
-                    android:textSize="13sp"
-                    android:textColor="@color/text_secondary" />
+                    android:text="@string/app_tagline"
+                    android:textSize="12sp"
+                    android:textColor="@color/primary_light" />
             </LinearLayout>
+
+            <!-- Check for Update Quick Button -->
+            <ImageButton
+                android:id="@+id/btnCheckUpdate"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/stat_sys_download_done"
+                app:tint="@color/primary_light"
+                android:contentDescription="Check for Update" />
 
             <!-- Settings Button -->
             <ImageButton
                 android:id="@+id/btnSettings"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
+                android:layout_marginStart="4dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_manage"
                 app:tint="@color/text_primary"
@@ -67,156 +86,188 @@
                 android:paddingHorizontal="20dp"
                 android:paddingBottom="24dp">
 
-                <!-- 1. Connection Status Card -->
-                <com.google.android.material.card.MaterialCardView
+                <!-- 1. 3D Connection Status Neon Card -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="0dp"
-                    app:strokeColor="@color/card_border"
-                    app:strokeWidth="1dp"
-                    app:cardBackgroundColor="@color/surface">
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_3d_card_neon"
+                    android:padding="16dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp">
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
 
-                        <LinearLayout
-                            android:layout_width="match_parent"
+                        <!-- Glowing Neon Dot -->
+                        <View
+                            android:id="@+id/viewStatusDot"
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:background="@drawable/status_dot_offline" />
+
+                        <TextView
+                            android:id="@+id/tvStatusText"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical">
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/status_disconnected"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/status_offline" />
 
-                            <!-- Status Dot / Indicator -->
-                            <View
-                                android:id="@+id/viewStatusDot"
-                                android:layout_width="12dp"
-                                android:layout_height="12dp"
-                                android:background="@drawable/status_dot_offline" />
+                        <!-- 24x7 Service Switch -->
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switchService"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
 
-                            <TextView
-                                android:id="@+id/tvStatusText"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:layout_marginStart="10dp"
-                                android:text="@string/status_disconnected"
-                                android:textSize="16sp"
-                                android:textStyle="bold"
-                                android:textColor="@color/status_offline" />
+                    <!-- Lock Screen Always-Connected Badge -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="8dp"
+                        android:background="#1510B981"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="4dp">
 
-                            <!-- Service Switch -->
-                            <com.google.android.material.switchmaterial.SwitchMaterial
-                                android:id="@+id/switchService"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content" />
-                        </LinearLayout>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🔒 24x7 ऑलवेज कनेक्टेड (स्क्रीन लॉक कंडीशन में भी एक्टिव)"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/accent" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="12dp"
+                        android:background="@color/card_border" />
+
+                    <!-- Server Details -->
+                    <TextView
+                        android:id="@+id/tvServerDetails"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="सर्वर: कॉन्फ़िगर नहीं है"
+                        android:textSize="13sp"
+                        android:textColor="@color/text_secondary" />
+
+                    <TextView
+                        android:id="@+id/tvDeviceDetails"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="डिवाइस: Android Phone"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_muted" />
+
+                </LinearLayout>
+
+                <!-- 2. 3D Dual-SIM Chips Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_3d_card"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
 
                         <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginVertical="12dp"
-                            android:background="@color/card_border" />
-
-                        <!-- Server Details -->
-                        <TextView
-                            android:id="@+id/tvServerDetails"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="सर्वर: कॉन्फ़िगर नहीं है"
-                            android:textSize="13sp"
-                            android:textColor="@color/text_secondary" />
+                            android:layout_width="22dp"
+                            android:layout_height="16dp"
+                            android:background="@drawable/bg_sim_chip" />
 
                         <TextView
-                            android:id="@+id/tvDeviceDetails"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="डिवाइस: Android Phone"
-                            android:textSize="13sp"
-                            android:textColor="@color/text_muted" />
-
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- 2. SIM Cards Card -->
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="0dp"
-                    app:strokeColor="@color/card_border"
-                    app:strokeWidth="1dp"
-                    app:cardBackgroundColor="@color/surface">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="सिम कार्ड स्थिति (Active SIMs)"
+                            android:layout_weight="1"
+                            android:layout_marginStart="10dp"
+                            android:text="डुअल सिम स्थिति (Dual-SIM Hardware)"
                             android:textSize="14sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_primary" />
 
                         <TextView
-                            android:id="@+id/tvSimInfo"
+                            android:id="@+id/tvSimRoutingBadge"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            android:text="सिम कार्ड की जानकारी लोड हो रही है..."
-                            android:textSize="13sp"
-                            android:textColor="@color/text_secondary" />
-
+                            android:text="SIM 1 + SIM 2"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/chip_gold"
+                            android:background="#20F59E0B"
+                            android:paddingHorizontal="6dp"
+                            android:paddingVertical="2dp" />
                     </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
 
-                <!-- 3. Quick Action Buttons Row -->
+                    <TextView
+                        android:id="@+id/tvSimInfo"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="सिम कार्ड की जानकारी लोड हो रही है..."
+                        android:textSize="13sp"
+                        android:lineSpacingExtra="3dp"
+                        android:textColor="@color/text_secondary" />
+
+                </LinearLayout>
+
+                <!-- 3. 3D Quick Action Buttons Row -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="12dp">
+                    android:layout_marginTop="14dp">
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnScanQr"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="52dp"
                         android:layout_weight="1"
                         android:layout_marginEnd="6dp"
                         android:text="@string/btn_scan_qr"
-                        android:textSize="13sp"
-                        app:cornerRadius="10dp"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp"
+                        app:elevation="4dp"
                         android:backgroundTint="@color/primary" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnTestSms"
                         android:layout_width="0dp"
-                        android:layout_height="48dp"
+                        android:layout_height="52dp"
                         android:layout_weight="1"
                         android:layout_marginStart="6dp"
                         android:text="@string/btn_test_sms"
-                        android:textSize="13sp"
-                        app:cornerRadius="10dp"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="12dp"
                         style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        app:strokeColor="@color/primary"
-                        android:textColor="@color/primary" />
+                        app:strokeColor="@color/primary_light"
+                        android:textColor="@color/primary_light" />
                 </LinearLayout>
 
-                <!-- 4. Recent Messages Section -->
+                <!-- 4. Live Activity Logs Section -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="20dp"
+                    android:layout_marginTop="22dp"
                     android:layout_marginBottom="8dp">
 
                     <TextView
@@ -232,9 +283,9 @@
                         android:id="@+id/tvClearLogs"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="क्लियर"
+                        android:text="लॉग्स हटाएं"
                         android:textSize="13sp"
-                        android:textColor="@color/primary"
+                        android:textColor="@color/primary_light"
                         android:background="?attr/selectableItemBackground"
                         android:padding="4dp" />
                 </LinearLayout>
@@ -248,7 +299,7 @@
                     android:textSize="13sp"
                     android:textColor="@color/text_muted"
                     android:gravity="center"
-                    android:padding="32dp" />
+                    android:padding="28dp" />
 
                 <!-- Logs RecyclerView -->
                 <androidx.recyclerview.widget.RecyclerView

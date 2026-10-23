@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Bottom Shadow -->
+    <item
+        android:left="0dp"
+        android:top="2dp"
+        android:right="0dp"
+        android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="10dp" />
+            <solid android:color="#050B14" />
+        </shape>
+    </item>
+
+    <!-- Metallic Gold Chip Body -->
+    <item
+        android:left="0dp"
+        android:top="0dp"
+        android:right="0dp"
+        android:bottom="2dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="10dp" />
+            <gradient
+                android:angle="135"
+                android:startColor="#F59E0B"
+                android:centerColor="#D97706"
+                android:endColor="#B45309"
+                android:type="linear" />
+            <stroke
+                android:width="1dp"
+                android:color="#FDE68A" />
+        </shape>
+    </item>
+</layer-list>

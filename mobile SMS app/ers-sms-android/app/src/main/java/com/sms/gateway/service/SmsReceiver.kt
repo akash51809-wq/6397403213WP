@@ -62,7 +62,63 @@ class SmsReceiver : BroadcastReceiver() {
                 }
             }
 
-            // Log locally
+            // 1. Enforce Option 2: Allow Forward Incoming Msg (SIM1/SIM2/Both)
+            val incomingPref = app.preferences.incomingSimPreference
+            if (incomingPref == 0 && simSlot != 0) {
+                App.addLog(SmsItem(
+                    address = sender,
+                    message = "[SIM 2 एसएमएस ड्रॉप किया गया - सिर्फ SIM 1 फॉरवर्डिंग अनुमति है] $fullText",
+                    timestamp = timestamp,
+                    type = SmsType.RECEIVED,
+                    simSlot = simSlot,
+                    status = SmsStatus.FAILED
+                ))
+                return
+            } else if (incomingPref == 1 && simSlot != 1) {
+                App.addLog(SmsItem(
+                    address = sender,
+                    message = "[SIM 1 एसएमएस ड्रॉप किया गया - सिर्फ SIM 2 फॉरवर्डिंग अनुमति है] $fullText",
+                    timestamp = timestamp,
+                    type = SmsType.RECEIVED,
+                    simSlot = simSlot,
+                    status = SmsStatus.FAILED
+                ))
+                return
+            }
+
+            // 2. Enforce Option 3: Choose SMS Sender ID Filter (All vs Custom)
+            val senderFilterMode = app.preferences.senderIdFilterMode
+            if (senderFilterMode.equals("custom", ignoreCase = true)) {
+                val rawWhitelist = app.preferences.senderIdWhitelist
+                val allowedSenders = rawWhitelist
+                    .split(",")
+                    .map { it.trim().lowercase() }
+                    .filter { it.isNotEmpty() }
+
+                if (allowedSenders.isNotEmpty()) {
+                    val cleanSender = sender.trim().lowercase()
+                    val isMatched = allowedSenders.any { allowed ->
+                        cleanSender == allowed ||
+                        cleanSender.contains(allowed) ||
+                        allowed.contains(cleanSender) ||
+                        cleanSender.replace("-", "").contains(allowed.replace("-", ""))
+                    }
+
+                    if (!isMatched) {
+                        App.addLog(SmsItem(
+                            address = sender,
+                            message = "[सेंडर ID फ़िल्टर: '$sender' स्वीकृत सूची में नहीं है] $fullText",
+                            timestamp = timestamp,
+                            type = SmsType.RECEIVED,
+                            simSlot = simSlot,
+                            status = SmsStatus.FAILED
+                        ))
+                        return
+                    }
+                }
+            }
+
+            // Log locally as Delivered
             val logItem = SmsItem(
                 address = sender,
                 message = fullText,

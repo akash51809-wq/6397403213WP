@@ -29,7 +29,13 @@ class SmsSendManager(private val context: Context) {
     ): Boolean {
         return try {
             val app = context.applicationContext as App
-            val preferredSlot = targetSimSlot ?: app.preferences.preferredSim
+            // Enforce user outgoing SIM preference: 0 for SIM1, 1 for SIM2, -1 for Both/Auto
+            val outgoingPref = app.preferences.outgoingSimPreference
+            val preferredSlot = when (outgoingPref) {
+                0 -> 0 // Force SIM 1
+                1 -> 1 // Force SIM 2
+                else -> targetSimSlot ?: app.preferences.preferredSim
+            }
 
             val smsManager: SmsManager = if (preferredSlot >= 0) {
                 val subId = app.simManager.getSubscriptionIdForSlot(preferredSlot)

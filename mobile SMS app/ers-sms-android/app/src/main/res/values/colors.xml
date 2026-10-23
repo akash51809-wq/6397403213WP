@@ -1,31 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#2563EB</color>
-    <color name="primary_dark">#1D4ED8</color>
-    <color name="primary_light">#3B82F6</color>
-    <color name="accent">#06B6D4</color>
+    <!-- 3D Brand Primary & Cyber Accents -->
+    <color name="primary">#0284C7</color>
+    <color name="primary_dark">#0369A1</color>
+    <color name="primary_light">#38BDF8</color>
+    <color name="accent">#10B981</color>
+    <color name="accent_cyan">#06B6D4</color>
+    <color name="accent_violet">#8B5CF6</color>
+    <color name="chip_gold">#F59E0B</color>
 
-    <color name="background">#F8FAFC</color>
-    <color name="surface">#FFFFFF</color>
-    <color name="surface_variant">#F1F5F9</color>
+    <!-- 3D Backgrounds & Elevated Glassmorphic Surfaces -->
+    <color name="background">#0B132B</color>
+    <color name="background_gradient_start">#0B132B</color>
+    <color name="background_gradient_end">#1C2541</color>
+    <color name="surface">#16223F</color>
+    <color name="surface_card_top">#1E2C52</color>
+    <color name="surface_card_bottom">#131D38</color>
+    <color name="surface_variant">#1E293B</color>
+    <color name="surface_glass">#24335C</color>
 
-    <color name="text_primary">#0F172A</color>
-    <color name="text_secondary">#64748B</color>
-    <color name="text_muted">#94A3B8</color>
+    <!-- 3D Borders & Highlights -->
+    <color name="card_border">#2C3E6B</color>
+    <color name="card_border_glow">#38BDF8</color>
+    <color name="card_highlight">#3B4E7A</color>
+    <color name="card_shadow">#070B18</color>
 
-    <!-- Status Colors -->
+    <!-- Typography -->
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_muted">#64748B</color>
+
+    <!-- Status Colors (Neon Glow) -->
     <color name="status_online">#10B981</color>
-    <color name="status_online_bg">#ECFDF5</color>
+    <color name="status_online_glow">#34D399</color>
+    <color name="status_online_bg">#064E3B</color>
     <color name="status_offline">#EF4444</color>
-    <color name="status_offline_bg">#FEF2F2</color>
+    <color name="status_offline_bg">#450A0A</color>
+    <color name="status_connecting">#F59E0B</color>
 
-    <color name="status_sent">#3B82F6</color>
+    <color name="status_sent">#38BDF8</color>
     <color name="status_delivered">#10B981</color>
     <color name="status_failed">#EF4444</color>
-    <color name="status_received">#8B5CF6</color>
+    <color name="status_received">#A855F7</color>
 
-    <color name="card_border">#E2E8F0</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="ic_launcher_background">#2563EB</color>
+    <color name="ic_launcher_background">#0B132B</color>
 </resources>

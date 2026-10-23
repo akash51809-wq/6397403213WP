@@ -1,7 +1,8 @@
 <resources>
-    <string name="app_name">ERS SMS</string>
-    <string name="gateway_service_title">ERS SMS Gateway रनिंग है</string>
-    <string name="gateway_service_desc">एसएमएस भेजने और प्राप्त करने के लिए सर्वर से कनेक्टेड</string>
+    <string name="app_name">ERS mobile SMS</string>
+    <string name="app_tagline">Next-Gen Dual-SIM Cloud Gateway</string>
+    <string name="gateway_service_title">ERS mobile SMS सक्रिय है</string>
+    <string name="gateway_service_desc">24x7 एसएमएस भेजने व प्राप्त करने के लिए सर्वर से कनेक्टेड</string>
 
     <string name="status_connected">ऑनलाइन (कनेक्टेड)</string>
     <string name="status_disconnected">ऑफलाइन (डिस्कनेक्टेड)</string>
@@ -9,14 +10,34 @@
 
     <string name="btn_start_service">सर्विस शुरू करें</string>
     <string name="btn_stop_service">सर्विस बंद करें</string>
-    <string name="btn_scan_qr">QR कोड स्कैन करें</string>
-    <string name="btn_settings">सेटिंग्स</string>
-    <string name="btn_test_sms">टेस्ट एसएमएस भेजें</string>
+    <string name="btn_scan_qr">📷 QR स्कैन करें</string>
+    <string name="btn_settings">⚙️ सेटिंग्स</string>
+    <string name="btn_test_sms">📨 टेस्ट एसएमएस</string>
     <string name="btn_save">सेव करें</string>
 
-    <string name="label_server_url">सर्वर URL (उदा. http://192.168.1.10:3000)</string>
+    <string name="label_server_url">सर्वर URL (उदा. https://your-domain.com)</string>
     <string name="label_api_key">डिवाइस API Key</string>
     <string name="label_device_name">डिवाइस का नाम</string>
+
+    <!-- Settings: Option 1 - Outgoing SIM Selection -->
+    <string name="label_outgoing_sim">1. आउटगोइंग एसएमएस सिम (Allow SIM for Send Msg)</string>
+    <string name="desc_outgoing_sim">वेब पैनल से भेजा जाने वाला एसएमएस किस सिम से जाएगा?</string>
+    <string name="sim_opt_both">Both (दोनों सिम / ऑटो)</string>
+    <string name="sim_opt_1">SIM 1 (सिर्फ सिम 1)</string>
+    <string name="sim_opt_2">SIM 2 (सिर्फ सिम 2)</string>
+
+    <!-- Settings: Option 2 - Incoming Forwarding SIM Selection -->
+    <string name="label_incoming_sim">2. इनकमिंग फॉरवर्डिंग सिम (Allow Forward Incoming Msg)</string>
+    <string name="desc_incoming_sim">किस सिम पर आने वाले मैसेज वेब पैनल पर फॉरवर्ड होंगे?</string>
+
+    <!-- Settings: Option 3 - Sender ID Filter -->
+    <string name="label_sender_id_filter">3. सेंडर आईडी फ़िल्टर (Choose SMS Sender ID)</string>
+    <string name="desc_sender_id_filter">किस सेंडर आईडी से आने वाले मैसेज पैनल पर भेजने हैं?</string>
+    <string name="sender_filter_all">All (सभी मैसेज फॉरवर्ड करें)</string>
+    <string name="sender_filter_custom">Custom (केवल चुनिंदा सेंडर आईडी)</string>
+    <string name="hint_sender_id">उदा. VK-HDFCBK, AX-SBIINB, 9876543210</string>
+    <string name="note_sender_id">अनेक सेंडर आईडी को कॉमा (,) से अलग करें। सिर्फ इन्हीं से आए मैसेज फॉरवर्ड होंगे।</string>
+
     <string name="label_sim_preference">पसंदीदा सिम कार्ड</string>
     <string name="label_auto_forward">इनकमिंग एसएमएस सर्वर को भेजें</string>
 
@@ -24,6 +45,13 @@
     <string name="sim_1">सिम 1</string>
     <string name="sim_2">सिम 2</string>
 
-    <string name="recent_logs_title">हालिया मैसेज एक्टिविटी</string>
+    <string name="recent_logs_title">लाइव एक्टिविटी लॉग्स</string>
     <string name="no_logs">अभी तक कोई मैसेज एक्टिविटी नहीं है</string>
+
+    <!-- In-App Auto Update -->
+    <string name="update_available_title">🚀 नया अपडेट उपलब्ध है!</string>
+    <string name="update_now">अभी अपडेट करें</string>
+    <string name="update_later">बाद में</string>
+    <string name="checking_updates">अपडेट चेक हो रहा है…</string>
+    <string name="app_up_to_date">ऐप पहले से ही नवीनतम वर्ज़न पर है</string>
 </resources>

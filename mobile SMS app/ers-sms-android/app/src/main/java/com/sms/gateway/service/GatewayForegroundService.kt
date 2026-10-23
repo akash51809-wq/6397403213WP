@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -18,13 +19,14 @@ import com.sms.gateway.ui.MainActivity
 class GatewayForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var isObservingConnection = false
 
     private val connectionStateObserver = androidx.lifecycle.Observer<SocketManager.ConnectionState> { state ->
         val statusText = when (state) {
-            SocketManager.ConnectionState.CONNECTED -> "🟢 ऑनलाइन - एसएमएस भेजने व पाने के लिए तैयार"
+            SocketManager.ConnectionState.CONNECTED -> "🟢 ऑनलाइन - 24x7 एक्टिव (स्क्रीन लॉक में भी कनेक्टेड)"
             SocketManager.ConnectionState.CONNECTING -> "🟡 कनेक्ट हो रहा है..."
-            SocketManager.ConnectionState.DISCONNECTED, null -> "🔴 डिस्कनेक्टेड - रीकनेक्ट की कोशिश जारी"
+            SocketManager.ConnectionState.DISCONNECTED, null -> "🔴 रीकनेक्टिंग... पुनः कनेक्ट किया जा रहा है"
         }
         updateNotification(statusText)
     }
@@ -55,7 +57,7 @@ class GatewayForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        acquireWakeLock()
+        acquireWakeAndWifiLocks()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,13 +121,14 @@ class GatewayForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, App.CHANNEL_ID)
-            .setContentTitle("ERS SMS Gateway")
+            .setContentTitle("ERS mobile SMS")
             .setContentText(statusText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "बंद करें", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
@@ -135,22 +138,43 @@ class GatewayForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
-    private fun acquireWakeLock() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "ERSSMS::GatewayWakeLock"
-        ).apply {
-            setReferenceCounted(false)
-            acquire(24 * 60 * 60 * 1000L) // 24 hours max
+    private fun acquireWakeAndWifiLocks() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "ERSSMS::GatewayWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire() // Continuous wake lock for lock-screen persistence
+            }
+
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "ERSSMS::WifiLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        wakeLock?.let {
-            if (it.isHeld) it.release()
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wifiLock?.let {
+                if (it.isHeld) it.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+
         val app = applicationContext as App
         if (isObservingConnection) {
             app.socketManager.connectionState.removeObserver(connectionStateObserver)
