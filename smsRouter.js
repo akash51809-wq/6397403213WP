@@ -209,6 +209,11 @@ router.get('/api/sms/qr', async (req, res) => {
       serverUrl = `http://${resolvedLocalIp}:${port}`;
     }
 
+    // Auto-normalize Render subdomain if broken multi-dot host was provided or scanned
+    if (serverUrl.includes('services.ers-new.onrender.com') || serverUrl.includes('services-ers-new.onrender.com')) {
+      serverUrl = 'https://services-ers.onrender.com';
+    }
+
     const qrData = JSON.stringify({
       serverUrl,
       apiKey,
@@ -511,8 +516,8 @@ const fs = require('fs');
 router.get(['/api/sms/version', '/api/sms/app-version'], (req, res) => {
   res.json({
     success: true,
-    versionCode: 2,
-    versionName: '2.0.0',
+    versionCode: 3,
+    versionName: '2.0.1',
     appName: 'ERS mobile SMS',
     apkUrl: '/download/ERS-SMS-Gateway.apk',
     downloadUrl: `${req.protocol}://${req.get('host')}/download/ERS-SMS-Gateway.apk`,

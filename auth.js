@@ -175,74 +175,171 @@ function generateApiTokenData() {
 }
 const generateApiToken = () => generateApiTokenData().rawToken;
 
+const DEFAULT_PLANS_LIST = [
+  {
+    planId: 'plan_startup',
+    name: 'Startup',
+    service: 'whatsapp',
+    price: 99,
+    currency: 'INR',
+    description: 'Send message to contacts only',
+    dailyLimit: '500/Day',
+    validity: '30 Days',
+    validityDays: 30,
+    deviceLimit: '1 Free + 1 Add-on',
+    apiAccess: true,
+    webAccess: true,
+    bulkMsg: false,
+    groupOption: false,
+    scheduleMsg: false,
+    ipSecurity: false,
+    headerColor: '#5398f5',
+    sortOrder: 1,
+    active: true
+  },
+  {
+    planId: 'plan_business',
+    name: 'Business',
+    service: 'whatsapp',
+    price: 149,
+    currency: 'INR',
+    description: 'Send message to groups also',
+    dailyLimit: '1000/Day',
+    validity: '30 Days',
+    validityDays: 30,
+    deviceLimit: '1 Free + 2 Add-ons',
+    apiAccess: true,
+    webAccess: true,
+    bulkMsg: true,
+    groupOption: true,
+    scheduleMsg: true,
+    ipSecurity: false,
+    headerColor: '#128c7e',
+    sortOrder: 2,
+    active: true
+  },
+  {
+    planId: 'plan_enterprise',
+    name: 'Enterprise',
+    service: 'whatsapp',
+    price: 199,
+    currency: 'INR',
+    description: 'Received message webhook support',
+    dailyLimit: '2000/Day',
+    validity: '30 Days',
+    validityDays: 30,
+    deviceLimit: '1 Free + 4 Add-ons',
+    apiAccess: true,
+    webAccess: true,
+    bulkMsg: true,
+    groupOption: true,
+    scheduleMsg: true,
+    ipSecurity: true,
+    headerColor: '#705ec8',
+    sortOrder: 3,
+    active: true
+  },
+  {
+    planId: 'plan_sms_starter',
+    name: 'SMS Starter',
+    service: 'sms',
+    price: 199,
+    currency: 'INR',
+    description: 'Connect Android phones as gateway to receive SMS and route to webhooks.',
+    validity: '30 Days',
+    validityDays: 30,
+    incomingAllowed: true,
+    outgoingAllowed: true,
+    apiAccess: true,
+    webAccess: true,
+    headerColor: '#0284c7',
+    sortOrder: 1,
+    active: true
+  },
+  {
+    planId: 'plan_sms_pro',
+    name: 'SMS Business Pro',
+    service: 'sms',
+    price: 399,
+    currency: 'INR',
+    description: 'Full two-way SMS gateway for high-throughput OTPs, alerts and notifications.',
+    validity: '30 Days',
+    validityDays: 30,
+    incomingAllowed: true,
+    outgoingAllowed: true,
+    apiAccess: true,
+    webAccess: true,
+    headerColor: '#0369a1',
+    sortOrder: 2,
+    active: true
+  },
+  {
+    planId: 'plan_gst_hit',
+    name: 'GST Pay-Per-Hit',
+    service: 'gst',
+    price: 1.0,
+    pricePerHit: 1.0,
+    currency: 'INR',
+    description: 'Pay ₹1.0 per lookup deducted directly from user wallet balance.',
+    validity: 'Pay-per-hit',
+    validityDays: 365,
+    apiAccess: true,
+    webAccess: true,
+    headerColor: '#7c3aed',
+    sortOrder: 1,
+    active: true
+  }
+];
+
+function escapeRegex(string) {
+  return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function findOrCreatePlan(planIdOrName) {
+  if (!planIdOrName) return null;
+  const queryStr = String(planIdOrName).trim();
+  let plan = await Plan.findOne({
+    $or: [
+      { planId: queryStr },
+      { planId: queryStr.toLowerCase() },
+      { name: new RegExp('^' + escapeRegex(queryStr) + '$', 'i') }
+    ]
+  });
+  if (!plan) {
+    const match = DEFAULT_PLANS_LIST.find(p => 
+      p.planId === queryStr || 
+      p.planId.toLowerCase() === queryStr.toLowerCase() || 
+      p.name.toLowerCase() === queryStr.toLowerCase()
+    );
+    if (match) {
+      try {
+        plan = await Plan.create(match);
+      } catch (e) {
+        plan = await Plan.findOne({ planId: match.planId });
+      }
+    }
+  }
+  return plan;
+}
+
 async function ensureDefaultPlans() {
   if (connection.readyState !== 1) return;
-  const count = await Plan.countDocuments();
-  if (count === 0) {
-    await Plan.create([
-      {
-        planId: 'plan_startup',
-        name: 'Startup',
-        price: 99,
-        currency: 'INR',
-        description: 'Send message to contacts only',
-        dailyLimit: '500/Day',
-        validity: '30 Days',
-        validityDays: 30,
-        deviceLimit: '1 Free + 1 Add-on',
-        apiAccess: true,
-        webAccess: true,
-        bulkMsg: false,
-        groupOption: false,
-        scheduleMsg: false,
-        ipSecurity: false,
-        headerColor: '#5398f5',
-        sortOrder: 1,
-        active: true
-      },
-      {
-        planId: 'plan_business',
-        name: 'Business',
-        price: 149,
-        currency: 'INR',
-        description: 'Send message to groups also',
-        dailyLimit: '1000/Day',
-        validity: '30 Days',
-        validityDays: 30,
-        deviceLimit: '1 Free + 2 Add-ons',
-        apiAccess: true,
-        webAccess: true,
-        bulkMsg: true,
-        groupOption: true,
-        scheduleMsg: true,
-        ipSecurity: false,
-        headerColor: '#128c7e',
-        sortOrder: 2,
-        active: true
-      },
-      {
-        planId: 'plan_enterprise',
-        name: 'Enterprise',
-        price: 199,
-        currency: 'INR',
-        description: 'Received message webhook support',
-        dailyLimit: '2000/Day',
-        validity: '30 Days',
-        validityDays: 30,
-        deviceLimit: '1 Free + 4 Add-ons',
-        apiAccess: true,
-        webAccess: true,
-        bulkMsg: true,
-        groupOption: true,
-        scheduleMsg: true,
-        ipSecurity: true,
-        headerColor: '#705ec8',
-        sortOrder: 3,
-        active: true
+  for (const p of DEFAULT_PLANS_LIST) {
+    try {
+      const existing = await Plan.findOne({
+        $or: [
+          { planId: p.planId },
+          { name: new RegExp('^' + escapeRegex(p.name) + '$', 'i'), service: p.service }
+        ]
+      });
+      if (!existing) {
+        await Plan.create(p);
       }
-    ]);
-    console.log('[PlanSystem] Default Startup, Business & Enterprise plans created.');
+    } catch (e) {
+      // ignore concurrency conflicts
+    }
   }
+  console.log('[PlanSystem] Default WhatsApp, SMS & GST plans verified.');
 }
 
 async function ensureAdminUser() {
@@ -2582,7 +2679,7 @@ router.post('/api/plans/purchase-wallet', authRequired, async (req, res) => {
     const { planId, service: reqService } = req.body;
     if (!planId) return res.status(400).json({ success: false, message: 'Plan ID आवश्यक है।' });
 
-    const plan = await Plan.findOne({ planId });
+    const plan = await findOrCreatePlan(planId);
     if (!plan) return res.status(404).json({ success: false, message: 'चुना हुआ Plan उपलब्ध नहीं है।' });
 
     const user = await User.findOne({ userId: req.user.userId });
@@ -2779,6 +2876,7 @@ async function recordAdminWhatsAppSession(info = {}) {
 // 1. Get active plans for user pricing table
 router.get('/api/plans', authRequired, async (req, res) => {
   try {
+    await ensureDefaultPlans().catch(() => {});
     const plans = await Plan.find({ active: true }).sort({ sortOrder: 1, price: 1 });
     const userRequests = await PlanPurchaseRequest.find({ userId: req.user.userId }).sort({ createdAt: -1 });
     res.json({
@@ -2972,7 +3070,7 @@ router.post('/api/plans/purchase', authRequired, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Plan और Payment / Bank Details भरना आवश्यक है।' });
     }
 
-    const plan = await Plan.findOne({ planId });
+    const plan = await findOrCreatePlan(planId);
     if (!plan) return res.status(404).json({ success: false, message: 'चुना हुआ Plan उपलब्ध नहीं है।' });
 
     let finalScreenshot = (typeof screenshot === 'string' ? screenshot.trim() : '');

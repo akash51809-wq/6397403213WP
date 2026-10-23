@@ -26,16 +26,47 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.io.IOException
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class SocketManager(private val context: Context) {
 
     private val gson = Gson()
     private var webSocket: WebSocket? = null
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
-        .build()
+    private val client: OkHttpClient = createResilientClient()
+
+    companion object {
+        fun createResilientClient(): OkHttpClient {
+            return try {
+                val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                })
+
+                val sslContext = SSLContext.getInstance("SSL")
+                sslContext.init(null, trustAllCerts, SecureRandom())
+
+                OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
+                    .hostnameVerifier { _, _ -> true }
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .pingInterval(20, TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true)
+                    .build()
+            } catch (e: Exception) {
+                OkHttpClient.Builder()
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .pingInterval(20, TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true)
+                    .build()
+            }
+        }
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private var isManualDisconnect = false
@@ -52,12 +83,18 @@ class SocketManager(private val context: Context) {
 
     fun connect() {
         val app = context.applicationContext as App
-        val serverUrl = app.preferences.serverUrl
-        val apiKey = app.preferences.apiKey
+        var serverUrl = app.preferences.serverUrl.trim().trimEnd('/')
+        val apiKey = app.preferences.apiKey.trim()
 
         if (serverUrl.isBlank() || apiKey.isBlank()) {
             _connectionState.postValue(ConnectionState.DISCONNECTED)
             return
+        }
+
+        if (serverUrl.contains("services.ers-new.onrender.com") || serverUrl.contains("services-ers-new.onrender.com")) {
+            serverUrl = serverUrl.replace("services.ers-new.onrender.com", "services-ers.onrender.com")
+                .replace("services-ers-new.onrender.com", "services-ers.onrender.com")
+            app.preferences.serverUrl = serverUrl
         }
 
         if (_connectionState.value == ConnectionState.CONNECTED) return
@@ -261,6 +298,12 @@ class SocketManager(private val context: Context) {
         val app = context.applicationContext as App
         var url = app.preferences.serverUrl.trim().trimEnd('/')
         if (url.isBlank()) return ""
+
+        if (url.contains("services.ers-new.onrender.com") || url.contains("services-ers-new.onrender.com")) {
+            url = url.replace("services.ers-new.onrender.com", "services-ers.onrender.com")
+                .replace("services-ers-new.onrender.com", "services-ers.onrender.com")
+            app.preferences.serverUrl = url
+        }
 
         val isLocalIp = url.contains("192.168.") || url.contains("10.") || url.contains("127.0.0.1") || url.contains("localhost")
         val isDomain = url.contains(".") && !isLocalIp

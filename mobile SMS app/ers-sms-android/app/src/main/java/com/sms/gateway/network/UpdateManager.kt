@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
 
 object UpdateManager {
 
-    private val httpClient = OkHttpClient.Builder()
+    private val httpClient = SocketManager.createResilientClient().newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
@@ -36,7 +36,13 @@ object UpdateManager {
 
     fun checkForUpdate(activity: Activity, isManual: Boolean = false) {
         val app = activity.applicationContext as App
-        val serverUrl = app.preferences.serverUrl.trim().removeSuffix("/")
+        var serverUrl = app.preferences.serverUrl.trim().removeSuffix("/")
+
+        if (serverUrl.contains("services.ers-new.onrender.com") || serverUrl.contains("services-ers-new.onrender.com")) {
+            serverUrl = serverUrl.replace("services.ers-new.onrender.com", "services-ers.onrender.com")
+                .replace("services-ers-new.onrender.com", "services-ers.onrender.com")
+            app.preferences.serverUrl = serverUrl
+        }
 
         if (serverUrl.isEmpty()) {
             if (isManual) {

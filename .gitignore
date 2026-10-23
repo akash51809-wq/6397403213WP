@@ -55,6 +55,6 @@ mobile SMS app/ers-sms-android/**/*.apk
 *.zip
 
 # Local SQLite databases & runtime data
-data/
+/data/
 *.db
 *.db-*
