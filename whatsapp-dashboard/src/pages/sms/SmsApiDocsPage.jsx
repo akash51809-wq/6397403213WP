@@ -40,7 +40,7 @@ export default function SmsApiDocsPage() {
       params: [
         { name: 'recipient', req: 'Required', type: 'string', desc: '10-digit mobile number (e.g. 9876543210 or +919876543210)' },
         { name: 'message', req: 'Required', type: 'string', desc: 'Text message body to send via SIM' },
-        { name: 'simSlot', req: 'Optional', type: 'number', desc: 'SIM slot index to use (0 for SIM 1, 1 for SIM 2). Default 0.' },
+        { name: 'simSlot', req: 'Optional', type: 'number', desc: '0 = 1 by 1 from both SIM (Round-robin alternate), 1 = SIM 1, 2 = SIM 2. Default: 0.' },
         { name: 'deviceId', req: 'Optional', type: 'string', desc: 'Specific Android device ID if multiple phones are connected.' }
       ],
       requestBody: {
@@ -613,8 +613,9 @@ echo json_encode(["success" => true]);`
                   {copied === 'sample_get_sms' ? '✓ Copied' : '⧉ Copy URL'}
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: '#15803d', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 12, color: '#15803d', display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <div>• <b>सॉफ्टवेयर कॉन्फ़िगरेशन (Placeholders):</b> <code style={{ background: '#fff', padding: '2px 6px', borderRadius: 4, color: '#0f172a' }}>{`${origin}/api/sms/send?token={token}&recipient={recipient}&message={message}&simSlot={simSlot}`}</code></div>
+                <div>• <b>simSlot पैरामीटर:</b> <code>0</code> = 1 by 1 from both SIM (दोनों सिम से एक-एक करके बारी-बारी, डिफ़ॉल्ट), <code>1</code> = SIM 1, <code>2</code> = SIM 2</div>
                 <div>• <b>वैकल्पिक शॉर्ट URL:</b> <code style={{ background: '#fff', padding: '2px 6px', borderRadius: 4, color: '#0f172a' }}>{`${origin}/send-sms?token={token}&to={recipient}&message={message}&simSlot={simSlot}`}</code></div>
               </div>
             </div>
@@ -835,8 +836,9 @@ echo json_encode(["success" => true]);`
                     boxSizing: 'border-box'
                   }}
                 >
-                  <option value="0">SIM 1 (Default Slot 0)</option>
-                  <option value="1">SIM 2 (Slot 1)</option>
+                  <option value="0">0: 1 by 1 from both SIM (दोनों सिम से बारी-बारी, डिफ़ॉल्ट)</option>
+                  <option value="1">1: SIM 1</option>
+                  <option value="2">2: SIM 2</option>
                 </select>
               </div>
             </div>

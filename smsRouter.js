@@ -27,6 +27,7 @@ const localIp = getLocalIp();
 // In-Memory store for active connected Android sockets & sent outbox
 const phoneSockets = new Map(); // deviceId -> ws
 const outboxMessages = [];
+let roundRobinSimIndex = 0; // Alternates between 0 (SIM 1) and 1 (SIM 2) when simSlot=0 (1 by 1 from both SIM)
 
 /**
  * Initialize WebSocket server for ERS SMS Gateway Android App
@@ -474,14 +475,32 @@ async function handleSendSms(req, res) {
       (req.body?.text !== undefined ? req.body?.text : req.body?.msg))));
     const message = (rawMessage !== undefined && rawMessage !== null) ? String(rawMessage).trim() : '';
 
-    const simSlot = Number(
-      req.query.simSlot !== undefined ? req.query.simSlot :
+    // simSlot: 0 = 1 by 1 from both SIM (Round Robin), 1 = SIM 1, 2 = SIM 2 (default: 0)
+    const rawSim = req.query.simSlot !== undefined ? req.query.simSlot :
       (req.query.sim !== undefined ? req.query.sim :
       (req.query.slot !== undefined ? req.query.slot :
       (req.body?.simSlot !== undefined ? req.body?.simSlot :
       (req.body?.sim !== undefined ? req.body?.sim :
-      (req.body?.slot !== undefined ? req.body?.slot : 0)))))
-    ) || 0;
+      (req.body?.slot !== undefined ? req.body?.slot : 0)))));
+
+    const parsedSim = parseInt(rawSim, 10);
+    const requestedSimSlot = isNaN(parsedSim) ? 0 : parsedSim;
+
+    let targetHardwareSimSlot = 0; // 0 for SIM 1, 1 for SIM 2
+    let simSelectionDesc = '';
+
+    if (requestedSimSlot === 1) {
+      targetHardwareSimSlot = 0; // Force SIM 1
+      simSelectionDesc = 'SIM 1';
+    } else if (requestedSimSlot === 2) {
+      targetHardwareSimSlot = 1; // Force SIM 2
+      simSelectionDesc = 'SIM 2';
+    } else {
+      // 0 = 1 by 1 from both SIM (Round Robin alternate)
+      targetHardwareSimSlot = roundRobinSimIndex;
+      simSelectionDesc = `1 by 1 Alternate (${roundRobinSimIndex === 0 ? 'SIM 1' : 'SIM 2'})`;
+      roundRobinSimIndex = roundRobinSimIndex === 0 ? 1 : 0; // Toggle for next message
+    }
 
     const deviceId = req.query.deviceId || req.body?.deviceId;
 
@@ -528,7 +547,9 @@ async function handleSendSms(req, res) {
       id: messageId,
       recipient: recipient,
       message: message,
-      simSlot: Number(simSlot),
+      simSlot: requestedSimSlot, // 0 = 1 by 1 from both SIM, 1 = SIM 1, 2 = SIM 2
+      dispatchSim: targetHardwareSimSlot + 1, // 1 or 2
+      simSelection: simSelectionDesc,
       deviceId: deviceId || 'default',
       status: 'QUEUED',
       createdAt: formatISTDate(Date.now())
@@ -555,11 +576,11 @@ async function handleSendSms(req, res) {
             messageId: messageId,
             phoneNumber: outboxItem.recipient,
             message: outboxItem.message,
-            simSlot: outboxItem.simSlot
+            simSlot: targetHardwareSimSlot // Hardware slot: 0 for SIM 1, 1 for SIM 2
           }
         }));
         outboxItem.status = 'DISPATCHED_TO_PHONE';
-        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone (${outboxItem.deviceId})`);
+        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone (${outboxItem.deviceId}) via hardware slot ${targetHardwareSimSlot} (${simSelectionDesc})`);
       } catch (sendErr) {
         console.warn('[SMS Gateway] Failed sending to phone socket:', sendErr.message);
       }
@@ -574,11 +595,13 @@ async function handleSendSms(req, res) {
       success: true,
       status: true,
       message: outboxItem.status === 'DISPATCHED_TO_PHONE' 
-        ? `SMS to ${recipient} dispatched to Android Gateway.`
+        ? `SMS to ${recipient} dispatched via SIM ${targetHardwareSimSlot + 1} (${simSelectionDesc}).`
         : `SMS to ${recipient} queued (Gateway currently offline. Will dispatch when phone connects).`,
       messageId: messageId,
       recipient: recipient,
-      simSlot: simSlot,
+      simSlot: requestedSimSlot,
+      dispatchSim: targetHardwareSimSlot + 1,
+      simSelection: simSelectionDesc,
       sms: outboxItem
     });
   } catch (err) {
