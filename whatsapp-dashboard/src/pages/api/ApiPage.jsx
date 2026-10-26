@@ -348,6 +348,9 @@ export function ApiPage() {
               <span className="method-mini get">GET</span>
               <code>{getUrl}</code>
             </div>
+            <div style={{ marginTop: 8, marginBottom: 12, fontSize: 12, color: '#374151' }}>
+              <strong>Software Placeholder Format:</strong> <code style={{ color: '#0369a1', background: '#f0f9ff', padding: '2px 6px', borderRadius: 4 }}>{`${baseUrl}/send-text?token={token}&to={to}&message={message}&session={session}`}</code>
+            </div>
             <div className="code-title">SUPPORTED QUERY PARAMETERS</div>
             <pre className="code-block"><code>{`token   : ${currentToken}
 to      : 9876543210 (or 120363012345678901@g.us)

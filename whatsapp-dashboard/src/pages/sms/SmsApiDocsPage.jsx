@@ -29,10 +29,10 @@ export default function SmsApiDocsPage() {
     send: {
       name: 'Send Outgoing SMS API',
       path: '/api/sms/send',
-      method: 'POST',
-      badge: 'POST',
+      method: 'POST / GET',
+      badge: 'POST/GET',
       badgeClass: 'post',
-      desc: 'Send fast SMS or OTP to any Indian 10-digit mobile number via your connected Android ERS SMS Gateway.',
+      desc: 'Send fast SMS or OTP to any Indian 10-digit mobile number via your connected Android ERS SMS Gateway. Supports both single-line HTTP GET URLs (for recharge/billing software) and standard JSON HTTP POST payloads.',
       headers: [
         { name: 'Content-Type', value: 'application/json' },
         { name: 'Authorization', value: `Bearer ${token}` }
@@ -561,6 +561,64 @@ echo json_encode(["success" => true]);`
           <p style={{ fontSize: 14, color: '#475569', marginTop: 0, marginBottom: 20 }}>
             {currentEndpoint.desc}
           </p>
+
+          {activeTab === 'send' && (
+            <div style={{
+              background: '#f0fdf4',
+              border: '1px solid #86efac',
+              borderRadius: 14,
+              padding: '16px 20px',
+              marginBottom: 24
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                <strong style={{ color: '#166534', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  ⚡ 1-Click Complete API URL Sample (Direct GET Request)
+                </strong>
+                <span style={{ fontSize: 11, background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                  Recharge / Billing / CRM Ready
+                </span>
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: 12, color: '#14532d', lineHeight: 1.4 }}>
+                किसी भी सॉफ्टवेयर, रिचार्ज पैनल या ब्राउज़र में सीधे कॉल करने के लिए यह कम्प्लीट URL उपयोग करें:
+              </p>
+              <div style={{
+                display: 'flex',
+                background: '#ffffff',
+                border: '1px solid #bbf7d0',
+                borderRadius: 10,
+                overflow: 'hidden',
+                alignItems: 'center',
+                marginBottom: 10
+              }}>
+                <span style={{ background: '#22c55e', color: '#fff', padding: '10px 14px', fontSize: 12, fontWeight: 900 }}>
+                  GET
+                </span>
+                <code style={{ flex: 1, padding: '10px 14px', fontSize: 12, color: '#0f172a', overflowX: 'auto', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+                  {`${origin}/api/sms/send?token=${token}&recipient=9876543210&message=Hello+World&simSlot=0`}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => copyCode(`${origin}/api/sms/send?token=${token}&recipient=9876543210&message=Hello+World&simSlot=0`, 'sample_get_sms')}
+                  style={{
+                    border: 'none',
+                    borderLeft: '1px solid #bbf7d0',
+                    background: '#f8fafc',
+                    padding: '10px 16px',
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    color: '#166534'
+                  }}
+                >
+                  {copied === 'sample_get_sms' ? '✓ Copied' : '⧉ Copy URL'}
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: '#15803d', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div>• <b>सॉफ्टवेयर कॉन्फ़िगरेशन (Placeholders):</b> <code style={{ background: '#fff', padding: '2px 6px', borderRadius: 4, color: '#0f172a' }}>{`${origin}/api/sms/send?token={token}&recipient={recipient}&message={message}&simSlot={simSlot}`}</code></div>
+                <div>• <b>वैकल्पिक शॉर्ट URL:</b> <code style={{ background: '#fff', padding: '2px 6px', borderRadius: 4, color: '#0f172a' }}>{`${origin}/send-sms?token={token}&to={recipient}&message={message}&simSlot={simSlot}`}</code></div>
+              </div>
+            </div>
+          )}
 
           {/* Parameters Table */}
           {currentEndpoint.params && currentEndpoint.params.length > 0 && (

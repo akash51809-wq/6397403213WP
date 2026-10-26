@@ -417,19 +417,96 @@ router.post(['/inbox', '/api/inbox', '/api/sms/inbox', '/api/sms/incoming'], asy
   }
 });
 
-// 10. SEND SMS OUTBOX
-router.post('/api/sms/send', authRequired, async (req, res) => {
+// Helper to authenticate SMS API requests via Bearer token, ?token=, x-api-token, or gateway apiKey
+async function resolveSmsUser(req) {
+  if (req.user) return req.user;
+
+  const token = String(
+    req.query.token || 
+    req.body?.token || 
+    req.headers['x-api-token'] || 
+    (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') ||
+    ''
+  ).trim();
+
+  const apiKey = String(
+    req.query.apiKey || 
+    req.query.api_key || 
+    req.body?.apiKey || 
+    req.body?.api_key || 
+    req.headers['x-api-key'] || 
+    ''
+  ).trim();
+
+  if (token) {
+    let u = await User.findOne({ apiToken: token });
+    if (!u) {
+      try {
+        const crypto = require('crypto');
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        u = await User.findOne({ $or: [{ apiTokenHash: tokenHash }, { apiToken: token }] });
+      } catch (hashErr) {}
+    }
+    if (u) return u;
+  }
+
+  // Support Master / Gateway API Key
+  const expectedApiKey = db.getSetting('api_key', 'ers_key_8899');
+  if (apiKey && apiKey === expectedApiKey) {
+    return { userId: 'ADMIN', role: 'admin', username: 'gateway_admin', smsPlan: 'SMS Business Pro' };
+  }
+
+  return null;
+}
+
+// 10. SEND SMS OUTBOX (SUPPORTS BOTH GET & POST ON /api/sms/send, /send-sms, /api/send-sms)
+async function handleSendSms(req, res) {
   try {
-    const { recipient, message, simSlot = 0, deviceId } = req.body;
-    if (!recipient || !message) {
-      return res.status(400).json({ success: false, message: 'Mobile number aur message body zaroori hai.' });
+    const recipient = String(
+      req.query.recipient || req.query.to || req.query.mobile || req.query.number || req.query.phone ||
+      req.body?.recipient || req.body?.to || req.body?.mobile || req.body?.number || req.body?.phone || ''
+    ).trim();
+
+    const rawMessage = req.query.message !== undefined ? req.query.message :
+      (req.query.text !== undefined ? req.query.text :
+      (req.query.msg !== undefined ? req.query.msg :
+      (req.body?.message !== undefined ? req.body?.message :
+      (req.body?.text !== undefined ? req.body?.text : req.body?.msg))));
+    const message = (rawMessage !== undefined && rawMessage !== null) ? String(rawMessage).trim() : '';
+
+    const simSlot = Number(
+      req.query.simSlot !== undefined ? req.query.simSlot :
+      (req.query.sim !== undefined ? req.query.sim :
+      (req.query.slot !== undefined ? req.query.slot :
+      (req.body?.simSlot !== undefined ? req.body?.simSlot :
+      (req.body?.sim !== undefined ? req.body?.sim :
+      (req.body?.slot !== undefined ? req.body?.slot : 0)))))
+    ) || 0;
+
+    const deviceId = req.query.deviceId || req.body?.deviceId;
+
+    const user = await resolveSmsUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        status: false,
+        message: "प्रमाणीकरण विफल: मान्य 'token' या 'apiKey' आवश्यक है (Authentication failed: valid 'token' or 'apiKey' required)."
+      });
     }
 
-    const user = req.user;
-    if (user && user.role !== 'admin' && String(user.userId).toUpperCase() !== 'ADMIN') {
+    if (!recipient || !message) {
+      return res.status(400).json({
+        success: false,
+        status: false,
+        message: "Mobile number ('recipient') और message body ('message') आवश्यक है।"
+      });
+    }
+
+    if (user.role !== 'admin' && String(user.userId).toUpperCase() !== 'ADMIN') {
       if (!user.smsPlan || (user.smsPlanExpiresAt && new Date(user.smsPlanExpiresAt).getTime() < Date.now())) {
         return res.status(403).json({
           success: false,
+          status: false,
           message: 'आपका SMS प्लान सक्रिय नहीं है या समाप्त हो चुका है। कृपया SMS प्लान सब्सक्राइब करें।'
         });
       }
@@ -440,6 +517,7 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
       if (planDoc && planDoc.outgoingAllowed === false) {
         return res.status(403).json({
           success: false,
+          status: false,
           message: 'Outgoing SMS आपके वर्तमान प्लान में अनुमत नहीं है (Invalid Plan: Outgoing SMS not allowed)। कृपया प्लान अपग्रेड करें।'
         });
       }
@@ -448,8 +526,8 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
     const messageId = 'msg_' + Date.now();
     const outboxItem = {
       id: messageId,
-      recipient: String(recipient).trim(),
-      message: String(message).trim(),
+      recipient: recipient,
+      message: message,
       simSlot: Number(simSlot),
       deviceId: deviceId || 'default',
       status: 'QUEUED',
@@ -494,15 +572,22 @@ router.post('/api/sms/send', authRequired, async (req, res) => {
 
     res.json({
       success: true,
+      status: true,
       message: outboxItem.status === 'DISPATCHED_TO_PHONE' 
         ? `SMS to ${recipient} dispatched to Android Gateway.`
         : `SMS to ${recipient} queued (Gateway currently offline. Will dispatch when phone connects).`,
+      messageId: messageId,
+      recipient: recipient,
+      simSlot: simSlot,
       sms: outboxItem
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, status: false, message: err.message });
   }
-});
+}
+
+router.get(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
+router.post(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
 
 router.get('/api/sms/outbox', (req, res) => {
   res.json({ success: true, outbox: outboxMessages });
