@@ -693,6 +693,55 @@ async function findOrLoadSession(sessionParam, caller = null) {
                 };
             }
         }
+
+        // Fallback: check if ANY active connected session exists in sessions map
+        for (const [uId, uSess] of sessions.entries()) {
+            if (uSess?.socket && uSess?.status === 'connected' && Boolean(uSess.socket.user?.id)) {
+                return {
+                    userId: uId,
+                    isAdmin: true,
+                    session: uSess
+                };
+            }
+        }
+
+        // If an admin or any session is currently connecting or reconnecting, wait up to 3500ms
+        let hasConnecting = false;
+        if (global.__waAdminSocket && (global.__waAdminSocket.status === 'connecting' || global.__waAdminSocket.ws?.readyState === 0)) hasConnecting = true;
+        for (const s of sessions.values()) {
+            if (s?.status === 'connecting' || s?.status === 'reconnecting' || s?.socket?.ws?.readyState === 0) {
+                hasConnecting = true;
+                break;
+            }
+        }
+        if (hasConnecting) {
+            for (let wait = 0; wait < 7; wait++) {
+                await new Promise(r => setTimeout(r, 500));
+                if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
+                    const wsState = global.__waAdminSocket.ws?.readyState;
+                    if (wsState === undefined || wsState === 1) {
+                        return {
+                            userId: 'ADMIN',
+                            isAdmin: true,
+                            session: {
+                                socket: global.__waAdminSocket,
+                                status: 'connected',
+                                connectedNumber: adminPhone
+                            }
+                        };
+                    }
+                }
+                for (const [uId, uSess] of sessions.entries()) {
+                    if (uSess?.socket && uSess?.status === 'connected' && Boolean(uSess.socket.user?.id)) {
+                        const wsState = uSess.socket.ws?.readyState;
+                        if (wsState === undefined || wsState === 1) {
+                            return { userId: uId, isAdmin: true, session: uSess };
+                        }
+                    }
+                }
+            }
+        }
+
         return {
             userId: 'ADMIN',
             isAdmin: true,
@@ -755,6 +804,19 @@ async function findOrLoadSession(sessionParam, caller = null) {
     let match = getSessionByPhoneOrUserId(sessionParam);
     if (match && match.session?.status === 'connected' && match.session?.socket) {
         return match;
+    }
+    // If targeted session is connecting / reconnecting, wait up to 3500ms
+    if (match && (match.session?.status === 'connecting' || match.session?.status === 'reconnecting' || match.session?.socket?.ws?.readyState === 0)) {
+        for (let wait = 0; wait < 7; wait++) {
+            await new Promise(r => setTimeout(r, 500));
+            match = getSessionByPhoneOrUserId(sessionParam);
+            if (match && match.session?.status === 'connected' && match.session?.socket) {
+                const wsState = match.session.socket.ws?.readyState;
+                if (wsState === undefined || wsState === 1) {
+                    return match;
+                }
+            }
+        }
     }
 
     const targetUserId = match?.userId || (callerUserId && isAdmin ? null : callerUserId);

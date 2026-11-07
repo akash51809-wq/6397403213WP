@@ -1123,39 +1123,54 @@ let isSending = false;
    BASIC API
 ========================================================= */
 
+function isSocketOpen(s) {
+    if (!s || typeof s.sendMessage !== 'function') return false;
+    if (!s.user?.id) return false;
+    const wsState = s.ws?.readyState;
+    return wsState === undefined || wsState === 1;
+}
+
 function getActiveAdminSocket() {
-    if (connectionStatus !== 'connected') {
-        return null;
+    if (connectionStatus === 'connected' && isSocketOpen(sock)) {
+        return sock;
     }
-    if (sock && typeof sock.sendMessage === 'function' && Boolean(sock.user?.id)) {
-        const wsState = sock.ws?.readyState;
-        if (wsState === undefined || wsState === 1) {
-            return sock;
-        }
-    }
-    if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
-        const wsState = global.__waAdminSocket.ws?.readyState;
-        if (wsState === undefined || wsState === 1) {
-            return global.__waAdminSocket;
-        }
+    if (isSocketOpen(global.__waAdminSocket)) {
+        return global.__waAdminSocket;
     }
     try {
         const { getSessionByPhoneOrUserId, sessions } = require('./userSessions');
-        const adminPhone = CONFIG_ADMIN_PHONE;
-        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-        if (match?.session?.socket && match?.session?.status === 'connected' && Boolean(match.session.socket.user?.id)) {
-            const wsState = match.session.socket.ws?.readyState;
-            if (wsState === undefined || wsState === 1) {
-                global.__waAdminSocket = match.session.socket;
-                return match.session.socket;
+
+        // Check explicit admin slots (admin_2, admin_3, admin_4)
+        for (const slotKey of ['admin_2', 'admin_3', 'admin_4']) {
+            const aS = sessions?.get(slotKey);
+            if (aS?.status === 'connected' && isSocketOpen(aS?.socket)) {
+                global.__waAdminSocket = aS.socket;
+                return aS.socket;
             }
         }
-        const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
-        if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
-            const wsState = userS.socket.ws?.readyState;
-            if (wsState === undefined || wsState === 1) {
+
+        const adminPhone = CONFIG_ADMIN_PHONE;
+        const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
+        if (match?.session?.status === 'connected' && isSocketOpen(match?.session?.socket)) {
+            global.__waAdminSocket = match.session.socket;
+            return match.session.socket;
+        }
+
+        if (CONFIG_ADMIN_DEFAULT_USER_ID) {
+            const userS = sessions?.get(CONFIG_ADMIN_DEFAULT_USER_ID);
+            if (userS?.status === 'connected' && isSocketOpen(userS?.socket)) {
                 global.__waAdminSocket = userS.socket;
                 return userS.socket;
+            }
+        }
+
+        // Fallback to ANY active connected session in sessions map
+        if (sessions && sessions.size > 0) {
+            for (const [key, sess] of sessions.entries()) {
+                if (sess?.status === 'connected' && isSocketOpen(sess?.socket)) {
+                    global.__waAdminSocket = sess.socket;
+                    return sess.socket;
+                }
             }
         }
     } catch (e) {}
@@ -3733,11 +3748,12 @@ async function handleSendText(req, res) {
         let fromNumber = null;
         let activeSession10 = '';
 
-        const { findOrLoadSession } = require('./userSessions');
+        const { findOrLoadSession, getSessionByPhoneOrUserId, sessions } = require('./userSessions');
         const caller = isGlobalAdmin ? { role: 'admin', userId: 'admin' } : user;
 
-        // Session target resolution
-        const targetSessionParam = providedSession || (caller.role === 'admin' ? 'admin' : caller.userId);
+        // Session target resolution:
+        // Prefer explicitly provided session. If empty and admin has a phone number, use caller.mobile, else 'admin'
+        const targetSessionParam = providedSession || (caller.role === 'admin' ? (caller.mobile || 'admin') : caller.userId);
 
         try {
             const sessionMatch = await findOrLoadSession(targetSessionParam, caller);
@@ -3754,13 +3770,62 @@ async function handleSendText(req, res) {
         const isAdminAuthorized = isGlobalAdmin || user?.role === 'admin';
         if (!activeSocket && isAdminAuthorized) {
             activeSocket = getActiveAdminSocket();
-            const adminPhone = activeSocket?.user?.id 
-                ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
-                : (connectedNumber || CONFIG_ADMIN_PHONE);
-            const adminPhone10 = String(adminPhone).replace(/\D/g, '').slice(-10);
             if (activeSocket) {
+                const adminPhone = activeSocket?.user?.id 
+                    ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
+                    : (connectedNumber || CONFIG_ADMIN_PHONE);
+                const adminPhone10 = String(adminPhone).replace(/\D/g, '').slice(-10);
                 fromNumber = adminPhone;
                 activeSession10 = adminPhone10;
+            }
+        }
+
+        // Additional resilient fallbacks if activeSocket not yet found:
+        if (!activeSocket) {
+            if (caller?.mobile) {
+                const matchMob = getSessionByPhoneOrUserId(caller.mobile);
+                if (matchMob?.session?.status === 'connected' && matchMob.session?.socket) {
+                    activeSocket = matchMob.session.socket;
+                    fromNumber = matchMob.session.connectedNumber || caller.mobile;
+                    activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                }
+            }
+            if (!activeSocket && isAdminAuthorized && sessions && sessions.size > 0) {
+                for (const [k, sess] of sessions.entries()) {
+                    if (sess?.status === 'connected' && sess?.socket && Boolean(sess.socket.user?.id)) {
+                        activeSocket = sess.socket;
+                        fromNumber = sess.connectedNumber || k;
+                        activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Reconnection wait loop: if socket is connecting / reconnecting (e.g. 515 restart), wait up to 3500ms
+        if (!activeSocket) {
+            let retryWait = 0;
+            while (!activeSocket && retryWait < 3500) {
+                await new Promise(r => setTimeout(r, 500));
+                retryWait += 500;
+                if (isAdminAuthorized) {
+                    activeSocket = getActiveAdminSocket();
+                    if (activeSocket) {
+                        const adminPhone = activeSocket?.user?.id 
+                            ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
+                            : (connectedNumber || CONFIG_ADMIN_PHONE);
+                        fromNumber = adminPhone;
+                        activeSession10 = String(adminPhone).replace(/\D/g, '').slice(-10);
+                        break;
+                    }
+                }
+                const retryMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
+                if (retryMatch && retryMatch.session?.status === 'connected' && retryMatch.session?.socket) {
+                    activeSocket = retryMatch.session.socket;
+                    fromNumber = retryMatch.session.connectedNumber || retryMatch.userId;
+                    activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                    break;
+                }
             }
         }
 
@@ -4000,30 +4065,61 @@ async function handleSendText(req, res) {
                 messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
             }
         } catch (sendErr) {
-            console.error('[API /send-text Socket Error]:', sendErr.message);
-            // Log failed message in report
-            appendMessageReport({
-                id: fallbackMsgId,
-                date: new Date().toISOString(),
-                from: fromNumber || activeSession10,
-                to: normalizedTo,
-                message: messageText,
-                status: 'failed',
-                session: activeSession10 || providedSession || 'default',
-                ownerUserId: ownerUserId,
-                type: messageType,
-                source: isGroup ? 'group' : 'api'
-            });
-
-            return res.status(502).json({
-                status: false,
-                message: `WhatsApp message failed to deliver: ${sendErr.message}`,
-                data: {
-                    to: normalizedTo,
-                    recipientType: isGroup ? 'group' : 'user',
-                    session: activeSession10 || providedSession || null
+            console.warn('[API /send-text] First send attempt encountered error:', sendErr.message);
+            let retriedResult = null;
+            if (sendErr.message && (
+                sendErr.message.includes('closed') || 
+                sendErr.message.includes('Closed') || 
+                sendErr.message.includes('timed out') ||
+                sendErr.message.includes('Connection Lost') ||
+                sendErr.message.includes('reset')
+            )) {
+                try {
+                    await new Promise(r => setTimeout(r, 800));
+                    let retrySocket = isAdminAuthorized ? getActiveAdminSocket() : null;
+                    if (!retrySocket) {
+                        const retryMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
+                        retrySocket = retryMatch?.session?.socket;
+                    }
+                    if (retrySocket && typeof retrySocket.sendMessage === 'function') {
+                        console.log('[API /send-text] Retrying send with refreshed active socket...');
+                        retriedResult = await Promise.race([
+                            retrySocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId }),
+                            sendTimeoutPromise
+                        ]);
+                        messageDeduplicator.setCompleted(dedupKey, retriedResult, deterministicMsgId);
+                        sendResult = retriedResult;
+                    }
+                } catch (retryErr) {
+                    console.error('[API /send-text Retry Error]:', retryErr.message);
                 }
-            });
+            }
+
+            if (!sendResult) {
+                // Log failed message in report
+                appendMessageReport({
+                    id: fallbackMsgId,
+                    date: new Date().toISOString(),
+                    from: fromNumber || activeSession10,
+                    to: normalizedTo,
+                    message: messageText,
+                    status: 'failed',
+                    session: activeSession10 || providedSession || 'default',
+                    ownerUserId: ownerUserId,
+                    type: messageType,
+                    source: isGroup ? 'group' : 'api'
+                });
+
+                return res.status(502).json({
+                    status: false,
+                    message: `WhatsApp message failed to deliver: ${sendErr.message}`,
+                    data: {
+                        to: normalizedTo,
+                        recipientType: isGroup ? 'group' : 'user',
+                        session: activeSession10 || providedSession || null
+                    }
+                });
+            }
         }
 
         const actualMessageId = sendResult?.key?.id || fallbackMsgId;
