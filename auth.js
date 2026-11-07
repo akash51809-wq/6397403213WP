@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 const { generateTTS, convertAudioToWhatsAppVoice, generateWhatsAppVoiceNote } = require('./ttsHelper');
 const { 
   connection, 
@@ -94,6 +95,87 @@ const randomDigits = (length) => {
   return String(crypto.randomInt(0, max)).padStart(length, '0');
 };
 const hashText = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+
+function getCandidateTokens(rawToken) {
+  const candidates = new Set();
+  if (!rawToken) return [];
+  const clean = String(rawToken).trim().replace(/^['"]|['"]$/g, '');
+  if (!clean) return [];
+  candidates.add(clean);
+
+  // If token starts with 'wa_' and length is 52 (accidental trailing '1' or extra char typo),
+  // or length > 51, also add the canonical 51-char slice.
+  if (clean.startsWith('wa_') && clean.length >= 52) {
+    candidates.add(clean.slice(0, 51));
+  }
+  return Array.from(candidates);
+}
+
+function getClientIp(req) {
+  if (!req) return '';
+  const cfIp = req.headers?.['cf-connecting-ip'];
+  if (cfIp) return String(cfIp).trim();
+
+  const xff = req.headers?.['x-forwarded-for'];
+  if (xff) {
+    const parts = String(xff).split(',');
+    if (parts.length > 0 && parts[0].trim()) {
+      return parts[0].trim();
+    }
+  }
+
+  const xRealIp = req.headers?.['x-real-ip'];
+  if (xRealIp) return String(xRealIp).trim();
+
+  const remote = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '127.0.0.1';
+  let clean = String(remote).trim();
+  if (clean.startsWith('::ffff:')) {
+    clean = clean.substring(7);
+  }
+  return clean;
+}
+
+function ipv4ToInt(ip) {
+  return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)) >>> 0, 0);
+}
+
+function isClientIpAllowed(clientIp, allowedIpConfig) {
+  if (!allowedIpConfig) return true;
+  const raw = String(allowedIpConfig).trim();
+  if (!raw || raw === '*' || raw.toLowerCase() === 'all') return true;
+
+  const cleanClient = String(clientIp || '').trim().replace(/^::ffff:/, '');
+  if (!cleanClient) return false;
+
+  const rules = raw.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  if (rules.length === 0) return true;
+
+  for (const rule of rules) {
+    if (rule === '*' || rule.toLowerCase() === 'all') return true;
+    if (rule === cleanClient) return true;
+
+    // IPv6 localhost vs IPv4 localhost
+    if ((cleanClient === '::1' || cleanClient === '127.0.0.1') && (rule === '127.0.0.1' || rule === '::1' || rule.toLowerCase() === 'localhost')) {
+      return true;
+    }
+
+    // CIDR match (e.g. 192.168.1.0/24)
+    if (rule.includes('/')) {
+      const [subnet, bitsStr] = rule.split('/');
+      const bits = parseInt(bitsStr, 10);
+      if (net.isIPv4(cleanClient) && net.isIPv4(subnet) && bits >= 0 && bits <= 32) {
+        const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+        const clientInt = ipv4ToInt(cleanClient);
+        const subnetInt = ipv4ToInt(subnet);
+        if ((clientInt & mask) === (subnetInt & mask)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 function safeErrorMessage(error, defaultMsg = 'सर्वर पर अनुरोध संसाधित करने में त्रुटि आई।') {
   if (!error) return defaultMsg;
@@ -466,18 +548,22 @@ async function authRequired(req, res, next) {
     let user = await authenticateToken(token);
     if (!user && token) {
       try {
-        const tokenH = hashText(token);
-        user = await User.findOne({ apiTokenHash: tokenH, status: 'active' });
-        if (!user) {
-          // Seamless migration fallback for unmigrated legacy plain text token
-          user = await User.findOne({ apiToken: token, status: 'active' });
-          if (user) {
-            user.apiTokenHash = tokenH;
-            user.apiTokenPrefix = String(token).slice(0, 7);
-            user.apiTokenLast4 = String(token).slice(-4);
-            user.apiToken = null;
-            await user.save().catch(() => {});
+        const candidateTokens = getCandidateTokens(token);
+        for (const cand of candidateTokens) {
+          const tokenH = hashText(cand);
+          user = await User.findOne({ apiTokenHash: tokenH, status: 'active' });
+          if (!user) {
+            // Seamless migration fallback for unmigrated legacy plain text token
+            user = await User.findOne({ apiToken: cand, status: 'active' });
+            if (user) {
+              user.apiTokenHash = tokenH;
+              user.apiTokenPrefix = String(cand).slice(0, 7);
+              user.apiTokenLast4 = String(cand).slice(-4);
+              user.apiToken = null;
+              await user.save().catch(() => {});
+            }
           }
+          if (user) break;
         }
       } catch {}
     }
@@ -3613,22 +3699,52 @@ async function saveSettingToDbAndFile(key, data, saveFileFn) {
 }
 
 // 17. Admin: Get/Save API Setting (IP + Callback URL)
+const API_IP_SETTINGS_FILE = path.join(__dirname, 'api_ip_settings.json');
 const API_SETTINGS_FILE = path.join(__dirname, 'api_settings.json');
-function getApiSettingsFile() {
+function getApiIpSettingsFile() {
   try {
+    if (fs.existsSync(API_IP_SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(API_IP_SETTINGS_FILE, 'utf-8') || '{}');
+    }
+    // Backward compatibility fallback: check legacy api_settings.json
     if (fs.existsSync(API_SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(API_SETTINGS_FILE, 'utf-8') || '{}');
+      const legacy = JSON.parse(fs.readFileSync(API_SETTINGS_FILE, 'utf-8') || '{}');
+      if (legacy.allowedIp || legacy.callbackUrl) {
+        return { allowedIp: legacy.allowedIp || '', callbackUrl: legacy.callbackUrl || '' };
+      }
     }
   } catch (e) {}
   return {};
 }
-function saveApiSettingsFile(data) {
-  try { fs.writeFileSync(API_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) {}
+function saveApiIpSettingsFile(data) {
+  try { fs.writeFileSync(API_IP_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) {}
+}
+
+let apiIpSettingCache = null;
+let apiIpSettingCacheExpires = 0;
+
+async function getApiIpSetting() {
+  const now = Date.now();
+  if (apiIpSettingCache && apiIpSettingCacheExpires > now) {
+    return apiIpSettingCache;
+  }
+  let data = null;
+  try {
+    data = await getSettingWithFallback('api_setting', getApiIpSettingsFile);
+  } catch (err) {
+    console.warn('[API IP Settings] Error fetching api_setting:', err.message);
+  }
+  if (!data || Object.keys(data).length === 0) {
+    data = getApiIpSettingsFile();
+  }
+  apiIpSettingCache = data || { allowedIp: '', callbackUrl: '' };
+  apiIpSettingCacheExpires = now + 15000;
+  return apiIpSettingCache;
 }
 
 router.get('/api/settings/api-setting', authRequired, adminRequired, async (req, res) => {
   try {
-    const data = await getSettingWithFallback('api_setting', getApiSettingsFile);
+    const data = await getApiIpSetting();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -3639,7 +3755,9 @@ router.post('/api/settings/api-setting', authRequired, adminRequired, async (req
   try {
     const { allowedIp, callbackUrl } = req.body || {};
     const data = { allowedIp: String(allowedIp || '').trim(), callbackUrl: String(callbackUrl || '').trim(), updatedAt: new Date().toISOString() };
-    await saveSettingToDbAndFile('api_setting', data, saveApiSettingsFile);
+    await saveSettingToDbAndFile('api_setting', data, saveApiIpSettingsFile);
+    apiIpSettingCache = data;
+    apiIpSettingCacheExpires = Date.now() + 15000;
     res.json({ success: true, message: 'API Setting saved.', data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -4036,6 +4154,10 @@ module.exports = {
   getDemoSettings,
   getSessionTokenTtlMs,
   generateApiTokenData,
+  getApiIpSetting,
+  getClientIp,
+  isClientIpAllowed,
+  getCandidateTokens,
   CONFIG_ADMIN_PHONE,
   CONFIG_ADMIN_DEFAULT_USER_ID,
   User, 

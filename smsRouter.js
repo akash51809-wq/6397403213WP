@@ -440,15 +440,19 @@ async function resolveSmsUser(req) {
   ).trim();
 
   if (token) {
-    let u = await User.findOne({ apiToken: token });
-    if (!u) {
-      try {
-        const crypto = require('crypto');
-        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-        u = await User.findOne({ $or: [{ apiTokenHash: tokenHash }, { apiToken: token }] });
-      } catch (hashErr) {}
+    const { getCandidateTokens } = require('./auth');
+    const candidateTokens = getCandidateTokens(token);
+    const crypto = require('crypto');
+    for (const cand of candidateTokens) {
+      let u = await User.findOne({ apiToken: cand });
+      if (!u) {
+        try {
+          const tokenHash = crypto.createHash('sha256').update(cand).digest('hex');
+          u = await User.findOne({ $or: [{ apiTokenHash: tokenHash }, { apiToken: cand }] });
+        } catch (hashErr) {}
+      }
+      if (u) return u;
     }
-    if (u) return u;
   }
 
   // Support Master / Gateway API Key
@@ -463,6 +467,19 @@ async function resolveSmsUser(req) {
 // 10. SEND SMS OUTBOX (SUPPORTS BOTH GET & POST ON /api/sms/send, /send-sms, /api/send-sms)
 async function handleSendSms(req, res) {
   try {
+    // 0. Enforce Global IP Whitelist from API Setting (if configured)
+    const { getApiIpSetting, getClientIp, isClientIpAllowed } = require('./auth');
+    const apiIpSetting = await getApiIpSetting().catch(() => ({}));
+    const clientIp = getClientIp(req);
+    if (apiIpSetting?.allowedIp && !isClientIpAllowed(clientIp, apiIpSetting.allowedIp)) {
+      console.warn(`[SMS Gateway /send] Forbidden: Client IP '${clientIp}' is not whitelisted in API settings (Allowed: ${apiIpSetting.allowedIp})`);
+      return res.status(403).json({
+        success: false,
+        status: false,
+        message: `Forbidden: Client IP address (${clientIp}) is not whitelisted in API settings.`
+      });
+    }
+
     const recipient = String(
       req.query.recipient || req.query.to || req.query.mobile || req.query.number || req.query.phone ||
       req.body?.recipient || req.body?.to || req.body?.mobile || req.body?.number || req.body?.phone || ''

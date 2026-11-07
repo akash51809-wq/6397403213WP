@@ -3608,58 +3608,91 @@ async function handleSendText(req, res) {
             jid = `${normalizedTo}@s.whatsapp.net`;
         }
 
+        // 0. Enforce Global IP Whitelist from API Setting (if configured)
+        const { getApiIpSetting, getClientIp, isClientIpAllowed, getCandidateTokens } = require('./auth');
+        const apiIpSetting = await getApiIpSetting().catch(() => ({}));
+        const clientIp = getClientIp(req);
+        if (apiIpSetting?.allowedIp && !isClientIpAllowed(clientIp, apiIpSetting.allowedIp)) {
+            console.warn(`[API /send-text] Forbidden: Client IP '${clientIp}' is not whitelisted in API settings (Allowed: ${apiIpSetting.allowedIp})`);
+            return res.status(403).json({
+                status: false,
+                message: `Forbidden: Client IP address (${clientIp}) is not whitelisted in API settings.`
+            });
+        }
+
         // 1. Authenticate token (Short 30-second TTL cache with instant revocation support)
         let user = null;
         let isGlobalAdmin = false;
         const now = Date.now();
-        const cached = apiTokenCache.get(token);
+        const candidateTokens = getCandidateTokens(token);
 
-        if (cached && cached.expiresAt > now) {
-            user = cached.user;
-            isGlobalAdmin = cached.isGlobalAdmin;
-        } else {
+        for (const cand of candidateTokens) {
+            const cached = apiTokenCache.get(cand);
+            if (cached && cached.expiresAt > now) {
+                user = cached.user;
+                isGlobalAdmin = cached.isGlobalAdmin;
+                break;
+            }
+        }
+
+        if (!user && !isGlobalAdmin) {
             try {
                 const { User } = require('./auth');
                 const crypto = require('crypto');
-                const tHash = crypto.createHash('sha256').update(String(token)).digest('hex');
-                user = await User.findOne({ apiTokenHash: tHash, status: 'active' }).lean();
-                if (!user) {
-                    const legacyUser = await User.findOne({ apiToken: token, status: 'active' });
-                    if (legacyUser) {
-                        legacyUser.apiTokenHash = tHash;
-                        legacyUser.apiTokenPrefix = String(token).slice(0, 7);
-                        legacyUser.apiTokenLast4 = String(token).slice(-4);
-                        legacyUser.apiToken = null;
-                        await legacyUser.save().catch(() => {});
-                        user = legacyUser;
+                for (const cand of candidateTokens) {
+                    const tHash = crypto.createHash('sha256').update(String(cand)).digest('hex');
+                    user = await User.findOne({ apiTokenHash: tHash, status: 'active' }).lean();
+                    if (!user) {
+                        const legacyUser = await User.findOne({ apiToken: cand, status: 'active' });
+                        if (legacyUser) {
+                            legacyUser.apiTokenHash = tHash;
+                            legacyUser.apiTokenPrefix = String(cand).slice(0, 7);
+                            legacyUser.apiTokenLast4 = String(cand).slice(-4);
+                            legacyUser.apiToken = null;
+                            await legacyUser.save().catch(() => {});
+                            user = legacyUser;
+                        }
                     }
+                    if (user) break;
                 }
             } catch (dbErr) {
                 console.warn('[API /send-text] DB user token lookup warn:', dbErr.message);
             }
 
             const settings = getApiSettings();
-            if (!user && token === settings.token) {
-                isGlobalAdmin = true;
-                try {
-                    const { User } = require('./auth');
-                    user = await User.findOne({ role: 'admin', status: 'active' }).lean();
-                } catch {}
+            if (!user) {
+                for (const cand of candidateTokens) {
+                    if (settings.token && cand === settings.token) {
+                        isGlobalAdmin = true;
+                        try {
+                            const { User } = require('./auth');
+                            user = await User.findOne({ role: 'admin', status: 'active' }).lean();
+                        } catch {}
+                        break;
+                    }
+                }
             }
 
             if (!user && !isGlobalAdmin) {
                 try {
                     const { authenticateToken } = require('./auth');
-                    user = await authenticateToken(token);
+                    for (const cand of candidateTokens) {
+                        user = await authenticateToken(cand);
+                        if (user) break;
+                    }
                 } catch {}
             }
 
             if (user || isGlobalAdmin) {
                 // Short 30-second TTL to avoid stale authorization
-                apiTokenCache.set(token, { user, isGlobalAdmin, expiresAt: now + 30 * 1000 });
+                for (const cand of candidateTokens) {
+                    apiTokenCache.set(cand, { user, isGlobalAdmin, expiresAt: now + 30 * 1000 });
+                }
                 if (user?.userId) {
                     if (!userTokenIndex.has(user.userId)) userTokenIndex.set(user.userId, new Set());
-                    userTokenIndex.get(user.userId).add(token);
+                    for (const cand of candidateTokens) {
+                        userTokenIndex.get(user.userId).add(cand);
+                    }
                 }
             }
         }
