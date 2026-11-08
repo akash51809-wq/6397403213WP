@@ -3802,12 +3802,20 @@ async function handleSendText(req, res) {
             }
         }
 
-        // Reconnection wait loop: if socket is connecting / reconnecting (e.g. 515 restart), wait up to 3500ms
+        // Auto-wake startBot if admin session is not active
+        if (!activeSocket && isAdminAuthorized) {
+            if (!isStartingBot && connectionStatus !== 'connected') {
+                console.log('[API /send-text] Triggering startBot() to auto-wake WhatsApp session...');
+                startBot().catch(e => console.warn('[API /send-text] startBot auto-wake error:', e.message));
+            }
+        }
+
+        // Reconnection wait loop: wait up to 6000ms for socket to establish connection
         if (!activeSocket) {
             let retryWait = 0;
-            while (!activeSocket && retryWait < 3500) {
-                await new Promise(r => setTimeout(r, 500));
-                retryWait += 500;
+            while (!activeSocket && retryWait < 6000) {
+                await new Promise(r => setTimeout(r, 400));
+                retryWait += 400;
                 if (isAdminAuthorized) {
                     activeSocket = getActiveAdminSocket();
                     if (activeSocket) {
