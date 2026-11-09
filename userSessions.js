@@ -635,13 +635,32 @@ async function findOrLoadSession(sessionParam, caller = null) {
             }
         } catch {}
     }
+    if (!adminPhone && global.__waAdminPhone) {
+        adminPhone = String(global.__waAdminPhone).replace(/\D/g, '');
+    }
+    if (!adminPhone) {
+        try {
+            const adminDoc = await WhatsAppSession.findOne({ sessionId: 'admin' }).lean();
+            if (adminDoc?.phone) {
+                adminPhone = String(adminDoc.phone).replace(/\D/g, '');
+                global.__waAdminPhone = adminPhone;
+            }
+        } catch {}
+    }
     if (!adminPhone) {
         adminPhone = CONFIG_ADMIN_PHONE;
     }
     const adminPhone10 = String(adminPhone || '').replace(/\D/g, '').slice(-10);
 
     // 1. SECURITY CHECK: Non-admin users cannot access the Admin session
-    const isTargetingAdmin = cleanParam === 'admin' || cleanParam === 'admin_1' || cleanParam === 'slot_1' || cleanParam === 'slot1' || cleanParam === 'default' || cleanParam === '0' || cleanParam === '1' || (clean10 && clean10 === adminPhone10);
+    let isTargetingAdmin = cleanParam === 'admin' || cleanParam === 'admin_1' || cleanParam === 'slot_1' || cleanParam === 'slot1' || cleanParam === 'default' || cleanParam === '0' || cleanParam === '1' || (clean10 && clean10 === adminPhone10);
+    if (!isTargetingAdmin && isAdmin && clean10) {
+        // If clean10 does not match any other regular user in database, admin is targeting their own phone!
+        const otherUserDoc = await WhatsAppSession.findOne({ phone: { $regex: clean10 + '$' }, ownerUserId: { $ne: 'ADMIN' }, status: { $ne: 'logged_out' } }).catch(() => null);
+        if (!otherUserDoc) {
+            isTargetingAdmin = true;
+        }
+    }
     if (isTargetingAdmin && !isAdmin) {
         const err = new Error('केवल एडमिन को एडमिन व्हाट्सऐप सेशन का उपयोग करने की अनुमति है।');
         err.statusCode = 403;
@@ -665,11 +684,14 @@ async function findOrLoadSession(sessionParam, caller = null) {
                 const s = indexMod.getActiveAdminSocket?.();
                 if (s && typeof s.sendMessage === 'function' && Boolean(s.user?.id)) {
                     directAdminSocket = s;
+                } else if (indexMod.sock && typeof indexMod.sock.sendMessage === 'function' && Boolean(indexMod.sock.user?.id)) {
+                    directAdminSocket = indexMod.sock;
                 }
             } catch {}
         }
         if (directAdminSocket) {
             const detectedPhone = directAdminSocket.user?.id ? String(directAdminSocket.user.id).split(':')[0].replace(/\D/g, '') : adminPhone;
+            if (detectedPhone) global.__waAdminPhone = detectedPhone;
             return {
                 userId: 'ADMIN',
                 isAdmin: true,

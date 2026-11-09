@@ -1131,7 +1131,7 @@ function isSocketOpen(s) {
 }
 
 function getActiveAdminSocket() {
-    if (connectionStatus === 'connected' && isSocketOpen(sock)) {
+    if (isSocketOpen(sock)) {
         return sock;
     }
     if (isSocketOpen(global.__waAdminSocket)) {
@@ -1149,7 +1149,7 @@ function getActiveAdminSocket() {
             }
         }
 
-        const adminPhone = CONFIG_ADMIN_PHONE;
+        const adminPhone = connectedNumber || global.__waAdminPhone || CONFIG_ADMIN_PHONE;
         const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
         if (match?.session?.status === 'connected' && isSocketOpen(match?.session?.socket)) {
             global.__waAdminSocket = match.session.socket;
@@ -3802,33 +3802,52 @@ async function handleSendText(req, res) {
             }
         }
 
-        // Auto-wake startBot if admin session is not active
-        if (!activeSocket && isAdminAuthorized) {
-            if (!isStartingBot && connectionStatus !== 'connected') {
-                console.log('[API /send-text] Triggering startBot() to auto-wake WhatsApp session...');
+        // Check if credentials exist in DB for this session
+        let hasValidCredentialsInDb = false;
+        if (isAdminAuthorized) {
+            try {
+                const SessionAuth = require('./models/SessionAuth');
+                hasValidCredentialsInDb = await SessionAuth.exists({ id: 'admin_creds.json' });
+            } catch {}
+        }
+        if (!hasValidCredentialsInDb && caller?.userId && caller.userId !== 'ADMIN') {
+            try {
+                const { WhatsAppSession } = require('./auth');
+                const userDoc = await WhatsAppSession.findOne({ 
+                    $or: [{ ownerUserId: caller.userId }, { sessionId: `user-${caller.userId}` }],
+                    status: { $ne: 'logged_out' }
+                });
+                if (userDoc) hasValidCredentialsInDb = true;
+            } catch {}
+        }
+
+        // Auto-wake startBot if credentials exist and socket is not active
+        if (!activeSocket && isAdminAuthorized && hasValidCredentialsInDb) {
+            if (!isStartingBot && (!sock || !isSocketOpen(sock))) {
+                console.log('[API /send-text] WhatsApp credentials exist in DB. Auto-waking startBot()...');
                 startBot().catch(e => console.warn('[API /send-text] startBot auto-wake error:', e.message));
             }
         }
 
-        // Reconnection wait loop: wait up to 6000ms for socket to establish connection
-        if (!activeSocket) {
+        // Reconnection wait loop: wait up to 8000ms for socket to establish connection
+        if (!activeSocket && hasValidCredentialsInDb) {
             let retryWait = 0;
-            while (!activeSocket && retryWait < 6000) {
-                await new Promise(r => setTimeout(r, 400));
-                retryWait += 400;
+            while (!activeSocket && retryWait < 8000) {
+                await new Promise(r => setTimeout(r, 300));
+                retryWait += 300;
                 if (isAdminAuthorized) {
                     activeSocket = getActiveAdminSocket();
                     if (activeSocket) {
                         const adminPhone = activeSocket?.user?.id 
                             ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
-                            : (connectedNumber || CONFIG_ADMIN_PHONE);
+                            : (connectedNumber || global.__waAdminPhone || CONFIG_ADMIN_PHONE);
                         fromNumber = adminPhone;
                         activeSession10 = String(adminPhone).replace(/\D/g, '').slice(-10);
                         break;
                     }
                 }
                 const retryMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
-                if (retryMatch && retryMatch.session?.status === 'connected' && retryMatch.session?.socket) {
+                if (retryMatch && retryMatch.session?.status === 'connected' && retryMatch.session?.socket && isSocketOpen(retryMatch.session.socket)) {
                     activeSocket = retryMatch.session.socket;
                     fromNumber = retryMatch.session.connectedNumber || retryMatch.userId;
                     activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
@@ -3837,7 +3856,7 @@ async function handleSendText(req, res) {
             }
         }
 
-        if (!activeSocket) {
+        if (!activeSocket && !hasValidCredentialsInDb) {
             return res.status(503).json({
                 status: false,
                 message: `WhatsApp is not connected for this user session (${providedSession || user?.mobile || user?.userId || 'default'}). कृपया डैशबोर्ड से पहले WhatsApp स्कैन करें।`
@@ -3935,6 +3954,112 @@ async function handleSendText(req, res) {
                     }
                 });
             }
+        }
+
+        // Zero-Loss Fallback: If credentials exist in DB but socket is still completing connection after wait loop
+        if (!activeSocket && hasValidCredentialsInDb) {
+            const fallbackPhone = fromNumber || activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
+            const resolvedSession = activeSession10 || providedSession || fallbackPhone;
+            console.log(`[API /send-text] WhatsApp socket reconnecting. Queuing message to ${normalizedTo} for immediate background delivery.`);
+
+            res.status(200).json({
+                status: true,
+                queued: true,
+                message: isGroup ? "Group message accepted and queued for immediate delivery" : "Message accepted and queued for immediate delivery",
+                data: {
+                    to: normalizedTo,
+                    recipientType: isGroup ? 'group' : 'user',
+                    message: messageText,
+                    session: resolvedSession,
+                    queued: true,
+                    messageId: deterministicMsgId
+                }
+            });
+
+            // Asynchronous background delivery worker
+            setImmediate(async () => {
+                try {
+                    let bgSocket = null;
+                    let bgFromNumber = fallbackPhone;
+                    for (let bgWait = 0; bgWait < 120; bgWait++) {
+                        await new Promise(r => setTimeout(r, 500));
+                        if (isAdminAuthorized) {
+                            bgSocket = getActiveAdminSocket();
+                            if (bgSocket && isSocketOpen(bgSocket)) {
+                                bgFromNumber = bgSocket.user?.id ? String(bgSocket.user.id).split(':')[0].replace(/\D/g, '') : fallbackPhone;
+                                break;
+                            }
+                        }
+                        const bgMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
+                        if (bgMatch?.session?.status === 'connected' && isSocketOpen(bgMatch.session?.socket)) {
+                            bgSocket = bgMatch.session.socket;
+                            bgFromNumber = bgMatch.session.connectedNumber || bgMatch.userId;
+                            break;
+                        }
+                    }
+
+                    if (bgSocket && typeof bgSocket.sendMessage === 'function') {
+                        console.log(`[API /send-text Queued] Socket connected. Delivering queued message to ${normalizedTo} (ID: ${deterministicMsgId})`);
+                        const bgSendRes = await bgSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId });
+                        const finalMsgId = bgSendRes?.key?.id || deterministicMsgId;
+                        messageDeduplicator.setCompleted(dedupKey, bgSendRes, deterministicMsgId);
+
+                        appendMessageReport({
+                            id: finalMsgId,
+                            date: new Date().toISOString(),
+                            from: bgFromNumber,
+                            to: normalizedTo,
+                            message: messageText,
+                            status: 'sent',
+                            session: resolvedSession,
+                            ownerUserId: ownerUserId,
+                            type: messageType,
+                            source: isGroup ? 'group' : 'api'
+                        });
+
+                        const incomingRecord = {
+                            id: finalMsgId,
+                            chatJid: jid,
+                            from: bgFromNumber,
+                            fromMe: true,
+                            message: messageText,
+                            date: new Date().toISOString(),
+                            timestamp: Date.now(),
+                            isRead: true,
+                            isGroup: isGroup,
+                            type: messageType,
+                            ownerUserId: ownerUserId,
+                            sessionPhone: resolvedSession ? String(resolvedSession).replace(/\D/g, '') : null
+                        };
+                        appendIncomingMessage(incomingRecord);
+                        broadcastIncomingEvent('new_message', incomingRecord, ownerUserId, resolvedSession);
+                        if (isGlobalAdmin) {
+                            const currentSettings = getApiSettings();
+                            currentSettings.totalSent = (currentSettings.totalSent || 0) + 1;
+                            currentSettings.lastUsed = new Date().toISOString();
+                            saveApiSettings(currentSettings);
+                        }
+                        console.log(`✅ [API /send-text Queued] Successfully delivered queued message to ${normalizedTo}`);
+                    } else {
+                        console.error(`❌ [API /send-text Queued] Socket failed to connect within 60s for ${normalizedTo}`);
+                        appendMessageReport({
+                            id: deterministicMsgId,
+                            date: new Date().toISOString(),
+                            from: fallbackPhone,
+                            to: normalizedTo,
+                            message: messageText,
+                            status: 'failed',
+                            session: resolvedSession,
+                            ownerUserId: ownerUserId,
+                            type: messageType,
+                            source: isGroup ? 'group' : 'api'
+                        });
+                    }
+                } catch (bgErr) {
+                    console.error('[API /send-text Queued Error]:', bgErr.message);
+                }
+            });
+            return;
         }
 
         // Fast / Async Mode: Instant HTTP response under 15ms
@@ -4216,6 +4341,7 @@ async function startBot(forceNew = false) {
             const parsedPhone = String(state.creds.me.id).split(':')[0].split('@')[0].replace(/\D/g, '');
             if (parsedPhone) {
                 connectedNumber = parsedPhone;
+                global.__waAdminPhone = parsedPhone;
             }
         }
 
@@ -4296,6 +4422,7 @@ async function startBot(forceNew = false) {
                 connectionStatus = 'connected';
                 latestQR = null;
                 connectedNumber = newSock.user?.id?.split(':')[0]?.split('@')[0] || connectedNumber || CONFIG_ADMIN_PHONE;
+                if (connectedNumber) global.__waAdminPhone = connectedNumber;
 
                 // Refresh global socket reference for auth.js OTP sending
                 global.__waAdminSocket = newSock;
@@ -4810,7 +4937,8 @@ app.listen(PORT, () => {
 
 // Admin Watchdog: Ensure Admin WhatsApp socket remains 24/7 active
 const adminWatchdog = setInterval(async () => {
-    if (connectionStatus === 'disconnected') {
+    const isLive = isSocketOpen(sock) || isSocketOpen(global.__waAdminSocket);
+    if (!isLive && !isStartingBot && !adminManuallyDisconnected) {
         try {
             const SessionAuth = require('./models/SessionAuth');
             const hasCreds = await SessionAuth.exists({ id: 'admin_creds.json' });
@@ -4822,7 +4950,7 @@ const adminWatchdog = setInterval(async () => {
             // DB not connected or lookup error
         }
     }
-}, 45000);
+}, 30000);
 if (typeof adminWatchdog?.unref === 'function') adminWatchdog.unref();
 
 module.exports = {
