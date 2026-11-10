@@ -1,6 +1,7 @@
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const { usePgAuthState, clearSessionCache } = require('./pgAuthState');
 const { WhatsAppSession } = require('./auth');
+const { isWsOpen, isSocketReady, getFastBaileysVersion } = require('./utils/waSocketHelper');
 
 const QRCode = require('qrcode');
 const { Boom } = require('@hapi/boom');
@@ -79,9 +80,10 @@ async function startUserSession(userId, forceNew = false) {
     if (sessions.has(userId)) {
         const currentSession = sessions.get(userId);
         if (currentSession.status === 'connected' && currentSession.socket) {
-            // Verify the underlying WebSocket is actually open (ws.OPEN === 1)
+            // Verify the underlying WebSocket is actually open (Baileys v7 ws.isOpen or ws.readyState)
             const wsState = currentSession.socket?.ws?.readyState;
-            if (wsState === 1) {
+            const wsLive = isWsOpen(currentSession.socket?.ws) && (wsState === undefined || wsState === 1);
+            if (wsLive) {
                 // Socket looks alive — don't recreate
                 return {
                     status: currentSession.status,
@@ -90,12 +92,12 @@ async function startUserSession(userId, forceNew = false) {
                 };
             }
             // WebSocket is dead despite status=connected — fall through to recreate
-            console.warn(`[UserSession] Dead socket detected for ${userId} (wsState=${wsState}), recreating...`);
+            console.warn(`[UserSession] Dead socket detected for ${userId} (wsState=${wsState}, isOpen=${currentSession.socket?.ws?.isOpen}), recreating...`);
         }
         // If already connecting within the last 15 seconds AND socket appears alive, avoid resetting
         if (currentSession.status === 'connecting' && currentSession.connectingSince && (Date.now() - currentSession.connectingSince < 15000)) {
             const wsState = currentSession.socket?.ws?.readyState;
-            if (wsState === 1) {
+            if (isWsOpen(currentSession.socket?.ws) || currentSession.socket?.ws?.isConnecting || wsState === 0 || wsState === 1) {
                 return {
                     status: 'connecting',
                     connectedNumber: currentSession.connectedNumber,
@@ -128,7 +130,7 @@ async function startUserSession(userId, forceNew = false) {
 
     console.log(`[UserSession] Starting session for ${isAdminSlot ? 'Admin slot' : 'user'} ${userId}`);
 
-    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1043857760] }));
+    const { version } = await getFastBaileysVersion(fetchLatestBaileysVersion);
     const socket = makeWASocket({
         version,
         auth: state,
@@ -154,6 +156,7 @@ async function startUserSession(userId, forceNew = false) {
             return undefined;
         }
     });
+    socket.__waConnecting = true;
 
     const sessionData = {
         socket,
@@ -273,6 +276,7 @@ async function startUserSession(userId, forceNew = false) {
             }
         } else if (connection === 'open') {
             console.log(`[UserSession] ${userId} connected`);
+            socket.__waConnecting = false;
             currentSession.status = 'connected';
             currentSession.qr = null;
             const rawId = socket.user?.id || '';
@@ -677,14 +681,14 @@ async function findOrLoadSession(sessionParam, caller = null) {
             }
         }
 
-        let directAdminSocket = (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) ? global.__waAdminSocket : null;
+        let directAdminSocket = isSocketReady(global.__waAdminSocket) ? global.__waAdminSocket : null;
         if (!directAdminSocket) {
             try {
                 const indexMod = require('./index');
                 const s = indexMod.getActiveAdminSocket?.();
-                if (s && typeof s.sendMessage === 'function' && Boolean(s.user?.id)) {
+                if (isSocketReady(s)) {
                     directAdminSocket = s;
-                } else if (indexMod.sock && typeof indexMod.sock.sendMessage === 'function' && Boolean(indexMod.sock.user?.id)) {
+                } else if (isSocketReady(indexMod.sock)) {
                     directAdminSocket = indexMod.sock;
                 }
             } catch {}
@@ -704,7 +708,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
         }
         // Fallback: check if adminPhone is connected in user sessions
         const match = adminPhone ? getSessionByPhoneOrUserId(adminPhone) : null;
-        if (match?.session?.socket && match?.session?.status === 'connected' && Boolean(match.session.socket.user?.id)) {
+        if (match?.session?.status === 'connected' && isSocketReady(match?.session?.socket)) {
             global.__waAdminSocket = match.session.socket;
             return {
                 userId: 'ADMIN',
@@ -719,7 +723,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
         // Check any connected admin slot (admin_2, admin_3, admin_4)
         for (const aSlot of ['admin_2', 'admin_3', 'admin_4']) {
             const aS = sessions.get(aSlot);
-            if (aS?.socket && aS?.status === 'connected') {
+            if (aS?.status === 'connected' && isSocketReady(aS?.socket)) {
                 return {
                     userId: aSlot,
                     isAdmin: true,
@@ -729,7 +733,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
         }
         if (CONFIG_ADMIN_DEFAULT_USER_ID) {
             const userS = sessions.get(CONFIG_ADMIN_DEFAULT_USER_ID);
-            if (userS?.socket && userS?.status === 'connected' && Boolean(userS.socket.user?.id)) {
+            if (userS?.status === 'connected' && isSocketReady(userS?.socket)) {
                 global.__waAdminSocket = userS.socket;
                 return {
                     userId: 'ADMIN',
@@ -745,7 +749,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
 
         // Fallback: check if ANY active connected session exists in sessions map
         for (const [uId, uSess] of sessions.entries()) {
-            if (uSess?.socket && uSess?.status === 'connected' && Boolean(uSess.socket.user?.id)) {
+            if (uSess?.status === 'connected' && isSocketReady(uSess?.socket)) {
                 return {
                     userId: uId,
                     isAdmin: true,
@@ -756,9 +760,9 @@ async function findOrLoadSession(sessionParam, caller = null) {
 
         // If an admin or any session is currently connecting or reconnecting, wait up to 3500ms
         let hasConnecting = false;
-        if (global.__waAdminSocket && (global.__waAdminSocket.status === 'connecting' || global.__waAdminSocket.ws?.readyState === 0)) hasConnecting = true;
+        if (global.__waAdminSocket && (global.__waAdminSocket.status === 'connecting' || global.__waAdminSocket.__waConnecting || global.__waAdminSocket.ws?.isConnecting || global.__waAdminSocket.ws?.readyState === 0)) hasConnecting = true;
         for (const s of sessions.values()) {
-            if (s?.status === 'connecting' || s?.status === 'reconnecting' || s?.socket?.ws?.readyState === 0) {
+            if (s?.status === 'connecting' || s?.status === 'reconnecting' || s?.socket?.__waConnecting || s?.socket?.ws?.isConnecting || s?.socket?.ws?.readyState === 0) {
                 hasConnecting = true;
                 break;
             }
@@ -766,9 +770,9 @@ async function findOrLoadSession(sessionParam, caller = null) {
         if (hasConnecting) {
             for (let wait = 0; wait < 7; wait++) {
                 await new Promise(r => setTimeout(r, 500));
-                if (global.__waAdminSocket && typeof global.__waAdminSocket.sendMessage === 'function' && Boolean(global.__waAdminSocket.user?.id)) {
+                if (isSocketReady(global.__waAdminSocket)) {
                     const wsState = global.__waAdminSocket.ws?.readyState;
-                    if (wsState === undefined || wsState === 1) {
+                    if (isWsOpen(global.__waAdminSocket.ws) && (wsState === undefined || wsState === 1)) {
                         return {
                             userId: 'ADMIN',
                             isAdmin: true,
@@ -781,9 +785,9 @@ async function findOrLoadSession(sessionParam, caller = null) {
                     }
                 }
                 for (const [uId, uSess] of sessions.entries()) {
-                    if (uSess?.socket && uSess?.status === 'connected' && Boolean(uSess.socket.user?.id)) {
+                    if (uSess?.status === 'connected' && isSocketReady(uSess?.socket)) {
                         const wsState = uSess.socket.ws?.readyState;
-                        if (wsState === undefined || wsState === 1) {
+                        if (isWsOpen(uSess.socket.ws) && (wsState === undefined || wsState === 1)) {
                             return { userId: uId, isAdmin: true, session: uSess };
                         }
                     }
@@ -818,13 +822,13 @@ async function findOrLoadSession(sessionParam, caller = null) {
 
         // Return user's session
         let s = sessions.get(callerUserId);
-        if (s && s.status === 'connected' && s.socket) return { userId: callerUserId, session: s };
+        if (s && s.status === 'connected' && isSocketReady(s.socket)) return { userId: callerUserId, session: s };
 
         // If currently connecting, wait up to 3 seconds for it to finish connecting
-        if (s && s.status === 'connecting') {
+        if (s && (s.status === 'connecting' || s.status === 'reconnecting')) {
             for (let wait = 0; wait < 6; wait++) {
                 s = sessions.get(callerUserId);
-                if (s && s.status === 'connected' && s.socket) {
+                if (s && s.status === 'connected' && isSocketReady(s.socket)) {
                     return { userId: callerUserId, session: s };
                 }
                 await new Promise(r => setTimeout(r, 500));
@@ -839,7 +843,7 @@ async function findOrLoadSession(sessionParam, caller = null) {
             await startUserSession(callerUserId);
             for (let wait = 0; wait < 6; wait++) {
                 s = sessions.get(callerUserId);
-                if (s && s.status === 'connected' && s.socket) {
+                if (s && s.status === 'connected' && isSocketReady(s.socket)) {
                     return { userId: callerUserId, session: s, dbSession: dbS };
                 }
                 await new Promise(r => setTimeout(r, 500));
@@ -851,17 +855,17 @@ async function findOrLoadSession(sessionParam, caller = null) {
 
     // 4. For ADMIN managing other user sessions:
     let match = getSessionByPhoneOrUserId(sessionParam);
-    if (match && match.session?.status === 'connected' && match.session?.socket) {
+    if (match && match.session?.status === 'connected' && isSocketReady(match.session?.socket)) {
         return match;
     }
     // If targeted session is connecting / reconnecting, wait up to 3500ms
-    if (match && (match.session?.status === 'connecting' || match.session?.status === 'reconnecting' || match.session?.socket?.ws?.readyState === 0)) {
+    if (match && (match.session?.status === 'connecting' || match.session?.status === 'reconnecting' || match.session?.socket?.__waConnecting || match.session?.socket?.ws?.isConnecting || match.session?.socket?.ws?.readyState === 0)) {
         for (let wait = 0; wait < 7; wait++) {
             await new Promise(r => setTimeout(r, 500));
             match = getSessionByPhoneOrUserId(sessionParam);
-            if (match && match.session?.status === 'connected' && match.session?.socket) {
+            if (match && match.session?.status === 'connected' && isSocketReady(match.session?.socket)) {
                 const wsState = match.session.socket.ws?.readyState;
-                if (wsState === undefined || wsState === 1) {
+                if (isWsOpen(match.session.socket.ws) && (wsState === undefined || wsState === 1)) {
                     return match;
                 }
             }
@@ -1042,10 +1046,11 @@ function startUserSessionWatchdog() {
                     continue;
                 }
                 if (session.status === 'connected') {
-                    // Check if underlying websocket is alive (ws.OPEN === 1)
+                    // Check if underlying websocket is alive (Baileys v7 ws.isOpen or ws.readyState)
                     const wsState = session.socket?.ws?.readyState;
-                    if (wsState !== undefined && wsState !== 1) {
-                        console.warn(`[Watchdog] Session ${userId} websocket closed (state: ${wsState}), auto-reconnecting...`);
+                    const wsClosed = !isWsOpen(session.socket?.ws) || (wsState !== undefined && wsState !== 1);
+                    if (wsClosed) {
+                        console.warn(`[Watchdog] Session ${userId} websocket closed (isOpen=${session.socket?.ws?.isOpen}, state=${wsState}), auto-reconnecting...`);
                         // Mark as reconnecting so startUserSession's connected-guard doesn't short-circuit
                         session.status = 'reconnecting';
                         session.connectingSince = null;

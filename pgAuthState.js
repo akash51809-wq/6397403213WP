@@ -432,10 +432,59 @@ async function migrateUnencryptedSessionAuth() {
   }
 }
 
+/**
+ * Inspects stored credentials for a session (cache first, then PostgreSQL) to determine
+ * whether the session is genuinely paired (registered === true or me.id exists).
+ */
+async function getLinkedSessionInfo(sessionId) {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) return { linked: false, phone: null };
+
+  const key = `${normalizedSessionId}_creds.json`;
+  const sessionCache = getSessionCache(normalizedSessionId);
+  let creds = sessionCache.has(key) ? sessionCache.get(key) : null;
+
+  if (!creds) {
+    try {
+      const res = await query(
+        `SELECT "data" FROM session_auth WHERE "id" = $1 LIMIT 1`,
+        [key]
+      );
+      if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
+        return { linked: false, phone: null };
+      }
+      const rawData = res.rows[0].data;
+      if (rawData.encrypted === true) {
+        const decryptedJson = decryptPayload(rawData);
+        if (!decryptedJson) return { linked: false, phone: null };
+        creds = JSON.parse(decryptedJson, BufferJSON.reviver);
+      } else {
+        const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+        creds = JSON.parse(jsonString, BufferJSON.reviver);
+      }
+      if (creds) sessionCache.set(key, creds);
+    } catch {
+      return { linked: false, phone: null };
+    }
+  }
+
+  const linked = Boolean(creds && (creds.registered === true || creds.me?.id));
+  const rawId = creds?.me?.id ? String(creds.me.id) : '';
+  const phone = rawId ? rawId.split(':')[0].split('@')[0].replace(/\D/g, '') : null;
+  return { linked, phone: phone || null };
+}
+
+async function isSessionLinked(sessionId) {
+  const info = await getLinkedSessionInfo(sessionId);
+  return info.linked;
+}
+
 module.exports = { 
   usePgAuthState,
   useMongoAuthState: usePgAuthState, // Alias for backwards compatibility
   clearSessionCache,
+  getLinkedSessionInfo,
+  isSessionLinked,
   encryptPayload,
   decryptPayload,
   encryptData: encryptPayload,

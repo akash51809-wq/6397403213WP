@@ -226,7 +226,7 @@ function getAutoPingUrl() {
   if (process.env.AUTOPING_URL) return process.env.AUTOPING_URL.trim();
   if (process.env.RENDER_EXTERNAL_URL) return `${process.env.RENDER_EXTERNAL_URL.trim().replace(/\/$/, '')}/ping`;
   if (process.env.APP_URL) return `${process.env.APP_URL.trim().replace(/\/$/, '')}/ping`;
-  return 'https://local-whatsapp.onrender.com/ping';
+  return 'https://services.easyrechargesolution.com/ping';
 }
 
 async function performAutoPing() {

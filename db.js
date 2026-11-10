@@ -105,6 +105,8 @@ async function connectPostgres(customUri = null) {
   return pool;
 }
 
+const TRANSIENT_PG_CODES = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', '57P01', '57P02', '57P03', '08006', '08003', '08001']);
+
 async function query(text, params) {
   if (!connection.pool) {
     throw new Error('[PostgreSQL] Database not connected. Call connectPostgres() first.');
@@ -112,6 +114,20 @@ async function query(text, params) {
   try {
     return await connection.pool.query(text, params);
   } catch (err) {
+    const msg = String(err?.message || '');
+    const isTransient = TRANSIENT_PG_CODES.has(err?.code) ||
+      msg.includes('Connection terminated') ||
+      msg.includes('ECONNRESET') ||
+      msg.includes('Client has encountered a connection error');
+    if (isTransient) {
+      console.warn(`[PostgreSQL] Transient query error (${err.message}), retrying once...`);
+      try {
+        return await connection.pool.query(text, params);
+      } catch (retryErr) {
+        console.error(`[PostgreSQL Query Error]: ${retryErr.message}`);
+        throw retryErr;
+      }
+    }
     console.error(`[PostgreSQL Query Error]: ${err.message}`);
     throw err;
   }
