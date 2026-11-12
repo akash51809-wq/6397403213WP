@@ -224,35 +224,52 @@ const autoPingStats = {
 
 function getAutoPingUrl() {
   if (process.env.AUTOPING_URL) return process.env.AUTOPING_URL.trim();
-  if (process.env.RENDER_EXTERNAL_URL) return `${process.env.RENDER_EXTERNAL_URL.trim().replace(/\/$/, '')}/ping`;
   if (process.env.APP_URL) return `${process.env.APP_URL.trim().replace(/\/$/, '')}/ping`;
+  if (process.env.RENDER_EXTERNAL_URL) return `${process.env.RENDER_EXTERNAL_URL.trim().replace(/\/$/, '')}/ping`;
   return 'https://services.easyrechargesolution.com/ping';
 }
 
+function getAutoPingCandidates() {
+  const candidates = [];
+  if (process.env.AUTOPING_URL) candidates.push(process.env.AUTOPING_URL.trim());
+  candidates.push('https://services.easyrechargesolution.com/ping');
+  if (process.env.APP_URL) candidates.push(`${process.env.APP_URL.trim().replace(/\/$/, '')}/ping`);
+  if (process.env.RENDER_EXTERNAL_URL) candidates.push(`${process.env.RENDER_EXTERNAL_URL.trim().replace(/\/$/, '')}/ping`);
+  candidates.push(`http://127.0.0.1:${PORT}/ping`);
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
 async function performAutoPing() {
-  const pingUrl = getAutoPingUrl();
-  autoPingStats.url = pingUrl;
+  const candidates = getAutoPingCandidates();
+  autoPingStats.url = candidates[0] || getAutoPingUrl();
   autoPingStats.totalPings += 1;
   const started = Date.now();
+  let lastErr = null;
 
-  try {
-    const res = await fetch(pingUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'WA-Control-AutoPing-Cron/1.0 (Keep-Alive)'
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-    const elapsed = Date.now() - started;
-    autoPingStats.lastPingTime = new Date().toISOString();
-    autoPingStats.lastPingStatus = `${res.status} ${res.statusText} (${elapsed}ms)`;
-    console.log(`[AutoPing Cron] Keep-Alive Ping -> ${pingUrl} [${autoPingStats.lastPingStatus}]`);
-  } catch (err) {
-    autoPingStats.failures += 1;
-    autoPingStats.lastPingTime = new Date().toISOString();
-    autoPingStats.lastPingStatus = `Error: ${err.message}`;
-    console.warn(`[AutoPing Cron] Keep-Alive Ping to ${pingUrl} failed:`, err.message);
+  for (const pingUrl of candidates) {
+    try {
+      const res = await fetch(pingUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'WA-Control-AutoPing-Cron/1.0 (Keep-Alive)'
+        },
+        signal: AbortSignal.timeout(15000)
+      });
+      const elapsed = Date.now() - started;
+      autoPingStats.url = pingUrl;
+      autoPingStats.lastPingTime = new Date().toISOString();
+      autoPingStats.lastPingStatus = `${res.status} ${res.statusText} (${elapsed}ms)`;
+      console.log(`[AutoPing Cron] Keep-Alive Ping -> ${pingUrl} [${autoPingStats.lastPingStatus}]`);
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
   }
+
+  autoPingStats.failures += 1;
+  autoPingStats.lastPingTime = new Date().toISOString();
+  autoPingStats.lastPingStatus = `Error: ${lastErr ? lastErr.message : 'All candidates failed'}`;
+  console.warn('[AutoPing Cron] Keep-Alive Ping failed across candidates:', autoPingStats.lastPingStatus);
 }
 
 function startAutoPing() {

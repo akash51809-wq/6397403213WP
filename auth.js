@@ -1668,8 +1668,20 @@ router.post('/api/user/whatsapp/connect', authRequired, async (req, res) => {
     const isRoleAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     if (isRoleAdmin) {
       const indexMod = require('./index');
+      const forceNew = Boolean(req.body?.force);
+      const existingAdminSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+      if (existingAdminSock && !forceNew) {
+        const existingPhone = existingAdminSock.user?.id ? String(existingAdminSock.user.id).split(':')[0].replace(/\D/g, '') : null;
+        return res.json({
+          success: true,
+          message: 'Admin WhatsApp session is already connected.',
+          status: 'connected',
+          connectedNumber: existingPhone,
+          qr: null
+        });
+      }
       if (typeof indexMod.startBot === 'function') {
-        indexMod.startBot(true).catch(e => console.warn('[Admin Connect] startBot error:', e.message));
+        indexMod.startBot(forceNew).catch(e => console.warn('[Admin Connect] startBot error:', e.message));
       }
       let qrDataUrl = null;
       let waited = 0;
@@ -1736,13 +1748,13 @@ router.post('/api/user/whatsapp/disconnect', authRequired, async (req, res) => {
             $or: [
               { id: 'admin' },
               { id: 'admin_creds.json' },
-              { id: { $regex: '^admin_' } }
+              { id: { $regex: '^admin_[^0-9]' } }
             ]
           });
           const { connection } = require('./db');
           if (connection?.pool) {
             await connection.pool.query(
-              `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id LIKE 'admin_%'`
+              `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id ~ '^admin_[^0-9]'`
             ).catch(() => {});
           }
         }
@@ -1977,8 +1989,21 @@ router.post('/api/devices/connect', authRequired, async (req, res) => {
     if (isRoleAdmin) {
       if (slot === 1) {
         const indexMod = require('./index');
+        const forceNew = Boolean(req.body?.force);
+        const existingAdminSock = typeof indexMod.getActiveAdminSocket === 'function' ? indexMod.getActiveAdminSocket() : null;
+        if (existingAdminSock && !forceNew) {
+          const existingPhone = existingAdminSock.user?.id ? String(existingAdminSock.user.id).split(':')[0].replace(/\D/g, '') : null;
+          return res.json({
+            success: true,
+            slot: 1,
+            status: 'connected',
+            connectedNumber: existingPhone,
+            qr: null,
+            message: 'Admin Device 01 is already connected.'
+          });
+        }
         if (typeof indexMod.startBot === 'function') {
-          indexMod.startBot(true).catch(() => {});
+          indexMod.startBot(forceNew).catch(() => {});
         }
         let qrDataUrl = null;
         let waited = 0;

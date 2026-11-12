@@ -1286,20 +1286,20 @@ async function clearAdminWhatsAppCredentials() {
     try {
         clearSessionCache('admin');
         const SessionAuth = require('./models/SessionAuth');
-        // 1. Delete canonical admin session and Baileys admin creds records
+        // 1. Delete canonical Slot 1 admin session and Baileys creds ONLY (never touch multi-device slots admin_2..admin_4)
         await SessionAuth.deleteMany({
             $or: [
                 { id: 'admin' },
                 { id: 'admin_creds.json' },
-                { id: { $regex: '^admin_' } }
+                { id: { $regex: '^admin_[^0-9]' } }
             ]
         });
 
-        // 2. Direct SQL cleanup ensuring canonical 'admin' and 'admin_creds.json' structure is wiped
+        // 2. Direct SQL cleanup ensuring canonical Slot 1 'admin' and 'admin_creds.json' structure is wiped without touching admin_2..4
         const { query } = require('./db');
         if (typeof query === 'function') {
             await query(
-                `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id LIKE 'admin_%'`
+                `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id ~ '^admin_[^0-9]'`
             ).catch(() => {});
         }
         console.log('[Admin WhatsApp] Cleared canonical admin credentials (admin, admin_creds.json, admin_*) from database.');
@@ -3577,6 +3577,28 @@ function invalidateApiTokenCache(identifier) {
  * Resolves whether the caller has any genuinely linked WhatsApp credentials in PostgreSQL
  * (checking admin Slots 1-4, paired WhatsAppSession rows, user sessions, and active memory fallback).
  */
+/**
+ * Wraps Baileys socket.sendMessage in a fresh per-attempt timeout so retries never race
+ * against an already-rejected timeout promise and hung sends cannot leak forever.
+ */
+function sendWithTimeout(targetSocket, jid, messagePayload, options, timeoutMs = 15000) {
+    let timer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error(`WhatsApp socket send timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+    });
+    return Promise.race([
+        Promise.resolve().then(() => targetSocket.sendMessage(jid, messagePayload, options)),
+        timeoutPromise
+    ]).finally(() => {
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    });
+}
+
 async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserId, targetSessionParam }) {
     const slotsToWake = [];
     let hasValidCredentialsInDb = false;
@@ -3591,6 +3613,31 @@ async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserI
                     }
                     slotsToWake.push(adminSlot);
                     hasValidCredentialsInDb = true;
+                }
+            } catch {}
+        }
+
+        // Direct SQL fallback on session_auth in case ORM/cache skipped a paired creds row
+        if (!hasValidCredentialsInDb) {
+            try {
+                const { query: dbQuery } = require('./db');
+                if (typeof dbQuery === 'function') {
+                    const sqlRes = await dbQuery(
+                        `SELECT id FROM session_auth WHERE id = 'admin_creds.json' OR id ~ '^admin_[0-9]+_creds\\.json$' LIMIT 4`
+                    );
+                    for (const row of (sqlRes?.rows || [])) {
+                        const rowId = String(row?.id || '');
+                        if (rowId === 'admin_creds.json') {
+                            hasValidCredentialsInDb = true;
+                            if (!slotsToWake.includes('admin')) slotsToWake.push('admin');
+                        } else {
+                            const slotMatch = rowId.match(/^(admin_\d+)_creds\.json$/);
+                            if (slotMatch) {
+                                hasValidCredentialsInDb = true;
+                                if (!slotsToWake.includes(slotMatch[1])) slotsToWake.push(slotMatch[1]);
+                            }
+                        }
+                    }
                 }
             } catch {}
         }
@@ -3625,8 +3672,14 @@ async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserI
             }
         }
 
-        // In-memory safety net: if admin already connected earlier and hasn't manually logged out, don't fail on transient DB hiccup
-        if (!hasValidCredentialsInDb && !adminManuallyDisconnected && (connectedNumber || global.__waAdminPhone || lastConnectedTime)) {
+        // In-memory safety net: if admin socket is connecting or already connected earlier and hasn't manually logged out, don't fail on transient DB hiccup
+        const hasConnectingAdminSocket = Boolean(
+            sock?.__waConnecting ||
+            global.__waAdminSocket?.__waConnecting ||
+            connectionStatus === 'connecting' ||
+            isStartingBot
+        );
+        if (!hasValidCredentialsInDb && !adminManuallyDisconnected && (connectedNumber || global.__waAdminPhone || lastConnectedTime || hasConnectingAdminSocket)) {
             hasValidCredentialsInDb = true;
             slotsToWake.push('admin');
         }
@@ -3729,7 +3782,7 @@ function dispatchQueuedApiMessage({
             let bgFromNumber = fallbackPhone;
 
             for (let attempt = 0; attempt < 3; attempt++) {
-                for (let bgWait = 0; bgWait < 120; bgWait++) {
+                for (let bgWait = 0; bgWait < 60; bgWait++) {
                     if (bgWait > 0 && bgWait % 30 === 0) {
                         wakeRequiredSessions({ isAdminAuthorized, slotsToWake, callerUserId, sessions });
                     }
@@ -3740,12 +3793,31 @@ function dispatchQueuedApiMessage({
                             bgFromNumber = cand.user?.id ? String(cand.user.id).split(':')[0].replace(/\D/g, '') : fallbackPhone;
                             break;
                         }
+                        if (sessions && sessions.size > 0) {
+                            for (const [k, sess] of sessions.entries()) {
+                                if (sess?.status === 'connected' && isSocketOpen(sess?.socket)) {
+                                    bgSocket = sess.socket;
+                                    bgFromNumber = sess.connectedNumber || k;
+                                    break;
+                                }
+                            }
+                            if (bgSocket) break;
+                        }
+                    } else if (callerUserId) {
+                        const directSess = sessions?.get(callerUserId);
+                        if (directSess?.status === 'connected' && isSocketOpen(directSess?.socket)) {
+                            bgSocket = directSess.socket;
+                            bgFromNumber = directSess.connectedNumber || callerUserId;
+                            break;
+                        }
                     }
-                    const bgMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
-                    if (bgMatch?.session?.status === 'connected' && isSocketOpen(bgMatch.session?.socket)) {
-                        bgSocket = bgMatch.session.socket;
-                        bgFromNumber = bgMatch.session.connectedNumber || bgMatch.userId;
-                        break;
+                    if (bgWait === 0 || bgWait % 10 === 0) {
+                        const bgMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
+                        if (bgMatch?.session?.status === 'connected' && isSocketOpen(bgMatch.session?.socket)) {
+                            bgSocket = bgMatch.session.socket;
+                            bgFromNumber = bgMatch.session.connectedNumber || bgMatch.userId;
+                            break;
+                        }
                     }
                     await new Promise(r => setTimeout(r, 500));
                 }
@@ -3754,7 +3826,7 @@ function dispatchQueuedApiMessage({
 
                 try {
                     console.log(`[API /send-text Queued] Delivering queued message to ${normalizedTo} (Attempt ${attempt + 1}, ID: ${deterministicMsgId})`);
-                    const bgSendRes = await bgSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId });
+                    const bgSendRes = await sendWithTimeout(bgSocket, jid, messagePayload, { messageId: deterministicMsgId }, 20000);
                     const finalMsgId = bgSendRes?.key?.id || deterministicMsgId;
                     messageDeduplicator.setCompleted(dedupKey, bgSendRes, deterministicMsgId);
 
@@ -3828,7 +3900,18 @@ async function handleSendText(req, res) {
         const to = String(req.query.to || req.body?.to || req.body?.number || req.body?.groupId || '').trim();
         const rawMessage = req.query.message !== undefined ? req.query.message : (req.body?.message !== undefined ? req.body?.message : (req.query.text !== undefined ? req.query.text : req.body?.text));
         const providedSession = String(req.query.session || req.body?.session || '').trim();
-        const isAsync = req.query.async === '1' || req.query.fast === '1' || req.body?.async === 1;
+        const isAsync = (
+            req.query.async === '1' ||
+            req.query.async === 'true' ||
+            req.query.fast === '1' ||
+            req.query.fast === 'true' ||
+            req.body?.async === 1 ||
+            req.body?.async === '1' ||
+            req.body?.async === true ||
+            req.body?.fast === 1 ||
+            req.body?.fast === '1' ||
+            req.body?.fast === true
+        );
         const isVoice = req.query.voice === '1' || req.query.audio === '1' || req.query.tts === '1' || req.body?.voice === 1 || req.body?.sendAsVoice === true;
         const voiceLang = String(req.query.lang || req.body?.lang || 'hi').trim().toLowerCase();
 
@@ -3999,20 +4082,53 @@ async function handleSendText(req, res) {
         // Session target resolution:
         // Prefer explicitly provided session. If empty and admin has a phone number, use caller.mobile, else 'admin'
         const targetSessionParam = providedSession || (caller.role === 'admin' ? (caller.mobile || 'admin') : caller.userId);
+        const isAdminAuthorized = isGlobalAdmin || String(user?.role || '').toLowerCase() === 'admin' || String(user?.userId || '').toUpperCase() === 'ADMIN';
 
-        try {
-            const sessionMatch = await findOrLoadSession(targetSessionParam, caller);
-            if (sessionMatch && sessionMatch.session?.status === 'connected' && isSocketOpen(sessionMatch.session?.socket)) {
-                activeSocket = sessionMatch.session.socket;
-                fromNumber = sessionMatch.session.connectedNumber || sessionMatch.userId;
+        // Fast-path check BEFORE findOrLoadSession so another connecting slot (e.g. Slot 2 QR wait) never delays ready sockets
+        if (providedSession && targetSessionParam) {
+            const directByTarget = getSessionByPhoneOrUserId(targetSessionParam);
+            if (directByTarget?.session?.status === 'connected' && isSocketOpen(directByTarget.session?.socket)) {
+                const isOwn = isAdminAuthorized || String(directByTarget.userId) === String(caller?.userId);
+                if (isOwn) {
+                    activeSocket = directByTarget.session.socket;
+                    fromNumber = directByTarget.session.connectedNumber || directByTarget.userId;
+                    activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                }
+            }
+        }
+        if (!activeSocket && isAdminAuthorized) {
+            const adminFast = getActiveAdminSocket();
+            if (adminFast && isSocketOpen(adminFast)) {
+                activeSocket = adminFast;
+                const adminPhone = activeSocket?.user?.id
+                    ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '')
+                    : (connectedNumber || global.__waAdminPhone || CONFIG_ADMIN_PHONE);
+                fromNumber = adminPhone;
+                activeSession10 = String(adminPhone).replace(/\D/g, '').slice(-10);
+            }
+        } else if (!activeSocket && caller?.userId) {
+            const userDirect = sessions?.get(caller.userId);
+            if (userDirect?.status === 'connected' && isSocketOpen(userDirect?.socket)) {
+                activeSocket = userDirect.socket;
+                fromNumber = userDirect.connectedNumber || caller.userId;
                 activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
             }
-        } catch (authErr) {
-            return res.status(403).json({ status: false, message: authErr.message });
+        }
+
+        if (!activeSocket) {
+            try {
+                const sessionMatch = await findOrLoadSession(targetSessionParam, caller);
+                if (sessionMatch && sessionMatch.session?.status === 'connected' && isSocketOpen(sessionMatch.session?.socket)) {
+                    activeSocket = sessionMatch.session.socket;
+                    fromNumber = sessionMatch.session.connectedNumber || sessionMatch.userId;
+                    activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                }
+            } catch (authErr) {
+                return res.status(403).json({ status: false, message: authErr.message });
+            }
         }
 
         // Admin WhatsApp fallback: ONLY if caller is verified admin!
-        const isAdminAuthorized = isGlobalAdmin || String(user?.role || '').toLowerCase() === 'admin' || String(user?.userId || '').toUpperCase() === 'ADMIN';
         if (!activeSocket && isAdminAuthorized) {
             activeSocket = getActiveAdminSocket();
             if (activeSocket) {
@@ -4062,28 +4178,52 @@ async function handleSendText(req, res) {
             if (hasValidCredentialsInDb) {
                 wakeRequiredSessions({ isAdminAuthorized, slotsToWake, callerUserId: caller?.userId, sessions });
 
-                // Reconnection wait loop: wait up to 8000ms for socket handshake to complete
-                let retryWait = 0;
-                while (!activeSocket && retryWait < 8000) {
+                // Reconnection wait loop bounded by wall-clock deadline (never call blocking findOrLoadSession per tick)
+                const waitDeadline = Date.now() + 8000;
+                while (!activeSocket && Date.now() < waitDeadline) {
                     await new Promise(r => setTimeout(r, 300));
-                    retryWait += 300;
                     if (isAdminAuthorized) {
-                        activeSocket = getActiveAdminSocket();
-                        if (activeSocket) {
-                            const adminPhone = activeSocket?.user?.id 
-                                ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') 
+                        const adminCand = getActiveAdminSocket();
+                        if (adminCand && isSocketOpen(adminCand)) {
+                            activeSocket = adminCand;
+                            const adminPhone = activeSocket?.user?.id
+                                ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '')
                                 : (connectedNumber || global.__waAdminPhone || CONFIG_ADMIN_PHONE);
                             fromNumber = adminPhone;
                             activeSession10 = String(adminPhone).replace(/\D/g, '').slice(-10);
                             break;
                         }
+                        if (sessions && sessions.size > 0) {
+                            for (const [k, sess] of sessions.entries()) {
+                                if (sess?.status === 'connected' && isSocketOpen(sess?.socket)) {
+                                    activeSocket = sess.socket;
+                                    fromNumber = sess.connectedNumber || k;
+                                    activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                                    break;
+                                }
+                            }
+                            if (activeSocket) break;
+                        }
+                    } else if (caller?.userId) {
+                        const directUserSess = sessions?.get(caller.userId);
+                        if (directUserSess?.status === 'connected' && isSocketOpen(directUserSess?.socket)) {
+                            activeSocket = directUserSess.socket;
+                            fromNumber = directUserSess.connectedNumber || caller.userId;
+                            activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                            break;
+                        }
                     }
-                    const retryMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
-                    if (retryMatch && retryMatch.session?.status === 'connected' && isSocketOpen(retryMatch.session?.socket)) {
-                        activeSocket = retryMatch.session.socket;
-                        fromNumber = retryMatch.session.connectedNumber || retryMatch.userId;
-                        activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
-                        break;
+                    if (targetSessionParam) {
+                        const byTarget = getSessionByPhoneOrUserId(targetSessionParam);
+                        if (byTarget?.session?.status === 'connected' && isSocketOpen(byTarget.session?.socket)) {
+                            const isOwn = isAdminAuthorized || String(byTarget.userId) === String(caller?.userId);
+                            if (isOwn) {
+                                activeSocket = byTarget.session.socket;
+                                fromNumber = byTarget.session.connectedNumber || byTarget.userId;
+                                activeSession10 = String(fromNumber).replace(/\D/g, '').slice(-10);
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -4314,11 +4454,7 @@ async function handleSendText(req, res) {
             });
         }
 
-        // Await genuine WhatsApp delivery acknowledgment from socket (15s timeout)
-        const sendTimeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('WhatsApp socket send timed out after 15000ms')), 15000);
-        });
-
+        // Await genuine WhatsApp delivery acknowledgment from socket (fresh 15s timeout per attempt)
         let sendResult = null;
         try {
             if (existing && existing.status === 'in_flight' && existing.promise) {
@@ -4326,10 +4462,7 @@ async function handleSendText(req, res) {
                 sendResult = await existing.promise;
             } else {
                 const executeSend = async () => {
-                    return await Promise.race([
-                        activeSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId }),
-                        sendTimeoutPromise
-                    ]);
+                    return await sendWithTimeout(activeSocket, jid, messagePayload, { messageId: deterministicMsgId }, 15000);
                 };
                 const sendPromise = executeSend();
                 messageDeduplicator.setInFlight(dedupKey, sendPromise, deterministicMsgId);
@@ -4344,7 +4477,8 @@ async function handleSendText(req, res) {
                 sendErr.message.includes('Closed') || 
                 sendErr.message.includes('timed out') ||
                 sendErr.message.includes('Connection Lost') ||
-                sendErr.message.includes('reset')
+                sendErr.message.includes('reset') ||
+                sendErr.message.includes('Stream')
             )) {
                 try {
                     await new Promise(r => setTimeout(r, 800));
@@ -4355,10 +4489,7 @@ async function handleSendText(req, res) {
                     }
                     if (isSocketOpen(retrySocket)) {
                         console.log('[API /send-text] Retrying send with refreshed active socket...');
-                        retriedResult = await Promise.race([
-                            retrySocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId }),
-                            sendTimeoutPromise
-                        ]);
+                        retriedResult = await sendWithTimeout(retrySocket, jid, messagePayload, { messageId: deterministicMsgId }, 15000);
                         messageDeduplicator.setCompleted(dedupKey, retriedResult, deterministicMsgId);
                         sendResult = retriedResult;
                     }
@@ -4367,7 +4498,10 @@ async function handleSendText(req, res) {
                 }
             }
 
-            const isTransientSendErr = Boolean(sendErr?.message && /closed|timed out|Connection Lost|reset|not open/i.test(sendErr.message));
+            const isTransientSendErr = Boolean(
+                sendErr?.message &&
+                /closed|timed out|etimedout|econnreset|connection|reset|not open|stream|428|515|408|hang up|destroyed|unavailable/i.test(sendErr.message)
+            );
             if (!sendResult && isTransientSendErr) {
                 const { hasValidCredentialsInDb: credOk, slotsToWake: wakeList } = await resolvePairedSlotsAndCredentials({
                     isAdminAuthorized,
