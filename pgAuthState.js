@@ -210,9 +210,14 @@ async function usePgAuthState(sessionId) {
     if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
       return null;
     }
-    const rawData = res.rows[0].data;
+    let rawData = res.rows[0].data;
+    if (typeof rawData === 'string') {
+      try {
+        rawData = JSON.parse(rawData);
+      } catch (e) {}
+    }
     let parsed = null;
-    if (rawData.encrypted === true) {
+    if (isEncryptedPayload(rawData)) {
       const decryptedJson = decryptPayload(rawData);
       if (!decryptedJson) {
         throw new Error(`Failed to decrypt ${key} with any candidate key`);
@@ -258,10 +263,16 @@ async function usePgAuthState(sessionId) {
   if (!isLinked) {
     console.log(`[SessionAuth] Initializing fresh credentials for unlinked session: ${normalizedSessionId}`);
     try {
-      await query(
-        `DELETE FROM session_auth WHERE id = $1 OR id = $2 OR id LIKE $3`,
-        [normalizedSessionId, `${normalizedSessionId}_creds.json`, `${normalizedSessionId}_%`]
-      );
+      if (normalizedSessionId === 'admin') {
+        await query(
+          `DELETE FROM session_auth WHERE id = 'admin' OR id = 'admin_creds.json' OR id ~ '^admin_[^0-9]'`
+        );
+      } else {
+        await query(
+          `DELETE FROM session_auth WHERE id = $1 OR id = $2 OR id LIKE $3`,
+          [normalizedSessionId, `${normalizedSessionId}_creds.json`, `${normalizedSessionId}_%`]
+        );
+      }
       sessionCache.clear();
     } catch (e) {}
     creds = initAuthCreds();
@@ -297,12 +308,18 @@ async function usePgAuthState(sessionId) {
             const resultMap = new Map();
             for (const row of (res.rows || [])) {
               try {
+                let raw = row.data;
+                if (typeof raw === 'string') {
+                  try {
+                    raw = JSON.parse(raw);
+                  } catch (e) {}
+                }
                 let parsed = null;
-                if (row.data && row.data.encrypted === true) {
-                  const dec = decryptPayload(row.data);
+                if (isEncryptedPayload(raw)) {
+                  const dec = decryptPayload(raw);
                   if (dec) parsed = JSON.parse(dec, BufferJSON.reviver);
-                } else if (row.data) {
-                  const str = typeof row.data === 'string' ? row.data : JSON.stringify(row.data);
+                } else if (raw) {
+                  const str = typeof raw === 'string' ? raw : JSON.stringify(raw);
                   parsed = JSON.parse(str, BufferJSON.reviver);
                 }
                 resultMap.set(row.id, parsed);
@@ -443,32 +460,41 @@ async function getLinkedSessionInfo(sessionId) {
   const key = `${normalizedSessionId}_creds.json`;
   const sessionCache = getSessionCache(normalizedSessionId);
   let creds = sessionCache.has(key) ? sessionCache.get(key) : null;
+  const isCredsLinked = (c) => Boolean(c && (c.registered === true || c.me?.id));
 
-  if (!creds) {
+  // If cached creds are not confirmed linked, check PostgreSQL directly
+  if (!isCredsLinked(creds)) {
     try {
       const res = await query(
         `SELECT "data" FROM session_auth WHERE "id" = $1 LIMIT 1`,
         [key]
       );
-      if (!res.rows || res.rows.length === 0 || !res.rows[0].data) {
-        return { linked: false, phone: null };
+      if (res.rows && res.rows.length > 0 && res.rows[0].data) {
+        let rawData = res.rows[0].data;
+        if (typeof rawData === 'string') {
+          try {
+            rawData = JSON.parse(rawData);
+          } catch (e) {}
+        }
+        if (isEncryptedPayload(rawData)) {
+          const decryptedJson = decryptPayload(rawData);
+          if (decryptedJson) {
+            creds = JSON.parse(decryptedJson, BufferJSON.reviver);
+          }
+        } else {
+          const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
+          creds = JSON.parse(jsonString, BufferJSON.reviver);
+        }
+        if (creds && isCredsLinked(creds)) {
+          sessionCache.set(key, creds);
+        }
       }
-      const rawData = res.rows[0].data;
-      if (rawData.encrypted === true) {
-        const decryptedJson = decryptPayload(rawData);
-        if (!decryptedJson) return { linked: false, phone: null };
-        creds = JSON.parse(decryptedJson, BufferJSON.reviver);
-      } else {
-        const jsonString = typeof rawData === 'string' ? rawData : JSON.stringify(rawData);
-        creds = JSON.parse(jsonString, BufferJSON.reviver);
-      }
-      if (creds) sessionCache.set(key, creds);
     } catch {
-      return { linked: false, phone: null };
+      // transient lookup failure
     }
   }
 
-  const linked = Boolean(creds && (creds.registered === true || creds.me?.id));
+  const linked = isCredsLinked(creds);
   const rawId = creds?.me?.id ? String(creds.me.id) : '';
   const phone = rawId ? rawId.split(':')[0].split('@')[0].replace(/\D/g, '') : null;
   return { linked, phone: phone || null };

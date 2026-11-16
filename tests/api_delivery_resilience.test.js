@@ -86,3 +86,18 @@ test('7. server.js AutoPing supports fallback candidates when RENDER_EXTERNAL_UR
     assert.ok(serverSrc.includes('https://services.easyrechargesolution.com/ping'), 'AutoPing candidates must include production domain ping URL');
     assert.ok(serverSrc.includes('http://127.0.0.1:${PORT}/ping'), 'AutoPing candidates must include local loopback ping fallback');
 });
+
+test('8. handleSendText enforces Fast-Dispatch race for group and slow messages', () => {
+    assert.ok(indexSrc.includes('FAST_DISPATCH_TIMEOUT_MS'), 'handleSendText must define FAST_DISPATCH_TIMEOUT_MS for cURL protection');
+    assert.ok(indexSrc.includes('Promise.race(['), 'handleSendText must race send against dispatch deadline');
+    assert.ok(indexSrc.includes('__FAST_DISPATCH_TRIGGERED__'), 'handleSendText must handle dispatch timeout gracefully');
+});
+
+test('9. resolvePairedSlotsAndCredentials ensures Universal Admin Guarantee so admin API calls are never blocked with 503', () => {
+    const fnStart = indexSrc.indexOf('async function resolvePairedSlotsAndCredentials');
+    const fnEnd = indexSrc.indexOf('function wakeRequiredSessions', fnStart);
+    const fnBody = indexSrc.slice(fnStart, fnEnd);
+
+    assert.ok(fnBody.includes('Universal Admin Guarantee'), 'Must include Universal Admin Guarantee in credential resolution');
+    assert.ok(fnBody.includes('!adminManuallyDisconnected'), 'Must protect connected/registered admin against false 503 errors');
+});

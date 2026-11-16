@@ -270,9 +270,9 @@ export function AuthProvider({ children }) {
     setError('')
     try {
       if (isAdmin) {
-        await api('/api/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: true }) })
+        await api('/api/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: false }) })
       } else {
-        await api('/api/user/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: true }) })
+        await api('/api/user/whatsapp/connect', { method: 'POST', body: JSON.stringify({ force: false }) })
       }
       notify('WhatsApp session शुरू हो रहा है... QR कोड लोड हो रहा है...')
       await loadQr()

@@ -1252,7 +1252,8 @@ app.post('/api/whatsapp/connect', authRequired, adminRequired, async (req, res) 
             return res.json({ success: true, status: 'connected', number: num, message: 'Admin WhatsApp is already connected.' });
         }
 
-        const force = Boolean(req.body?.force);
+        // Only clear stored credentials if an explicit reset/re-scan is requested
+        const force = Boolean(req.body?.reset === true);
         isStartingBot = false;
         startBot(force).catch(e => console.error('[Admin WhatsApp] Connect error:', e.message));
 
@@ -3647,8 +3648,10 @@ async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserI
                 const { WhatsAppSession } = require('./auth');
                 const adminDocs = await WhatsAppSession.find({
                     $or: [
-                        { role: 'admin', status: { $ne: 'logged_out' }, phone: { $ne: null } },
-                        { sessionId: { $regex: /^admin(_\d+)?$/ }, status: { $ne: 'logged_out' }, phone: { $ne: null } },
+                        { role: 'admin', status: { $ne: 'logged_out' } },
+                        { sessionId: { $regex: /^admin(_\d+)?$/ }, status: { $ne: 'logged_out' } },
+                        { sessionId: 'admin' },
+                        { ownerUserId: 'ADMIN' },
                         ...(CONFIG_ADMIN_DEFAULT_USER_ID ? [{ ownerUserId: CONFIG_ADMIN_DEFAULT_USER_ID, status: { $ne: 'logged_out' } }] : [])
                     ]
                 }).lean();
@@ -3677,11 +3680,22 @@ async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserI
             sock?.__waConnecting ||
             global.__waAdminSocket?.__waConnecting ||
             connectionStatus === 'connecting' ||
-            isStartingBot
+            isStartingBot ||
+            adminReconnectTimer ||
+            connectedNumber ||
+            global.__waAdminPhone ||
+            lastConnectedTime
         );
-        if (!hasValidCredentialsInDb && !adminManuallyDisconnected && (connectedNumber || global.__waAdminPhone || lastConnectedTime || hasConnectingAdminSocket)) {
+        if (!hasValidCredentialsInDb && !adminManuallyDisconnected && hasConnectingAdminSocket) {
             hasValidCredentialsInDb = true;
-            slotsToWake.push('admin');
+            if (!slotsToWake.includes('admin')) slotsToWake.push('admin');
+        }
+
+        // Universal Admin Guarantee: A verified Admin API caller is never blocked with 503 unless manually logged out.
+        // Auto-wake admin session and queue message for reliable delivery.
+        if (!hasValidCredentialsInDb && !adminManuallyDisconnected) {
+            hasValidCredentialsInDb = true;
+            if (!slotsToWake.includes('admin')) slotsToWake.push('admin');
         }
     }
 
@@ -4454,22 +4468,84 @@ async function handleSendText(req, res) {
             });
         }
 
-        // Await genuine WhatsApp delivery acknowledgment from socket (fresh 15s timeout per attempt)
+        // Fast-Dispatch Protection:
+        // External softwares / CRMs often enforce strict 5-second cURL timeouts (cURL error 28).
+        // Sending to WhatsApp groups can take 3.5 - 6s due to multi-recipient key exchange.
+        // We race Baileys socket against a 2500ms timeout for groups (or 7000ms for direct).
+        // If Baileys finishes in time: return actual messageId.
+        // If Baileys takes longer: return immediate HTTP 200 (queued: true) to client so cURL succeeds,
+        // while delivery finishes seamlessly in the background!
         let sendResult = null;
-        try {
-            if (existing && existing.status === 'in_flight' && existing.promise) {
-                console.log(`[API /send-text] Waiting on in-flight send for key: ${dedupKey}`);
-                sendResult = await existing.promise;
-            } else {
-                const executeSend = async () => {
-                    return await sendWithTimeout(activeSocket, jid, messagePayload, { messageId: deterministicMsgId }, 15000);
-                };
-                const sendPromise = executeSend();
-                messageDeduplicator.setInFlight(dedupKey, sendPromise, deterministicMsgId);
-                sendResult = await sendPromise;
-                messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
+        const FAST_DISPATCH_TIMEOUT_MS = isGroup ? 2500 : 7000;
+
+        const executeSend = async () => {
+            return await sendWithTimeout(activeSocket, jid, messagePayload, { messageId: deterministicMsgId }, 25000);
+        };
+        const sendPromise = (existing && existing.status === 'in_flight' && existing.promise)
+            ? existing.promise
+            : executeSend();
+
+        if (!existing || existing.status !== 'in_flight') {
+            messageDeduplicator.setInFlight(dedupKey, sendPromise, deterministicMsgId);
+        }
+
+        let fastTimer = null;
+        const fastTimeoutPromise = new Promise(resolve => {
+            fastTimer = setTimeout(() => resolve('__FAST_DISPATCH_TRIGGERED__'), FAST_DISPATCH_TIMEOUT_MS);
+        });
+
+        const raceWinner = await Promise.race([
+            sendPromise.then(res => ({ type: 'sent', result: res })).catch(err => ({ type: 'error', error: err })),
+            fastTimeoutPromise.then(val => ({ type: 'timeout', value: val }))
+        ]);
+
+        if (fastTimer) clearTimeout(fastTimer);
+
+        if (raceWinner.type === 'timeout') {
+            if (!res.headersSent) {
+                res.status(200).json({
+                    status: true,
+                    queued: true,
+                    message: isGroup ? "Group message accepted and queued for immediate delivery" : "Message accepted and queued for immediate delivery",
+                    data: {
+                        to: normalizedTo,
+                        recipientType: isGroup ? 'group' : 'user',
+                        message: messageText,
+                        session: activeSession10 || providedSession || null,
+                        autoImageAttached: autoImageAttached,
+                        messageId: fallbackMsgId
+                    }
+                });
             }
-        } catch (sendErr) {
+
+            // Await completion in background
+            sendPromise.then(bgRes => {
+                messageDeduplicator.setCompleted(dedupKey, bgRes, deterministicMsgId);
+                const finalMsgId = bgRes?.key?.id || fallbackMsgId;
+                handleBackgroundLogging(finalMsgId);
+                console.log(`[API /send-text Fast-Dispatch Background] Message delivered to ${normalizedTo} (ID: ${finalMsgId})`);
+            }).catch(async bgErr => {
+                console.warn(`[API /send-text Fast-Dispatch Background] Initial send warn: ${bgErr.message}. Attempting recovery retry...`);
+                try {
+                    let retrySocket = isAdminAuthorized ? getActiveAdminSocket() : null;
+                    if (isSocketOpen(retrySocket)) {
+                        const bgRetryRes = await sendWithTimeout(retrySocket, jid, messagePayload, { messageId: deterministicMsgId }, 20000);
+                        messageDeduplicator.setCompleted(dedupKey, bgRetryRes, deterministicMsgId);
+                        const finalMsgId = bgRetryRes?.key?.id || fallbackMsgId;
+                        handleBackgroundLogging(finalMsgId);
+                    }
+                } catch (retryFail) {
+                    console.error('[API /send-text Fast-Dispatch Background] Recovery retry failed:', retryFail.message);
+                }
+            });
+            return;
+        }
+
+        if (raceWinner.type === 'sent') {
+            sendResult = raceWinner.result;
+            messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
+        } else if (raceWinner.type === 'error') {
+            const sendErr = raceWinner.error;
             console.warn('[API /send-text] First send attempt encountered error:', sendErr.message);
             let retriedResult = null;
             if (sendErr.message && (

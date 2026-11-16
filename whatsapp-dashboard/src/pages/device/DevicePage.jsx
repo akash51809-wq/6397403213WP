@@ -118,7 +118,7 @@ export function DevicePage() {
       notify(`Device Slot 0${slotId}: QR कोड लोड हो रहा है...`)
       const res = await api('/api/devices/connect', {
         method: 'POST',
-        body: JSON.stringify({ slot: slotId, force: true })
+        body: JSON.stringify({ slot: slotId, force: false })
       })
       if (res && res.success) {
         if (res.qr) {
