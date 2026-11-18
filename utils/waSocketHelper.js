@@ -13,6 +13,8 @@ const FALLBACK_VERSION = [2, 3000, 1043857760];
  */
 function isWsOpen(ws) {
     if (!ws) return true; // Preserves compatibility with lightweight test mock sockets
+    if (typeof ws.isClosed === 'boolean' && ws.isClosed) return false;
+    if (typeof ws.isClosing === 'boolean' && ws.isClosing) return false;
     if (typeof ws.isOpen === 'boolean') return ws.isOpen;
     const state = ws.socket?.readyState ?? ws.readyState;
     return state === undefined || state === 1;
@@ -25,6 +27,7 @@ function isSocketReady(s) {
     if (!s || typeof s.sendMessage !== 'function') return false;
     if (!s.user?.id) return false;
     if (s.__waConnecting === true) return false;
+    if (s.__waClosed === true) return false;
     return isWsOpen(s.ws);
 }
 

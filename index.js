@@ -3600,6 +3600,68 @@ function sendWithTimeout(targetSocket, jid, messagePayload, options, timeoutMs =
     });
 }
 
+const TRANSIENT_WA_ERR_REGEX = /closed|timed out|etimedout|econnreset|connection|reset|not open|stream|428|515|408|hang up|destroyed|unavailable|socket/i;
+
+function isTransientWhatsAppError(err) {
+    const msg = String(err?.message || err || '');
+    const statusCode = err?.output?.statusCode || err?.statusCode || null;
+    if (statusCode === 428 || statusCode === 515 || statusCode === 408 || statusCode === 503) return true;
+    return TRANSIENT_WA_ERR_REGEX.test(msg);
+}
+
+/**
+ * Marks a zombie/closed Baileys socket dead so getActiveAdminSocket() stops returning it,
+ * tears down its stale WebSocket cleanly, and triggers immediate background reconnect.
+ */
+function markSocketDeadAndReconnect(deadSocket, isAdmin = true) {
+    if (!deadSocket) return;
+    try {
+        deadSocket.__waClosed = true;
+        deadSocket.__waConnecting = false;
+    } catch {}
+
+    try {
+        const isAdminSock = deadSocket === sock || deadSocket === global.__waAdminSocket;
+        if (isAdminSock) {
+            if (sock === deadSocket) sock = null;
+            if (global.__waAdminSocket === deadSocket) global.__waAdminSocket = null;
+            if (!adminManuallyDisconnected) {
+                connectionStatus = 'connecting';
+            }
+            try {
+                if (typeof deadSocket.end === 'function') {
+                    deadSocket.end(new Error('Stale socket replaced after connection close'));
+                }
+            } catch {}
+            if (!isStartingBot && !adminManuallyDisconnected) {
+                console.warn('[Admin WhatsApp] Dead/closed socket detected during send. Triggering immediate reconnect...');
+                startBot().catch(e => console.warn('[Admin WhatsApp] Immediate reconnect warning:', e.message));
+            }
+        } else {
+            try {
+                const { sessions, startUserSession } = require('./userSessions');
+                if (sessions) {
+                    for (const [key, sess] of sessions.entries()) {
+                        if (sess?.socket === deadSocket) {
+                            sess.status = 'connecting';
+                            sess.socket = null;
+                            try {
+                                if (typeof deadSocket.end === 'function') {
+                                    deadSocket.end(new Error('Stale socket replaced after connection close'));
+                                }
+                            } catch {}
+                            startUserSession(key).catch(() => {});
+                            break;
+                        }
+                    }
+                }
+            } catch {}
+        }
+    } catch (e) {
+        console.warn('[markSocketDeadAndReconnect] notice:', e.message);
+    }
+}
+
 async function resolvePairedSlotsAndCredentials({ isAdminAuthorized, callerUserId, targetSessionParam }) {
     const slotsToWake = [];
     let hasValidCredentialsInDb = false;
@@ -3883,8 +3945,11 @@ function dispatchQueuedApiMessage({
                     return;
                 } catch (sendBgErr) {
                     console.warn(`[API /send-text Queued] Attempt ${attempt + 1} error: ${sendBgErr.message}`);
+                    if (isTransientWhatsAppError(sendBgErr)) {
+                        markSocketDeadAndReconnect(bgSocket, isAdminAuthorized);
+                    }
                     bgSocket = null;
-                    await new Promise(r => setTimeout(r, 1500));
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             }
 
@@ -3909,6 +3974,7 @@ function dispatchQueuedApiMessage({
 
 async function handleSendText(req, res) {
     res.setHeader('Connection', 'keep-alive');
+    const reqCtx = {};
     try {
         const token = String(req.query.token || req.body?.token || req.headers['x-api-token'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || '').trim();
         const to = String(req.query.to || req.body?.to || req.body?.number || req.body?.groupId || '').trim();
@@ -4343,6 +4409,13 @@ async function handleSendText(req, res) {
             }
         }
 
+        // Snapshot request delivery context so outer catch & background retries can always queue on Connection Closed
+        Object.assign(reqCtx, {
+            isGroup, normalizedTo, messageText, jid, messagePayload, dedupKey, deterministicMsgId,
+            isAdminAuthorized, caller, targetSessionParam, providedSession, fromNumber, activeSession10,
+            ownerUserId, messageType, isGlobalAdmin, activeSocket, findOrLoadSession, sessions
+        });
+
         // Zero-Loss Fallback: If credentials exist in DB but socket is still completing handshake after wait loop
         if (!activeSocket && hasValidCredentialsInDb) {
             const fallbackPhone = fromNumber || activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
@@ -4373,7 +4446,7 @@ async function handleSendText(req, res) {
 
             setImmediate(async () => {
                 try {
-                    const sendResult = await activeSocket.sendMessage(jid, messagePayload, { messageId: deterministicMsgId });
+                    const sendResult = await sendWithTimeout(activeSocket, jid, messagePayload, { messageId: deterministicMsgId }, 25000);
                     const messageId = sendResult?.key?.id || deterministicMsgId;
                     messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
                     appendMessageReport({
@@ -4411,6 +4484,37 @@ async function handleSendText(req, res) {
                     }
                 } catch (sendErr) {
                     console.error('[API /send-text Async] Send failed:', sendErr.message);
+                    if (isTransientWhatsAppError(sendErr)) {
+                        markSocketDeadAndReconnect(activeSocket, isAdminAuthorized);
+                        const { hasValidCredentialsInDb: credOk, slotsToWake: wakeList } = await resolvePairedSlotsAndCredentials({
+                            isAdminAuthorized,
+                            callerUserId: caller?.userId,
+                            targetSessionParam
+                        }).catch(() => ({ hasValidCredentialsInDb: Boolean(isAdminAuthorized && !adminManuallyDisconnected), slotsToWake: ['admin'] }));
+                        if (credOk) {
+                            const fallbackPhone = fromNumber || activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
+                            const resolvedSession = activeSession10 || providedSession || fallbackPhone;
+                            wakeRequiredSessions({ isAdminAuthorized, slotsToWake: wakeList, callerUserId: caller?.userId, sessions });
+                            dispatchQueuedApiMessage({
+                                res, isGroup, normalizedTo, messageText, resolvedSession, deterministicMsgId,
+                                fallbackPhone, isAdminAuthorized, slotsToWake: wakeList, callerUserId: caller?.userId, targetSessionParam, caller,
+                                jid, messagePayload, dedupKey, ownerUserId, messageType, isGlobalAdmin, findOrLoadSession, sessions
+                            });
+                            return;
+                        }
+                    }
+                    appendMessageReport({
+                        id: deterministicMsgId,
+                        date: new Date().toISOString(),
+                        from: fromNumber || activeSession10,
+                        to: normalizedTo,
+                        message: messageText,
+                        status: 'failed',
+                        session: activeSession10 || providedSession || 'default',
+                        ownerUserId: ownerUserId,
+                        type: messageType,
+                        source: isGroup ? 'group' : 'api'
+                    });
                 }
             });
             return;
@@ -4525,18 +4629,38 @@ async function handleSendText(req, res) {
                 handleBackgroundLogging(finalMsgId);
                 console.log(`[API /send-text Fast-Dispatch Background] Message delivered to ${normalizedTo} (ID: ${finalMsgId})`);
             }).catch(async bgErr => {
-                console.warn(`[API /send-text Fast-Dispatch Background] Initial send warn: ${bgErr.message}. Attempting recovery retry...`);
-                try {
-                    let retrySocket = isAdminAuthorized ? getActiveAdminSocket() : null;
-                    if (isSocketOpen(retrySocket)) {
-                        const bgRetryRes = await sendWithTimeout(retrySocket, jid, messagePayload, { messageId: deterministicMsgId }, 20000);
-                        messageDeduplicator.setCompleted(dedupKey, bgRetryRes, deterministicMsgId);
-                        const finalMsgId = bgRetryRes?.key?.id || fallbackMsgId;
-                        handleBackgroundLogging(finalMsgId);
+                console.warn(`[API /send-text Fast-Dispatch Background] Initial send warn: ${bgErr.message}. Handing off to resilient background queue...`);
+                if (isTransientWhatsAppError(bgErr)) {
+                    markSocketDeadAndReconnect(activeSocket, isAdminAuthorized);
+                    const { hasValidCredentialsInDb: credOk, slotsToWake: wakeList } = await resolvePairedSlotsAndCredentials({
+                        isAdminAuthorized,
+                        callerUserId: caller?.userId,
+                        targetSessionParam
+                    }).catch(() => ({ hasValidCredentialsInDb: Boolean(isAdminAuthorized && !adminManuallyDisconnected), slotsToWake: ['admin'] }));
+                    if (credOk) {
+                        const fallbackPhone = fromNumber || activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
+                        const resolvedSession = activeSession10 || providedSession || fallbackPhone;
+                        wakeRequiredSessions({ isAdminAuthorized, slotsToWake: wakeList, callerUserId: caller?.userId, sessions });
+                        dispatchQueuedApiMessage({
+                            res, isGroup, normalizedTo, messageText, resolvedSession, deterministicMsgId,
+                            fallbackPhone, isAdminAuthorized, slotsToWake: wakeList, callerUserId: caller?.userId, targetSessionParam, caller,
+                            jid, messagePayload, dedupKey, ownerUserId, messageType, isGlobalAdmin, findOrLoadSession, sessions
+                        });
+                        return;
                     }
-                } catch (retryFail) {
-                    console.error('[API /send-text Fast-Dispatch Background] Recovery retry failed:', retryFail.message);
                 }
+                appendMessageReport({
+                    id: fallbackMsgId,
+                    date: new Date().toISOString(),
+                    from: fromNumber || activeSession10,
+                    to: normalizedTo,
+                    message: messageText,
+                    status: 'failed',
+                    session: activeSession10 || providedSession || 'default',
+                    ownerUserId: ownerUserId,
+                    type: messageType,
+                    source: isGroup ? 'group' : 'api'
+                });
             });
             return;
         }
@@ -4546,24 +4670,20 @@ async function handleSendText(req, res) {
             messageDeduplicator.setCompleted(dedupKey, sendResult, deterministicMsgId);
         } else if (raceWinner.type === 'error') {
             const sendErr = raceWinner.error;
-            console.warn('[API /send-text] First send attempt encountered error:', sendErr.message);
+            console.warn('[API /send-text] First send attempt encountered error:', sendErr?.message || sendErr);
+            const isTransientSendErr = isTransientWhatsAppError(sendErr);
             let retriedResult = null;
-            if (sendErr.message && (
-                sendErr.message.includes('closed') || 
-                sendErr.message.includes('Closed') || 
-                sendErr.message.includes('timed out') ||
-                sendErr.message.includes('Connection Lost') ||
-                sendErr.message.includes('reset') ||
-                sendErr.message.includes('Stream')
-            )) {
+            if (isTransientSendErr) {
+                // Immediately retire the dead/closed socket and start reconnecting before retrying
+                markSocketDeadAndReconnect(activeSocket, isAdminAuthorized);
                 try {
-                    await new Promise(r => setTimeout(r, 800));
+                    await new Promise(r => setTimeout(r, 1000));
                     let retrySocket = isAdminAuthorized ? getActiveAdminSocket() : null;
-                    if (!retrySocket) {
+                    if (!retrySocket || retrySocket === activeSocket) {
                         const retryMatch = await findOrLoadSession(targetSessionParam, caller).catch(() => null);
                         retrySocket = retryMatch?.session?.socket;
                     }
-                    if (isSocketOpen(retrySocket)) {
+                    if (retrySocket && retrySocket !== activeSocket && isSocketOpen(retrySocket)) {
                         console.log('[API /send-text] Retrying send with refreshed active socket...');
                         retriedResult = await sendWithTimeout(retrySocket, jid, messagePayload, { messageId: deterministicMsgId }, 15000);
                         messageDeduplicator.setCompleted(dedupKey, retriedResult, deterministicMsgId);
@@ -4574,20 +4694,16 @@ async function handleSendText(req, res) {
                 }
             }
 
-            const isTransientSendErr = Boolean(
-                sendErr?.message &&
-                /closed|timed out|etimedout|econnreset|connection|reset|not open|stream|428|515|408|hang up|destroyed|unavailable/i.test(sendErr.message)
-            );
             if (!sendResult && isTransientSendErr) {
                 const { hasValidCredentialsInDb: credOk, slotsToWake: wakeList } = await resolvePairedSlotsAndCredentials({
                     isAdminAuthorized,
                     callerUserId: caller?.userId,
                     targetSessionParam
-                }).catch(() => ({ hasValidCredentialsInDb: false, slotsToWake: [] }));
+                }).catch(() => ({ hasValidCredentialsInDb: Boolean(isAdminAuthorized && !adminManuallyDisconnected), slotsToWake: ['admin'] }));
                 if (credOk) {
                     const fallbackPhone = fromNumber || activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
                     const resolvedSession = activeSession10 || providedSession || fallbackPhone;
-                    console.warn(`[API /send-text] Transient send failure (${sendErr.message}). Auto-waking and queuing message to ${normalizedTo}.`);
+                    console.warn(`[API /send-text] Transient send failure (${sendErr?.message}). Auto-waking and queuing message to ${normalizedTo}.`);
                     wakeRequiredSessions({ isAdminAuthorized, slotsToWake: wakeList, callerUserId: caller?.userId, sessions });
                     return dispatchQueuedApiMessage({
                         res, isGroup, normalizedTo, messageText, resolvedSession, deterministicMsgId,
@@ -4614,7 +4730,7 @@ async function handleSendText(req, res) {
 
                 return res.status(502).json({
                     status: false,
-                    message: `WhatsApp message failed to deliver: ${sendErr.message}`,
+                    message: `WhatsApp message failed to deliver: ${sendErr?.message || 'Unknown error'}`,
                     data: {
                         to: normalizedTo,
                         recipientType: isGroup ? 'group' : 'user',
@@ -4643,6 +4759,54 @@ async function handleSendText(req, res) {
         return;
     } catch (error) {
         console.error('Error in /send-text API:', error);
+        if (res.headersSent) return;
+        if (isTransientWhatsAppError(error) && reqCtx.jid && reqCtx.messagePayload && (reqCtx.isAdminAuthorized || reqCtx.caller?.userId)) {
+            try {
+                if (reqCtx.activeSocket) {
+                    markSocketDeadAndReconnect(reqCtx.activeSocket, reqCtx.isAdminAuthorized);
+                }
+                const { hasValidCredentialsInDb: credOk, slotsToWake: wakeList } = await resolvePairedSlotsAndCredentials({
+                    isAdminAuthorized: reqCtx.isAdminAuthorized,
+                    callerUserId: reqCtx.caller?.userId,
+                    targetSessionParam: reqCtx.targetSessionParam
+                }).catch(() => ({ hasValidCredentialsInDb: Boolean(reqCtx.isAdminAuthorized && !adminManuallyDisconnected), slotsToWake: ['admin'] }));
+                if (credOk) {
+                    const fallbackPhone = reqCtx.fromNumber || reqCtx.activeSession10 || connectedNumber || global.__waAdminPhone || '8840457632';
+                    const resolvedSession = reqCtx.activeSession10 || reqCtx.providedSession || fallbackPhone;
+                    console.warn(`[API /send-text Outer Recovery] Caught transient error (${error.message}). Auto-waking and queuing message to ${reqCtx.normalizedTo}.`);
+                    wakeRequiredSessions({
+                        isAdminAuthorized: reqCtx.isAdminAuthorized,
+                        slotsToWake: wakeList,
+                        callerUserId: reqCtx.caller?.userId,
+                        sessions: reqCtx.sessions
+                    });
+                    return dispatchQueuedApiMessage({
+                        res,
+                        isGroup: reqCtx.isGroup,
+                        normalizedTo: reqCtx.normalizedTo,
+                        messageText: reqCtx.messageText,
+                        resolvedSession,
+                        deterministicMsgId: reqCtx.deterministicMsgId,
+                        fallbackPhone,
+                        isAdminAuthorized: reqCtx.isAdminAuthorized,
+                        slotsToWake: wakeList,
+                        callerUserId: reqCtx.caller?.userId,
+                        targetSessionParam: reqCtx.targetSessionParam,
+                        caller: reqCtx.caller,
+                        jid: reqCtx.jid,
+                        messagePayload: reqCtx.messagePayload,
+                        dedupKey: reqCtx.dedupKey,
+                        ownerUserId: reqCtx.ownerUserId,
+                        messageType: reqCtx.messageType,
+                        isGlobalAdmin: reqCtx.isGlobalAdmin,
+                        findOrLoadSession: reqCtx.findOrLoadSession,
+                        sessions: reqCtx.sessions
+                    });
+                }
+            } catch (recErr) {
+                console.error('[API /send-text Outer Recovery] Fallback warning:', recErr.message);
+            }
+        }
         return res.status(500).json({ status: false, message: `Internal Server Error: ${error.message}` });
     }
 }
@@ -4723,9 +4887,9 @@ async function startBot(forceNew = false) {
             printQRInTerminal: false,
             browser: Browsers.macOS('Chrome'),
             syncFullHistory: false,
-            keepAliveIntervalMs: 25000,
+            keepAliveIntervalMs: 15000,
             connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 25000,
             getMessage: async (key) => {
                 const all = getIncomingMessages();
                 const found = all.find(m => m.id === key?.id);
@@ -4737,6 +4901,7 @@ async function startBot(forceNew = false) {
         });
 
         newSock.__waConnecting = true;
+        newSock.__waClosed = false;
         sock = newSock;
         // Expose socket globally so auth.js can use it for OTP/signup messages
         global.__waAdminSocket = newSock;
@@ -4790,6 +4955,7 @@ async function startBot(forceNew = false) {
 
             if (connection === 'open') {
                 newSock.__waConnecting = false;
+                newSock.__waClosed = false;
                 connectionStatus = 'connected';
                 latestQR = null;
                 connectedNumber = newSock.user?.id?.split(':')[0]?.split('@')[0] || connectedNumber || CONFIG_ADMIN_PHONE;
@@ -4829,6 +4995,10 @@ async function startBot(forceNew = false) {
 
             if (connection === 'close') {
                 newSock.__waConnecting = false;
+                newSock.__waClosed = true;
+                if (sock === newSock) {
+                    sock = null;
+                }
                 const statusCode = lastDisconnect?.error instanceof Boom ? lastDisconnect.error.output?.statusCode : null;
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut;
                 const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));

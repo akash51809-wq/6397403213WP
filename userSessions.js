@@ -136,9 +136,9 @@ async function startUserSession(userId, forceNew = false) {
         auth: state,
         printQRInTerminal: false,
         browser: Browsers.macOS('Chrome'),
-        keepAliveIntervalMs: 25000,
+        keepAliveIntervalMs: 15000,
         connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 25000,
         markOnlineOnConnect: true,
         syncFullHistory: false,
         qrTimeout: 60000,
@@ -192,6 +192,7 @@ async function startUserSession(userId, forceNew = false) {
         const currentSession = sessions.get(userId);
         
         if (!currentSession) return;
+        if (currentSession.socket && currentSession.socket !== socket) return;
 
         if (qr) {
             if (String(userId || '').trim().toUpperCase() === 'ADMIN' && !String(userId || '').trim().startsWith('admin_')) {
@@ -221,6 +222,11 @@ async function startUserSession(userId, forceNew = false) {
         }
 
         if (connection === 'close') {
+            socket.__waClosed = true;
+            socket.__waConnecting = false;
+            if (currentSession.socket === socket) {
+                currentSession.socket = null;
+            }
             const statusCode = (lastDisconnect?.error instanceof Boom) ? lastDisconnect.error.output?.statusCode : null;
             const isLoggedOut = statusCode === DisconnectReason.loggedOut;
             const isQRExpired = Boolean(lastDisconnect?.error?.message?.includes('QR refs attempts ended') || String(lastDisconnect?.error).includes('QR refs attempts ended'));
@@ -277,6 +283,7 @@ async function startUserSession(userId, forceNew = false) {
         } else if (connection === 'open') {
             console.log(`[UserSession] ${userId} connected`);
             socket.__waConnecting = false;
+            socket.__waClosed = false;
             currentSession.status = 'connected';
             currentSession.qr = null;
             const rawId = socket.user?.id || '';

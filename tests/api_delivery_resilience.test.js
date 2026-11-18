@@ -101,3 +101,19 @@ test('9. resolvePairedSlotsAndCredentials ensures Universal Admin Guarantee so a
     assert.ok(fnBody.includes('Universal Admin Guarantee'), 'Must include Universal Admin Guarantee in credential resolution');
     assert.ok(fnBody.includes('!adminManuallyDisconnected'), 'Must protect connected/registered admin against false 503 errors');
 });
+
+test('10. Connection Closed & zombie socket protection prevents 500 Internal Server Error and retires dead sockets immediately', () => {
+    const { isSocketReady, isWsOpen } = require('../utils/waSocketHelper');
+
+    // Closed or closing WebSocket / __waClosed flag must report NOT ready
+    assert.equal(isSocketReady({ sendMessage: () => {}, user: { id: '918840457632@s.whatsapp.net' }, __waClosed: true }), false);
+    assert.equal(isWsOpen({ isOpen: true, isClosed: true }), false);
+    assert.equal(isWsOpen({ isOpen: true, isClosing: true }), false);
+    assert.equal(isSocketReady({ sendMessage: () => {}, user: { id: '918840457632@s.whatsapp.net' }, __waClosed: false, __waConnecting: false, ws: { isOpen: true } }), true);
+
+    // index.js must retire dead sockets on Connection Closed and recover in outer catch + Fast-Dispatch background
+    assert.ok(indexSrc.includes('function markSocketDeadAndReconnect('), 'index.js must define markSocketDeadAndReconnect helper');
+    assert.ok(indexSrc.includes('function isTransientWhatsAppError('), 'index.js must define isTransientWhatsAppError helper');
+    assert.ok(indexSrc.includes('[API /send-text Outer Recovery]'), 'handleSendText outer catch must recover Connection Closed via queue instead of 500');
+    assert.ok(indexSrc.includes('newSock.__waClosed = true'), 'startBot close handler must mark closed socket immediately');
+});
