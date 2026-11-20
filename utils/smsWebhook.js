@@ -71,7 +71,7 @@ async function processIncomingSmsWebhook(smsRecord) {
   const device = db.getDevice(smsRecord.deviceId);
   const targetUrl = (device?.webhook_url || db.getSetting('default_webhook_url') || '').trim();
   const whitelist = (device?.sender_whitelist || db.getSetting('default_sender_whitelist') || '').trim();
-  const apiKey = db.getSetting('api_key', 'ers_key_8899');
+  const apiKey = db.getSetting('api_key', '');
 
   if (!isSenderAllowed(smsRecord.sender, whitelist)) {
     return {
@@ -161,7 +161,7 @@ async function sendTestWebhook(targetUrl, apiKey) {
     throw new Error('Valid target URL is required');
   }
 
-  const keyToUse = apiKey || db.getSetting('api_key', 'ers_key_8899');
+  const keyToUse = apiKey || db.getSetting('api_key', '');
   const now = Date.now();
   const testPayload = {
     id: 999999,

@@ -3,7 +3,7 @@ const QRCode = require('qrcode');
 const os = require('os');
 const WebSocket = require('ws');
 const router = express.Router();
-const { authRequired, User, Plan } = require('./auth');
+const { authRequired, adminRequired, User, Plan } = require('./auth');
 
 const db = require('./utils/smsDb');
 const { encryptPayload, decryptPayload, formatISTDate } = require('./utils/smsCrypto');
@@ -41,16 +41,22 @@ function initSmsWebSocket(server) {
       const apiKey = parsedUrl.searchParams.get('apiKey') || req.headers['x-api-key'] || '';
       const deviceId = parsedUrl.searchParams.get('deviceId') || req.headers['x-device-id'] || 'android_phone';
 
-      console.log(`[SMS Gateway] Incoming WebSocket connection attempt from device: ${deviceId}, apiKey: ${apiKey}`);
+      console.log(`[SMS Gateway] Incoming WebSocket connection attempt from device: ${deviceId}`);
 
-      const expectedKey = db.getSetting('api_key', 'ers_key_8899');
-      if (apiKey && expectedKey && apiKey !== expectedKey && apiKey !== 'ers_key_8899') {
-        console.warn(`[SMS Gateway] Notice: Device ${deviceId} connected with key "${apiKey}" (expected "${expectedKey}") - allowing`);
+      const expectedKey = db.getSetting('api_key');
+      if (!apiKey || (expectedKey && apiKey !== expectedKey)) {
+        console.warn(`[SMS Gateway] Unauthorized WebSocket connection attempt rejected: device=${deviceId}, keyProvided=${apiKey ? '[REDACTED]' : 'NONE'}`);
+        try {
+          ws.send(JSON.stringify({ event: 'error', message: 'Unauthorized: Invalid or missing API key' }));
+        } catch (e) {}
+        ws.close(4401, 'Unauthorized: Invalid or missing API key');
+        ws.terminate();
+        return;
       }
 
       phoneSockets.set(deviceId, ws);
       db.setDeviceOnlineStatus(deviceId, true);
-      console.log(`[SMS Gateway] Mobile app connected successfully! DeviceId: ${deviceId}`);
+      console.log(`[SMS Gateway] Mobile app connected and authenticated successfully! DeviceId: ${deviceId}`);
 
       ws.on('message', async (messageText) => {
         try {
@@ -155,7 +161,7 @@ function initSmsWebSocket(server) {
 }
 
 // 1. GET SMS STATUS METRICS
-router.get('/api/sms/status', (req, res) => {
+router.get('/api/sms/status', authRequired, (req, res) => {
   try {
     const devices = db.getAllDevices();
     const totalSms = db.getTotalSmsCount ? db.getTotalSmsCount() : 0;
@@ -182,11 +188,11 @@ router.get('/api/sms/status', (req, res) => {
 });
 
 // 2. GET PAIRING QR CODE
-router.get('/api/sms/qr', async (req, res) => {
+router.get('/api/sms/qr', authRequired, async (req, res) => {
   try {
-    let apiKey = 'ers_key_8899';
+    let apiKey = '';
     try {
-      apiKey = db.getSetting('api_key', 'ers_key_8899') || 'ers_key_8899';
+      apiKey = db.getSetting('api_key') || '';
     } catch (dbErr) {
       console.warn('[SMS Gateway] getSetting notice for QR:', dbErr.message);
     }
@@ -240,7 +246,7 @@ router.get('/api/sms/qr', async (req, res) => {
 });
 
 // 3. GET CONNECTED DEVICES
-router.get('/api/sms/devices', (req, res) => {
+router.get('/api/sms/devices', authRequired, (req, res) => {
   try {
     const devices = db.getAllDevices();
     res.json({ success: true, devices });
@@ -249,9 +255,24 @@ router.get('/api/sms/devices', (req, res) => {
   }
 });
 
-// 3b. REGISTER DEVICE VIA HTTP POST
-router.post('/api/sms/devices/register', (req, res) => {
+// 3b. REGISTER DEVICE VIA HTTP POST (Requires Valid apiKey or User Token)
+router.post('/api/sms/devices/register', async (req, res) => {
   try {
+    const apiKey = req.headers['x-api-key'] || req.query.apiKey || req.body?.apiKey;
+    const expectedKey = db.getSetting('api_key');
+    let authorized = false;
+
+    if (apiKey && expectedKey && apiKey === expectedKey) {
+      authorized = true;
+    } else {
+      const user = await resolveSmsUser(req);
+      if (user) authorized = true;
+    }
+
+    if (!authorized) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Valid apiKey or authentication token required.' });
+    }
+
     const data = req.body || {};
     const devId = data.deviceId || req.headers['x-device-id'] || 'android_phone';
     db.upsertDevice({
@@ -269,7 +290,7 @@ router.post('/api/sms/devices/register', (req, res) => {
 });
 
 // 4. UPDATE DEVICE CONFIG
-router.post('/api/sms/devices/:deviceId/config', (req, res) => {
+router.post('/api/sms/devices/:deviceId/config', authRequired, adminRequired, (req, res) => {
   try {
     const { deviceId } = req.params;
     const { webhookUrl, senderWhitelist } = req.body;
@@ -281,7 +302,7 @@ router.post('/api/sms/devices/:deviceId/config', (req, res) => {
 });
 
 // 5. GET / POST SETTINGS
-router.get('/api/sms/settings', (req, res) => {
+router.get('/api/sms/settings', authRequired, adminRequired, (req, res) => {
   try {
     const settings = db.getAllSettings();
     res.json({ success: true, settings });
@@ -290,7 +311,7 @@ router.get('/api/sms/settings', (req, res) => {
   }
 });
 
-router.post('/api/sms/settings', (req, res) => {
+router.post('/api/sms/settings', authRequired, adminRequired, (req, res) => {
   try {
     const { apiKey, defaultWebhookUrl, defaultSenderWhitelist, retentionHours } = req.body;
     if (apiKey) db.setSetting('api_key', apiKey.trim());
@@ -305,7 +326,7 @@ router.post('/api/sms/settings', (req, res) => {
 });
 
 // 6. TEST WEBHOOK
-router.post('/api/sms/webhook/test', async (req, res) => {
+router.post('/api/sms/webhook/test', authRequired, async (req, res) => {
   try {
     const { targetUrl, apiKey } = req.body;
     const url = targetUrl || db.getSetting('default_webhook_url');
@@ -321,7 +342,7 @@ router.post('/api/sms/webhook/test', async (req, res) => {
 });
 
 // 7. GET INCOMING SMS MESSAGES
-router.get('/api/sms/messages', (req, res) => {
+router.get('/api/sms/messages', authRequired, (req, res) => {
   try {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
     const offset = Math.max(0, Number(req.query.offset || 0));
@@ -336,7 +357,7 @@ router.get('/api/sms/messages', (req, res) => {
 });
 
 // 8. GET WEBHOOK DELIVERIES
-router.get('/api/sms/webhook-deliveries', (req, res) => {
+router.get('/api/sms/webhook-deliveries', authRequired, (req, res) => {
   try {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
     const offset = Math.max(0, Number(req.query.offset || 0));
@@ -352,11 +373,24 @@ router.get('/api/sms/webhook-deliveries', (req, res) => {
 // 9. INCOMING SMS ENDPOINTS (SUPPORTS /inbox, /api/inbox, /api/sms/inbox, /api/sms/incoming)
 router.post(['/inbox', '/api/inbox', '/api/sms/inbox', '/api/sms/incoming'], async (req, res) => {
   try {
+    const expectedApiKey = db.getSetting('api_key') || '';
+    const providedApiKey = req.headers['x-api-key'] || req.query.apiKey || req.query.api_key || req.body?.apiKey;
+
     const rawItems = Array.isArray(req.body) 
       ? req.body 
       : (Array.isArray(req.body?.messages) ? req.body.messages : [req.body]);
 
-    const apiKey = db.getSetting('api_key', 'ers_key_8899');
+    const hasEncryptedPayload = rawItems.some(i => i && i.payload);
+    if (!hasEncryptedPayload && expectedApiKey) {
+      if (!providedApiKey || providedApiKey !== expectedApiKey) {
+        const user = await resolveSmsUser(req);
+        if (!user) {
+          return res.status(401).json({ success: false, message: 'Unauthorized: Valid apiKey or authentication token required.' });
+        }
+      }
+    }
+
+    const apiKey = expectedApiKey;
     const savedRecords = [];
 
     for (const item of rawItems) {
@@ -456,8 +490,8 @@ async function resolveSmsUser(req) {
   }
 
   // Support Master / Gateway API Key
-  const expectedApiKey = db.getSetting('api_key', 'ers_key_8899');
-  if (apiKey && apiKey === expectedApiKey) {
+  const expectedApiKey = db.getSetting('api_key') || '';
+  if (apiKey && expectedApiKey && apiKey === expectedApiKey) {
     return { userId: 'ADMIN', role: 'admin', username: 'gateway_admin', smsPlan: 'SMS Business Pro' };
   }
 
@@ -629,7 +663,7 @@ async function handleSendSms(req, res) {
 router.get(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
 router.post(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
 
-router.get('/api/sms/outbox', (req, res) => {
+router.get('/api/sms/outbox', authRequired, (req, res) => {
   res.json({ success: true, outbox: outboxMessages });
 });
 

@@ -662,9 +662,24 @@ async function getUserPlanFeatures(user) {
 
   const isDemo = planName.toLowerCase().includes('demo');
 
+  // FAIL-CLOSED: If custom plan not found in database and not a standard demo fallback, deny access
+  if (!planDoc && !isDemo) {
+    return {
+      active: false,
+      isExpired: true,
+      apiAccess: false,
+      webAccess: false,
+      bulkMsg: false,
+      groupOption: false,
+      scheduleMsg: false,
+      dailyLimit: 0,
+      rawDailyLimit: '0/Day'
+    };
+  }
+
   // Parse numeric daily limit
   let dailyLimitNum = isDemo ? 100 : 500;
-  const rawLimit = planDoc?.dailyLimit || (isDemo ? '100/Day' : '500/Day');
+  const rawLimit = planDoc?.dailyLimit || (isDemo ? '100/Day' : '0/Day');
   if (typeof rawLimit === 'number') {
     dailyLimitNum = rawLimit;
   } else if (typeof rawLimit === 'string') {
@@ -675,11 +690,11 @@ async function getUserPlanFeatures(user) {
   return {
     active: true,
     isExpired: false,
-    apiAccess: planDoc ? planDoc.apiAccess !== false : true,
+    apiAccess: planDoc ? planDoc.apiAccess !== false : false,
     webAccess: planDoc ? planDoc.webAccess !== false : true,
-    bulkMsg: planDoc ? Boolean(planDoc.bulkMsg) : (isDemo ? false : true),
-    groupOption: planDoc ? Boolean(planDoc.groupOption) : (isDemo ? false : true),
-    scheduleMsg: planDoc ? Boolean(planDoc.scheduleMsg) : (isDemo ? false : true),
+    bulkMsg: planDoc ? Boolean(planDoc.bulkMsg) : false,
+    groupOption: planDoc ? Boolean(planDoc.groupOption) : false,
+    scheduleMsg: planDoc ? Boolean(planDoc.scheduleMsg) : false,
     dailyLimit: dailyLimitNum,
     rawDailyLimit: rawLimit
   };
@@ -689,17 +704,18 @@ const userQuotaLocks = new Map();
 
 async function withUserQuotaLock(userId, fn) {
   const normalizedId = String(userId || 'global');
-  const currentLock = userQuotaLocks.get(normalizedId) || Promise.resolve();
+  const prevLock = userQuotaLocks.get(normalizedId) || Promise.resolve();
   let release;
-  const nextLock = new Promise(resolve => { release = resolve; });
-  userQuotaLocks.set(normalizedId, currentLock.then(() => nextLock).catch(() => nextLock));
+  const gate = new Promise(resolve => { release = resolve; });
+  const currentLock = prevLock.then(() => gate, () => gate);
+  userQuotaLocks.set(normalizedId, currentLock);
 
   try {
-    await currentLock;
+    await prevLock;
     return await fn();
   } finally {
     release();
-    if (userQuotaLocks.get(normalizedId) === nextLock) {
+    if (userQuotaLocks.get(normalizedId) === currentLock) {
       userQuotaLocks.delete(normalizedId);
     }
   }
@@ -1483,12 +1499,6 @@ router.post('/api/admin/users/:userId/send-password', authRequired, adminRequire
       return res.status(400).json({ success: false, message: 'यूजर का कोई वैध 10-अंकीय मोबाइल नंबर नहीं मिला।' });
     }
 
-    const newPassword = makePassword();
-    user.passwordHash = await hashPassword(newPassword);
-    user.sessions = []; // Revoke all old sessions
-    user.updatedAt = new Date();
-    await user.save();
-
     const sender = getLiveAdminWhatsAppSender();
     if (!sender) {
       return res.status(503).json({ 
@@ -1497,14 +1507,24 @@ router.post('/api/admin/users/:userId/send-password', authRequired, adminRequire
       });
     }
 
+    const newPassword = makePassword();
+
+    // Send WhatsApp notification FIRST. If dispatch fails, user's current password & sessions remain intact (preventing lockout).
     await sender(
       clean10,
       `*WA Control Center - Password Reset* 🔐\n\nUser ID: *${user.userId}*\nLogin ID: *${user.username || clean10}*\nNew Password: *${newPassword}*\n\nकृपया पोर्टल में लॉगिन करें और Settings से पासवर्ड बदलें।`
     );
 
+    // Delivery succeeded: now safely commit new password hash and revoke old sessions
+    user.passwordHash = await hashPassword(newPassword);
+    user.sessions = []; // Revoke all old sessions
+    user.updatedAt = new Date();
+    await user.save();
+
     res.json({ 
       success: true, 
-      message: `नया पासवर्ड यूजर (+91 ${clean10}) के WhatsApp पर सफलतापूर्वक भेज दिया गया!` 
+      message: `नया पासवर्ड यूजर (+91 ${clean10}) के WhatsApp पर सफलतापूर्वक भेज दिया गया!`,
+      newPassword: newPassword
     });
   } catch (err) {
     console.error('Admin send password error:', err);
@@ -4174,6 +4194,8 @@ module.exports = {
   recordAdminWhatsAppSession, 
   getUserPlanFeatures,
   checkAndIncrementDailyUsage,
+  withUserQuotaLock,
+  userQuotaLocks,
   sanitizeUser,
   getTodayDateIST,
   getDemoSettings,

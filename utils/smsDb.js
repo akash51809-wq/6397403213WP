@@ -70,7 +70,6 @@ function initSchema() {
 
   // Default Settings Seed
   const defaultSettings = [
-    { key: 'api_key', value: 'ers_key_8899' },
     { key: 'default_webhook_url', value: '' },
     { key: 'default_sender_whitelist', value: '' },
     { key: 'plan_status', value: 'ACTIVE' },
@@ -80,6 +79,19 @@ function initSchema() {
   const stmt = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   for (const s of defaultSettings) {
     stmt.run(s.key, s.value);
+  }
+
+  // Ensure cryptographically secure random API key if not configured or using default
+  try {
+    const crypto = require('crypto');
+    const existingKey = db.prepare('SELECT value FROM settings WHERE key = ?').get('api_key');
+    if (!existingKey || !existingKey.value || existingKey.value === 'ers_key_8899') {
+      const generatedKey = 'ers_' + crypto.randomBytes(16).toString('hex');
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('api_key', generatedKey);
+      console.log('[SMS Gateway] Secure random API key initialized in settings.');
+    }
+  } catch (keyErr) {
+    console.warn('[SMS Gateway] Notice on secure key init:', keyErr.message);
   }
 }
 
@@ -188,7 +200,7 @@ function getAllSettings() {
     return obj;
   } catch (err) {
     try { initSchema(); } catch (e) {}
-    return { api_key: 'ers_key_8899' };
+    return { api_key: getSetting('api_key', '') };
   }
 }
 

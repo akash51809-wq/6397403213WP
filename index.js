@@ -1697,23 +1697,15 @@ app.post('/api/incoming/request-history', authRequired, async (req, res) => {
         const userId = req.user?.userId;
         const isAdmin = req.user?.role === 'admin';
 
-        if (isAdmin) {
-            if (!sock) return res.status(400).json({ success: false, message: 'Admin WhatsApp not connected' });
-            res.json({ success: true, message: 'History sync started. Reconnecting... wait 5-10 seconds then refresh.' });
-            setTimeout(() => {
-                try { sock.end(new Error('history-sync-request')); } catch (e) {}
-            }, 300);
-        } else {
-            const { getUserSession } = require('./userSessions');
-            const session = getUserSession(userId);
-            if (!session || session.status !== 'connected') {
-                return res.status(400).json({ success: false, message: 'Your WhatsApp is not connected' });
-            }
-            res.json({ success: true, message: 'History sync started. Reconnecting... wait 5-10 seconds then refresh.' });
-            setTimeout(() => {
-                try { session.socket.end(new Error('history-sync-request')); } catch (e) {}
-            }, 300);
-        }
+        // Query database messages instead of disconnecting live socket (preventing 503 drops & zombie states)
+        const messages = await getIncomingMessages(userId, isAdmin);
+
+        res.json({
+            success: true,
+            message: 'WhatsApp history synced cleanly from database.',
+            count: messages.length,
+            messages: messages.slice(0, 50)
+        });
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
@@ -2369,6 +2361,7 @@ app.post('/api/contacts', authRequired, async (req, res) => {
     try {
         const { query: dbQuery } = require('./db');
         const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
         const { id, name, mobile, group, type, status, email } = req.body;
 
         if (!name || !name.trim()) {
@@ -2377,6 +2370,20 @@ app.post('/api/contacts', authRequired, async (req, res) => {
         const cleanPhone = String(mobile || '').replace(/\D/g, '').slice(-10);
         if (!cleanPhone) {
             return res.status(400).json({ success: false, message: 'Valid 10-digit mobile number is required' });
+        }
+
+        // Cross-Tenant / IDOR Protection: If updating existing contact by ID, ensure user owns it
+        if (id && !isAdmin) {
+            const existingRes = await dbQuery(`SELECT "ownerUserId" FROM contacts WHERE "id" = $1`, [id]);
+            if (existingRes.rows.length > 0) {
+                const owner = existingRes.rows[0].ownerUserId;
+                if (owner && owner !== userId) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'Forbidden: You do not have permission to modify another user\'s contact.'
+                    });
+                }
+            }
         }
 
         const contactId = id || `cnt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -2393,7 +2400,8 @@ app.post('/api/contacts', authRequired, async (req, res) => {
                 "status" = EXCLUDED."status",
                 "email" = EXCLUDED."email",
                 "updatedAt" = NOW()
-        `, [contactId, name.trim(), cleanPhone, groupName, userId, type || 'Customer', status || 'Active', email || '']);
+            WHERE contacts."ownerUserId" = EXCLUDED."ownerUserId" OR contacts."ownerUserId" IS NULL OR $9 = true
+        `, [contactId, name.trim(), cleanPhone, groupName, userId, type || 'Customer', status || 'Active', email || '', isAdmin]);
 
         // Auto ensure group exists in contact_groups
         await dbQuery(`
@@ -2508,11 +2516,25 @@ app.delete('/api/contact-groups/:name', authRequired, async (req, res) => {
 });
 
 /* =========================================================
-   SCHEDULED MESSAGES APIS
+   SCHEDULED MESSAGES APIS & EXECUTION ENGINE
 ========================================================= */
 
 app.post('/api/user/schedule', authRequired, async (req, res) => {
     try {
+        const features = await getUserPlanFeatures(req.user);
+        if (features.isExpired) {
+            return res.status(403).json({
+                success: false,
+                message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
+            });
+        }
+        if (!features.scheduleMsg && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Scheduled messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+            });
+        }
+
         const { query: dbQuery } = require('./db');
         const userId = req.user.userId;
         const { recipients, message, scheduledDate, scheduledTime, session, attachment } = req.body;
@@ -2570,6 +2592,201 @@ app.get('/api/user/schedule', authRequired, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
+app.delete('/api/user/schedule/:id', authRequired, async (req, res) => {
+    try {
+        const { query: dbQuery } = require('./db');
+        const userId = req.user.userId;
+        const isAdmin = req.user.role === 'admin';
+        const scheduleId = req.params.id;
+
+        const checkSql = isAdmin
+            ? `SELECT * FROM scheduled_messages WHERE "id" = $1`
+            : `SELECT * FROM scheduled_messages WHERE "id" = $1 AND "ownerUserId" = $2`;
+        const checkRes = await dbQuery(checkSql, isAdmin ? [scheduleId] : [scheduleId, userId]);
+        if (!checkRes?.rows || checkRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Scheduled message not found or unauthorized' });
+        }
+
+        await dbQuery(`DELETE FROM scheduled_messages WHERE "id" = $1`, [scheduleId]);
+        res.json({ success: true, message: 'Scheduled message cancelled and deleted successfully' });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+let isProcessingScheduledMessages = false;
+
+async function processScheduledMessages() {
+    if (isProcessingScheduledMessages) return;
+    isProcessingScheduledMessages = true;
+
+    try {
+        const { query: dbQuery } = require('./db');
+        const dueRes = await dbQuery(`
+            SELECT * FROM scheduled_messages 
+            WHERE "status" = 'pending' AND "scheduledAt" <= NOW() 
+            ORDER BY "scheduledAt" ASC 
+            LIMIT 5
+        `);
+
+        if (!dueRes?.rows || dueRes.rows.length === 0) {
+            return;
+        }
+
+        for (const item of dueRes.rows) {
+            try {
+                await dbQuery(`UPDATE scheduled_messages SET "status" = 'processing' WHERE "id" = $1`, [item.id]);
+
+                const ownerUserId = item.ownerUserId;
+                const isAdmin = String(ownerUserId).toUpperCase() === 'ADMIN';
+                let userObj = null;
+
+                if (isAdmin) {
+                    userObj = { userId: 'ADMIN', role: 'admin' };
+                } else {
+                    userObj = await User.findOne({ userId: ownerUserId });
+                }
+
+                if (!userObj) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    continue;
+                }
+
+                const features = await getUserPlanFeatures(userObj);
+                if (features.isExpired || (!features.scheduleMsg && !isAdmin)) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    continue;
+                }
+
+                const rawList = String(item.recipients || '').split(/[\n,;]+/);
+                const validNumbers = [];
+                for (const r of rawList) {
+                    const norm = normalizeIndianNumber(r);
+                    if (norm) validNumbers.push(norm);
+                }
+
+                if (validNumbers.length === 0) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    continue;
+                }
+
+                const { findOrLoadSession } = require('./userSessions');
+                let activeSocket = null;
+                let fromNumber = null;
+
+                if (isAdmin) {
+                    activeSocket = getActiveAdminSocket();
+                    fromNumber = activeSocket?.user?.id ? String(activeSocket.user.id).split(':')[0].replace(/\D/g, '') : (connectedNumber || 'Admin');
+                } else {
+                    const sessionMatch = await findOrLoadSession(item.session || null, userObj);
+                    if (sessionMatch && sessionMatch.session?.status === 'connected' && sessionMatch.session?.socket && Boolean(sessionMatch.session.socket.user?.id)) {
+                        activeSocket = sessionMatch.session.socket;
+                        fromNumber = sessionMatch.session.connectedNumber || sessionMatch.userId;
+                    }
+                }
+
+                if (!activeSocket || !activeSocket.user?.id) {
+                    const ageMs = Date.now() - new Date(item.scheduledAt).getTime();
+                    if (ageMs < 2 * 60 * 60 * 1000) {
+                        await dbQuery(`UPDATE scheduled_messages SET "status" = 'pending' WHERE "id" = $1`, [item.id]);
+                    } else {
+                        await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    }
+                    continue;
+                }
+
+                const quotaCheck = await checkAndIncrementDailyUsage(userObj, validNumbers.length);
+                if (!quotaCheck.allowed) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    continue;
+                }
+
+                let payload = {};
+                let attachment = null;
+                if (item.attachment) {
+                    attachment = typeof item.attachment === 'string' ? JSON.parse(item.attachment) : item.attachment;
+                }
+                if (attachment && attachment.data) {
+                    const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+                    const validation = validateAndProcessMediaUpload(attachment.data, {
+                        claimedMimeType: attachment.type,
+                        claimedFileName: attachment.name,
+                        prefix: `sched_${ownerUserId}`
+                    });
+                    if (validation.valid) {
+                        const buffer = validation.buffer;
+                        const mimeType = validation.mimeType;
+                        const fileName = validation.originalName || validation.safeFilename;
+                        if (mimeType.startsWith('image/')) {
+                            payload = { image: buffer, caption: item.message || undefined, mimetype: mimeType };
+                        } else if (mimeType.startsWith('video/')) {
+                            payload = { video: buffer, caption: item.message || undefined, mimetype: mimeType };
+                        } else if (mimeType.startsWith('audio/')) {
+                            payload = { audio: buffer, mimetype: mimeType, ptt: false };
+                        } else {
+                            payload = { document: buffer, fileName: fileName, caption: item.message || undefined, mimetype: mimeType };
+                        }
+                    } else {
+                        payload = { text: item.message || '' };
+                    }
+                } else {
+                    payload = { text: item.message || '' };
+                }
+
+                let deliveredCount = 0;
+                for (const num of validNumbers) {
+                    try {
+                        const jid = `${num}@s.whatsapp.net`;
+                        const resMsg = await activeSocket.sendMessage(jid, payload);
+                        const msgId = resMsg?.key?.id || `sched_m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+                        deliveredCount++;
+
+                        appendMessageReport({
+                            id: msgId,
+                            date: new Date().toISOString(),
+                            ownerUserId: ownerUserId,
+                            from: fromNumber || String(userObj.mobile || 'User'),
+                            to: num,
+                            message: item.message || (attachment?.name ? `[${attachment.name}]` : '[Attachment]'),
+                            status: 'sent',
+                            session: fromNumber || 'default',
+                            type: attachment ? (attachment.type?.split('/')[0] || 'media') : 'text',
+                            source: 'schedule'
+                        });
+                    } catch (sendErr) {
+                        console.warn(`[Scheduler] Failed sending scheduled message to ${num}:`, sendErr.message);
+                    }
+                    if (validNumbers.length > 1) {
+                        await new Promise(r => setTimeout(r, 1200));
+                    }
+                }
+
+                await dbQuery(`
+                    UPDATE scheduled_messages 
+                    SET "status" = 'sent', "sentAt" = NOW() 
+                    WHERE "id" = $1
+                `, [item.id]);
+
+                console.log(`[Scheduler] Completed scheduled message #${item.id} to ${deliveredCount}/${validNumbers.length} recipients`);
+            } catch (jobErr) {
+                console.error(`[Scheduler] Error processing scheduled message ${item.id}:`, jobErr);
+                await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]).catch(() => {});
+            }
+        }
+    } catch (schedErr) {
+        console.error('[Scheduler] Engine poll notice:', schedErr.message);
+    } finally {
+        isProcessingScheduledMessages = false;
+    }
+}
+
+const scheduledMessagesTimer = setInterval(() => {
+    processScheduledMessages().catch(err => {
+        console.error('[Scheduler] Interval error:', err.message);
+    });
+}, 25000);
+if (typeof scheduledMessagesTimer?.unref === 'function') scheduledMessagesTimer.unref();
 
 /* =========================================================
    WHATSAPP LIST
@@ -2717,6 +2934,12 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
                 message: 'आपका सब्सक्रिप्शन प्लान समाप्त हो चुका है। कृपया प्लान रिन्यू या अपग्रेड करें।'
             });
         }
+        if (!features.webAccess && req.user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Web messaging आपके वर्तमान प्लान में उपलब्ध नहीं है। कृपया प्लान अपग्रेड करें।'
+            });
+        }
         if (!features.groupOption) {
             return res.status(403).json({
                 success: false,
@@ -2725,6 +2948,30 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
         }
 
         const { groupIds, message, session, attachment } = req.body;
+
+        if (!Array.isArray(groupIds) || groupIds.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'कम से कम एक group चुनें' 
+            });
+        }
+
+        const maxGroupsAllowed = req.user.role === 'admin' ? 100 : 25;
+        if (groupIds.length > maxGroupsAllowed) {
+            return res.status(400).json({
+                success: false,
+                message: `सुरक्षा सीमा: एक बार में अधिकतम ${maxGroupsAllowed} ग्रुप्स पर ही मैसेज भेजा जा सकता है।`
+            });
+        }
+
+        // Daily plan limit enforcement for group messaging
+        const quotaCheck = await checkAndIncrementDailyUsage(req.user, groupIds.length);
+        if (!quotaCheck.allowed) {
+            return res.status(403).json({
+                success: false,
+                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
+            });
+        }
 
         const { findOrLoadSession } = require('./userSessions');
         const match = await findOrLoadSession(session || null, req.user);
@@ -2743,13 +2990,6 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
             return res.status(400).json({ 
                 success: false, 
                 message: 'WhatsApp कनेक्टेड नहीं है। कृपया पहले Dashboard से QR कोड स्कैन करें।' 
-            });
-        }
-
-        if (!Array.isArray(groupIds) || groupIds.length === 0) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'कम से कम एक group चुनें' 
             });
         }
 
@@ -3127,16 +3367,7 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
             });
         }
 
-        // Daily plan limit enforcement
-        const quotaCheck = await checkAndIncrementDailyUsage(req.user, validNumbers.length);
-        if (!quotaCheck.allowed) {
-            return res.status(403).json({
-                success: false,
-                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
-            });
-        }
-
-        // Anti-spam campaign limit check for standard users
+        // Anti-spam campaign limit check for standard users (validate BEFORE deducting quota)
         const maxAllowed = req.user.role === 'admin' ? 1000 : 50;
         if (validNumbers.length > maxAllowed) {
             return res.status(400).json({
@@ -3145,7 +3376,7 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
             });
         }
 
-        // Queue RAM / DoS Protection Check
+        // Queue RAM / DoS Protection Check (validate BEFORE deducting quota)
         const uId = req.user.userId;
         const currentUQueue = userQueues.get(uId) || [];
         const queuedRecipientsCount = currentUQueue.reduce((acc, j) => acc + (j.numbers?.length || 0), 0);
@@ -3166,6 +3397,15 @@ app.post('/api/send-message', authRequired, attachmentBodyParser, async (req, re
             return res.status(429).json({
                 success: false,
                 message: `आपकी मैसेज कतार (Queue) भर चुकी है (अधिकतम ${MAX_USER_QUEUED_RECIPIENTS} संदेश)। कृपया पिछले संदेश पूरे होने की प्रतीक्षा करें।`
+            });
+        }
+
+        // Daily plan limit enforcement (deduct only after all acceptance validations pass)
+        const quotaCheck = await checkAndIncrementDailyUsage(req.user, validNumbers.length);
+        if (!quotaCheck.allowed) {
+            return res.status(403).json({
+                success: false,
+                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
             });
         }
 
@@ -5472,10 +5712,12 @@ async function handleMessageStatusUpdates(updates, ownerUserId) {
    START SERVER
 ========================================================= */
 
-app.listen(PORT, () => {
-    console.log(`API server running on http://localhost:${PORT}`);
-    startBot();
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`API server running on http://localhost:${PORT}`);
+        startBot();
+    });
+}
 
 // Admin Watchdog: Ensure Admin WhatsApp socket remains 24/7 active
 const adminWatchdog = setInterval(async () => {
@@ -5519,5 +5761,6 @@ module.exports = {
     clearAdminWhatsAppCredentials,
     getLatestQR: () => latestQR,
     getConnectionStatus: () => connectionStatus,
-    getActiveAdminSocket
+    getActiveAdminSocket,
+    processScheduledMessages
 };
