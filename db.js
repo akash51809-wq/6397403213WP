@@ -458,6 +458,12 @@ async function initTables(pool) {
     );`,
     `CREATE INDEX IF NOT EXISTS idx_sched_owner ON scheduled_messages("ownerUserId");`,
     `CREATE INDEX IF NOT EXISTS idx_sched_time ON scheduled_messages("scheduledAt", "status");`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "processingStartedAt" TIMESTAMPTZ;`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "retryCount" INT DEFAULT 0;`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "deliveredCount" INT DEFAULT 0;`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "failedCount" INT DEFAULT 0;`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "error" TEXT;`,
+    `ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS "recipientResults" JSONB;`,
 
     // 16. sms_messages (Persistent incoming SMS gateway messages)
     `CREATE TABLE IF NOT EXISTS sms_messages (
@@ -471,8 +477,10 @@ async function initTables(pool) {
       "webhook_status" VARCHAR(50) DEFAULT 'DELIVERED',
       "created_at" BIGINT
     );`,
+    `ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS "owner_user_id" VARCHAR(100) DEFAULT 'ADMIN';`,
     `CREATE INDEX IF NOT EXISTS idx_sms_received_ts ON sms_messages("received_timestamp");`,
     `CREATE INDEX IF NOT EXISTS idx_sms_sender ON sms_messages("sender");`,
+    `CREATE INDEX IF NOT EXISTS idx_sms_messages_owner ON sms_messages("owner_user_id");`,
 
     // 17. sms_devices (Android gateway devices)
     `CREATE TABLE IF NOT EXISTS sms_devices (
@@ -487,6 +495,12 @@ async function initTables(pool) {
       "last_seen_at" BIGINT,
       "created_at" BIGINT
     );`,
+    `ALTER TABLE sms_devices ADD COLUMN IF NOT EXISTS "owner_user_id" VARCHAR(100) DEFAULT 'ADMIN';`,
+    `ALTER TABLE sms_devices ADD COLUMN IF NOT EXISTS "device_token" VARCHAR(255);`,
+    `CREATE INDEX IF NOT EXISTS idx_sms_devices_owner ON sms_devices("owner_user_id");`,
+
+    // Legacy contacts safe assignment to ADMIN to prevent cross-tenant hijacking
+    `UPDATE contacts SET "ownerUserId" = 'ADMIN' WHERE "ownerUserId" IS NULL;`,
 
     // 18. ezytm_accounts (Plan API / EzyTM credentials rotation pool)
     `CREATE TABLE IF NOT EXISTS ezytm_accounts (

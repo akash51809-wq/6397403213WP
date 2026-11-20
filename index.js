@@ -2377,7 +2377,7 @@ app.post('/api/contacts', authRequired, async (req, res) => {
             const existingRes = await dbQuery(`SELECT "ownerUserId" FROM contacts WHERE "id" = $1`, [id]);
             if (existingRes.rows.length > 0) {
                 const owner = existingRes.rows[0].ownerUserId;
-                if (owner && owner !== userId) {
+                if (!owner || owner !== userId) {
                     return res.status(403).json({
                         success: false,
                         message: 'Forbidden: You do not have permission to modify another user\'s contact.'
@@ -2400,7 +2400,7 @@ app.post('/api/contacts', authRequired, async (req, res) => {
                 "status" = EXCLUDED."status",
                 "email" = EXCLUDED."email",
                 "updatedAt" = NOW()
-            WHERE contacts."ownerUserId" = EXCLUDED."ownerUserId" OR contacts."ownerUserId" IS NULL OR $9 = true
+            WHERE contacts."ownerUserId" = EXCLUDED."ownerUserId" OR $9 = true
         `, [contactId, name.trim(), cleanPhone, groupName, userId, type || 'Customer', status || 'Active', email || '', isAdmin]);
 
         // Auto ensure group exists in contact_groups
@@ -2439,7 +2439,7 @@ app.delete('/api/contacts/:id', authRequired, async (req, res) => {
         if (isAdmin) {
             await dbQuery(`DELETE FROM contacts WHERE "id" = $1`, [contactId]);
         } else {
-            await dbQuery(`DELETE FROM contacts WHERE "id" = $1 AND ("ownerUserId" = $2 OR "ownerUserId" IS NULL)`, [contactId, userId]);
+            await dbQuery(`DELETE FROM contacts WHERE "id" = $1 AND "ownerUserId" = $2`, [contactId, userId]);
         }
 
         res.json({ success: true, message: 'Contact deleted' });
@@ -2456,7 +2456,7 @@ app.get('/api/contact-groups', authRequired, async (req, res) => {
 
         const sql = isAdmin
             ? `SELECT "group", COUNT(*) as count FROM contacts WHERE "group" IS NOT NULL AND "group" != '' GROUP BY "group" ORDER BY "group" ASC`
-            : `SELECT "group", COUNT(*) as count FROM contacts WHERE ("ownerUserId" = $1 OR "ownerUserId" IS NULL) AND "group" IS NOT NULL AND "group" != '' GROUP BY "group" ORDER BY "group" ASC`;
+            : `SELECT "group", COUNT(*) as count FROM contacts WHERE "ownerUserId" = $1 AND "group" IS NOT NULL AND "group" != '' GROUP BY "group" ORDER BY "group" ASC`;
         const result = await dbQuery(sql, isAdmin ? [] : [userId]);
 
         const groupsList = result.rows.map(r => ({
@@ -2551,6 +2551,39 @@ app.post('/api/user/schedule', authRequired, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid schedule date or time format' });
         }
 
+        // Deduplicate recipients
+        const rawList = String(recipients || '').split(/[\n,;]+/);
+        const seen = new Set();
+        const validRecipients = [];
+        for (const r of rawList) {
+            const norm = normalizeIndianNumber(r);
+            if (norm && !seen.has(norm)) {
+                seen.add(norm);
+                validRecipients.push(norm);
+            }
+        }
+        if (validRecipients.length === 0) {
+            return res.status(400).json({ success: false, message: 'कम से कम एक मान्य 10-अंकीय मोबाइल नंबर (Recipient) आवश्यक है।' });
+        }
+
+        // Validate attachment upfront if provided
+        if (attachment) {
+            if (!attachment.data) {
+                return res.status(400).json({ success: false, message: 'अमान्य अटैचमेंट: attachment data अनुपलब्ध है।' });
+            }
+            const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
+            const validation = validateAndProcessMediaUpload(attachment.data, {
+                claimedMimeType: attachment.type,
+                claimedFileName: attachment.name,
+                prefix: `sched_${userId}`
+            });
+            if (!validation.valid) {
+                return res.status(400).json({ success: false, message: validation.error || 'अमान्य अटैचमेंट फ़ाइल।' });
+            }
+        } else if (!message || !message.trim()) {
+            return res.status(400).json({ success: false, message: 'Message text या attachment आवश्यक है।' });
+        }
+
         const scheduleId = `sched_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         await dbQuery(`
             INSERT INTO scheduled_messages ("id", "ownerUserId", "recipients", "message", "scheduledAt", "status", "session", "attachment", "createdAt")
@@ -2558,7 +2591,7 @@ app.post('/api/user/schedule', authRequired, async (req, res) => {
         `, [
             scheduleId,
             userId,
-            recipients.trim(),
+            validRecipients.join(','),
             message || '',
             scheduledAt.toISOString(),
             session || '',
@@ -2568,7 +2601,8 @@ app.post('/api/user/schedule', authRequired, async (req, res) => {
         res.json({
             success: true,
             message: 'Message scheduled successfully!',
-            scheduleId
+            scheduleId,
+            recipientCount: validRecipients.length
         });
     } catch (e) {
         console.error('[Schedule] Error saving schedule:', e);
@@ -2623,21 +2657,63 @@ async function processScheduledMessages() {
 
     try {
         const { query: dbQuery } = require('./db');
-        const dueRes = await dbQuery(`
-            SELECT * FROM scheduled_messages 
-            WHERE "status" = 'pending' AND "scheduledAt" <= NOW() 
-            ORDER BY "scheduledAt" ASC 
-            LIMIT 5
-        `);
+        const { refundDailyUsage } = require('./auth');
 
-        if (!dueRes?.rows || dueRes.rows.length === 0) {
+        // 1. Stale job recovery (jobs stuck in processing for > 10 minutes)
+        try {
+            await dbQuery(`
+                UPDATE scheduled_messages
+                SET "status" = CASE WHEN COALESCE("retryCount", 0) < 3 THEN 'pending' ELSE 'failed' END,
+                    "retryCount" = COALESCE("retryCount", 0) + 1,
+                    "error" = CASE WHEN COALESCE("retryCount", 0) >= 3 THEN 'Max retries exceeded after worker timeout' ELSE 'Recovered from stuck processing' END
+                WHERE "status" = 'processing'
+                  AND ("processingStartedAt" IS NULL OR "processingStartedAt" < NOW() - INTERVAL '10 minutes')
+            `);
+        } catch (recoverErr) {
+            console.warn('[Scheduler] Stale job recovery notice:', recoverErr.message);
+        }
+
+        // 2. Concurrency-safe atomic job claim using CTE FOR UPDATE SKIP LOCKED
+        let claimedJobs = [];
+        try {
+            const claimRes = await dbQuery(`
+                WITH next_jobs AS (
+                    SELECT "id" FROM scheduled_messages
+                    WHERE "status" = 'pending' AND "scheduledAt" <= NOW()
+                    ORDER BY "scheduledAt" ASC
+                    LIMIT 5
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE scheduled_messages
+                SET "status" = 'processing', "processingStartedAt" = NOW()
+                WHERE "id" IN (SELECT "id" FROM next_jobs)
+                RETURNING *;
+            `);
+            if (claimRes?.rows && claimRes.rows.length > 0) {
+                claimedJobs = claimRes.rows;
+            }
+        } catch (cteErr) {
+            // Fallback for mock or SQLite environments
+            const fallbackRes = await dbQuery(`
+                SELECT * FROM scheduled_messages 
+                WHERE "status" = 'pending' AND "scheduledAt" <= NOW() 
+                ORDER BY "scheduledAt" ASC 
+                LIMIT 5
+            `);
+            if (fallbackRes?.rows && fallbackRes.rows.length > 0) {
+                for (const row of fallbackRes.rows) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'processing', "processingStartedAt" = NOW() WHERE "id" = $1 AND "status" = 'pending'`, [row.id]);
+                    claimedJobs.push(row);
+                }
+            }
+        }
+
+        if (claimedJobs.length === 0) {
             return;
         }
 
-        for (const item of dueRes.rows) {
+        for (const item of claimedJobs) {
             try {
-                await dbQuery(`UPDATE scheduled_messages SET "status" = 'processing' WHERE "id" = $1`, [item.id]);
-
                 const ownerUserId = item.ownerUserId;
                 const isAdmin = String(ownerUserId).toUpperCase() === 'ADMIN';
                 let userObj = null;
@@ -2649,25 +2725,30 @@ async function processScheduledMessages() {
                 }
 
                 if (!userObj) {
-                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = 'Owner user not found' WHERE "id" = $1`, [item.id]);
                     continue;
                 }
 
                 const features = await getUserPlanFeatures(userObj);
                 if (features.isExpired || (!features.scheduleMsg && !isAdmin)) {
-                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = 'Plan expired or scheduled messaging not allowed' WHERE "id" = $1`, [item.id]);
                     continue;
                 }
 
+                // Deduplicate recipients
                 const rawList = String(item.recipients || '').split(/[\n,;]+/);
+                const seenRecipients = new Set();
                 const validNumbers = [];
                 for (const r of rawList) {
                     const norm = normalizeIndianNumber(r);
-                    if (norm) validNumbers.push(norm);
+                    if (norm && !seenRecipients.has(norm)) {
+                        seenRecipients.add(norm);
+                        validNumbers.push(norm);
+                    }
                 }
 
                 if (validNumbers.length === 0) {
-                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = 'No valid recipients' WHERE "id" = $1`, [item.id]);
                     continue;
                 }
 
@@ -2691,22 +2772,18 @@ async function processScheduledMessages() {
                     if (ageMs < 2 * 60 * 60 * 1000) {
                         await dbQuery(`UPDATE scheduled_messages SET "status" = 'pending' WHERE "id" = $1`, [item.id]);
                     } else {
-                        await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
+                        await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = 'WhatsApp session disconnected after max wait time' WHERE "id" = $1`, [item.id]);
                     }
                     continue;
                 }
 
-                const quotaCheck = await checkAndIncrementDailyUsage(userObj, validNumbers.length);
-                if (!quotaCheck.allowed) {
-                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]);
-                    continue;
-                }
-
-                let payload = {};
+                // Attachment Validation & payload construction
+                let payload = null;
                 let attachment = null;
                 if (item.attachment) {
                     attachment = typeof item.attachment === 'string' ? JSON.parse(item.attachment) : item.attachment;
                 }
+
                 if (attachment && attachment.data) {
                     const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
                     const validation = validateAndProcessMediaUpload(attachment.data, {
@@ -2728,19 +2805,47 @@ async function processScheduledMessages() {
                             payload = { document: buffer, fileName: fileName, caption: item.message || undefined, mimetype: mimeType };
                         }
                     } else {
-                        payload = { text: item.message || '' };
+                        // Invalid attachment
+                        if (!item.message || !item.message.trim()) {
+                            // Attachment was invalid and there is no text message: fail cleanly, never send empty text!
+                            await dbQuery(`
+                                UPDATE scheduled_messages 
+                                SET "status" = 'failed', "sentAt" = NOW(), "error" = $1 
+                                WHERE "id" = $2
+                            `, [validation.error || 'Invalid media attachment and no text message', item.id]);
+                            continue;
+                        }
+                        payload = { text: item.message.trim() };
                     }
+                } else if (item.message && item.message.trim()) {
+                    payload = { text: item.message.trim() };
                 } else {
-                    payload = { text: item.message || '' };
+                    await dbQuery(`
+                        UPDATE scheduled_messages 
+                        SET "status" = 'failed', "sentAt" = NOW(), "error" = 'Empty message and no attachment' 
+                        WHERE "id" = $1
+                    `, [item.id]);
+                    continue;
+                }
+
+                // Check and reserve daily usage quota
+                const quotaCheck = await checkAndIncrementDailyUsage(userObj, validNumbers.length);
+                if (!quotaCheck.allowed) {
+                    await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = $1 WHERE "id" = $2`, [quotaCheck.message || 'Daily limit exceeded', item.id]);
+                    continue;
                 }
 
                 let deliveredCount = 0;
+                let failedCount = 0;
+                const recipientResults = [];
+
                 for (const num of validNumbers) {
                     try {
                         const jid = `${num}@s.whatsapp.net`;
                         const resMsg = await activeSocket.sendMessage(jid, payload);
                         const msgId = resMsg?.key?.id || `sched_m_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
                         deliveredCount++;
+                        recipientResults.push({ recipient: num, status: 'sent', messageId: msgId, timestamp: new Date().toISOString() });
 
                         appendMessageReport({
                             id: msgId,
@@ -2755,6 +2860,8 @@ async function processScheduledMessages() {
                             source: 'schedule'
                         });
                     } catch (sendErr) {
+                        failedCount++;
+                        recipientResults.push({ recipient: num, status: 'failed', error: sendErr.message, timestamp: new Date().toISOString() });
                         console.warn(`[Scheduler] Failed sending scheduled message to ${num}:`, sendErr.message);
                     }
                     if (validNumbers.length > 1) {
@@ -2762,16 +2869,39 @@ async function processScheduledMessages() {
                     }
                 }
 
+                // Reconciliation: refund quota for failed dispatches
+                if (failedCount > 0 && typeof refundDailyUsage === 'function') {
+                    await refundDailyUsage(userObj, failedCount).catch(e => console.warn('[Scheduler] Quota refund warning:', e.message));
+                }
+
+                // Determine accurate final status
+                let finalStatus = 'sent';
+                if (deliveredCount === 0) {
+                    finalStatus = 'failed';
+                } else if (failedCount > 0) {
+                    finalStatus = 'partial';
+                }
+
                 await dbQuery(`
                     UPDATE scheduled_messages 
-                    SET "status" = 'sent', "sentAt" = NOW() 
-                    WHERE "id" = $1
-                `, [item.id]);
+                    SET "status" = $1, 
+                        "sentAt" = NOW(),
+                        "deliveredCount" = $2,
+                        "failedCount" = $3,
+                        "recipientResults" = $4
+                    WHERE "id" = $5
+                `, [
+                    finalStatus,
+                    deliveredCount,
+                    failedCount,
+                    JSON.stringify(recipientResults),
+                    item.id
+                ]);
 
-                console.log(`[Scheduler] Completed scheduled message #${item.id} to ${deliveredCount}/${validNumbers.length} recipients`);
+                console.log(`[Scheduler] Completed scheduled message #${item.id} with status=${finalStatus} (${deliveredCount} delivered, ${failedCount} failed)`);
             } catch (jobErr) {
                 console.error(`[Scheduler] Error processing scheduled message ${item.id}:`, jobErr);
-                await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW() WHERE "id" = $1`, [item.id]).catch(() => {});
+                await dbQuery(`UPDATE scheduled_messages SET "status" = 'failed', "sentAt" = NOW(), "error" = $1 WHERE "id" = $2`, [jobErr.message, item.id]).catch(() => {});
             }
         }
     } catch (schedErr) {
@@ -2926,6 +3056,7 @@ app.get('/api/whatsapp/groups', authRequired, async (req, res) => {
 });
 
 app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (req, res) => {
+    let reservedQuotaCount = 0;
     try {
         const features = await getUserPlanFeatures(req.user);
         if (features.isExpired) {
@@ -2947,12 +3078,22 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
             });
         }
 
-        const { groupIds, message, session, attachment } = req.body;
+        const { message, session, attachment } = req.body;
+        const rawGroupIds = req.body?.groupIds;
 
-        if (!Array.isArray(groupIds) || groupIds.length === 0) {
+        if (!Array.isArray(rawGroupIds) || rawGroupIds.length === 0) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'कम से कम एक group चुनें' 
+            });
+        }
+
+        // Deduplicate group IDs
+        const groupIds = Array.from(new Set(rawGroupIds.filter(Boolean)));
+        if (groupIds.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'कम से कम एक मान्य group चुनें' 
             });
         }
 
@@ -2964,15 +3105,14 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
             });
         }
 
-        // Daily plan limit enforcement for group messaging
-        const quotaCheck = await checkAndIncrementDailyUsage(req.user, groupIds.length);
-        if (!quotaCheck.allowed) {
-            return res.status(403).json({
-                success: false,
-                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
+        if (!message && !attachment) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Message या attachment आवश्यक है।' 
             });
         }
 
+        // 1. Validate active WhatsApp socket FIRST (before reserving quota)
         const { findOrLoadSession } = require('./userSessions');
         const match = await findOrLoadSession(session || null, req.user);
         let activeSocket = null;
@@ -2993,14 +3133,7 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
             });
         }
 
-        if (!message && !attachment) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Message या attachment आवश्यक है।' 
-            });
-        }
-
-        // Construct message payload
+        // 2. Validate attachment/payload FIRST (before reserving quota)
         let messagePayload = {};
         if (attachment && attachment.data) {
             const { validateAndProcessMediaUpload } = require('./utils/mediaValidator');
@@ -3032,7 +3165,18 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
             messagePayload = { text: String(message || '') };
         }
 
+        // 3. Pre-flight checks passed: Now check and reserve daily plan limit quota
+        const quotaCheck = await checkAndIncrementDailyUsage(req.user, groupIds.length);
+        if (!quotaCheck.allowed) {
+            return res.status(403).json({
+                success: false,
+                message: quotaCheck.message || 'आज की मैसेज भेजने की दैनिक सीमा (Daily Limit) समाप्त हो चुकी है।'
+            });
+        }
+        reservedQuotaCount = groupIds.length;
+
         const results = [];
+        let failedCount = 0;
 
         for (const groupId of groupIds) {
             try {
@@ -3057,6 +3201,7 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
                     source: 'group'
                 });
             } catch (err) {
+                failedCount++;
                 results.push({ 
                     groupId, 
                     status: 'failed', 
@@ -3077,8 +3222,16 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
                 });
             }
             // Anti-spam delay between groups
-            if (groupIds.length > 1) {
+            if (uniqueGroupIds.length > 1) {
                 await new Promise(resolve => setTimeout(resolve, 1200));
+            }
+        }
+
+        // 4. Reconciliation: refund quota for failed group deliveries
+        if (failedCount > 0) {
+            const { refundDailyUsage } = require('./auth');
+            if (typeof refundDailyUsage === 'function') {
+                await refundDailyUsage(req.user, failedCount).catch(e => console.warn('[GroupSend] Refund error:', e.message));
             }
         }
 
@@ -3088,6 +3241,12 @@ app.post('/api/send-group-message', authRequired, attachmentBodyParser, async (r
         });
     } catch (error) {
         console.error('Send group message error:', error);
+        if (reservedQuotaCount > 0) {
+            const { refundDailyUsage } = require('./auth');
+            if (typeof refundDailyUsage === 'function') {
+                await refundDailyUsage(req.user, reservedQuotaCount).catch(e => console.warn('[GroupSend] Full refund error:', e.message));
+            }
+        }
         res.status(500).json({ 
             success: false, 
             message: error.message 

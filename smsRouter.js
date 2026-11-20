@@ -38,13 +38,31 @@ function initSmsWebSocket(server) {
   wss.on('connection', (ws, req) => {
     try {
       const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      const apiKey = parsedUrl.searchParams.get('apiKey') || req.headers['x-api-key'] || '';
-      const deviceId = parsedUrl.searchParams.get('deviceId') || req.headers['x-device-id'] || 'android_phone';
+      const apiKey = (parsedUrl.searchParams.get('apiKey') || req.headers['x-api-key'] || '').trim();
+      const deviceId = (parsedUrl.searchParams.get('deviceId') || req.headers['x-device-id'] || 'android_phone').trim();
 
       console.log(`[SMS Gateway] Incoming WebSocket connection attempt from device: ${deviceId}`);
 
-      const expectedKey = db.getSetting('api_key');
-      if (!apiKey || (expectedKey && apiKey !== expectedKey)) {
+      const rawExpectedKey = db.getSetting('api_key');
+      const expectedKey = typeof rawExpectedKey === 'string' ? rawExpectedKey.trim() : '';
+
+      let authenticatedOwnerUserId = null;
+      let isAuthenticated = false;
+
+      // Fail-closed validation: both expectedKey and client apiKey must be non-empty and match for master key
+      if (expectedKey && apiKey && apiKey === expectedKey) {
+        isAuthenticated = true;
+        authenticatedOwnerUserId = 'ADMIN';
+      } else if (apiKey) {
+        // Alternatively, check if apiKey matches a registered device token
+        const dev = db.getDeviceByToken(apiKey);
+        if (dev) {
+          isAuthenticated = true;
+          authenticatedOwnerUserId = dev.owner_user_id || 'ADMIN';
+        }
+      }
+
+      if (!isAuthenticated) {
         console.warn(`[SMS Gateway] Unauthorized WebSocket connection attempt rejected: device=${deviceId}, keyProvided=${apiKey ? '[REDACTED]' : 'NONE'}`);
         try {
           ws.send(JSON.stringify({ event: 'error', message: 'Unauthorized: Invalid or missing API key' }));
@@ -54,9 +72,11 @@ function initSmsWebSocket(server) {
         return;
       }
 
+      ws.ownerUserId = authenticatedOwnerUserId || 'ADMIN';
+      ws.deviceId = deviceId;
       phoneSockets.set(deviceId, ws);
       db.setDeviceOnlineStatus(deviceId, true);
-      console.log(`[SMS Gateway] Mobile app connected and authenticated successfully! DeviceId: ${deviceId}`);
+      console.log(`[SMS Gateway] Mobile app connected and authenticated successfully! DeviceId: ${deviceId}, Owner: ${ws.ownerUserId}`);
 
       ws.on('message', async (messageText) => {
         try {
@@ -71,9 +91,11 @@ function initSmsWebSocket(server) {
               deviceName: data.deviceName || 'Android Device',
               batteryLevel: data.batteryLevel !== undefined ? data.batteryLevel : 100,
               isCharging: !!data.isCharging,
-              simCards: data.simCards || []
+              simCards: data.simCards || [],
+              ownerUserId: authenticatedOwnerUserId || 'ADMIN',
+              deviceToken: (apiKey !== expectedKey) ? apiKey : ''
             });
-            console.log(`[SMS Gateway] Device registered: ${data.deviceName || deviceId} | SIMs: ${(data.simCards || []).length} | Battery: ${data.batteryLevel}%`);
+            console.log(`[SMS Gateway] Device registered: ${data.deviceName || deviceId} | SIMs: ${(data.simCards || []).length} | Battery: ${data.batteryLevel}% | Owner: ${authenticatedOwnerUserId}`);
           }
 
           // 2. Incoming SMS received by phone
@@ -93,7 +115,8 @@ function initSmsWebSocket(server) {
               sender,
               message,
               simSlot,
-              timestamp
+              timestamp,
+              ownerUserId: authenticatedOwnerUserId || 'ADMIN'
             });
             console.log(`[SMS Gateway] Received incoming SMS #${smsRecord.id} from ${sender}: "${message.slice(0, 40)}"`);
 
@@ -163,12 +186,18 @@ function initSmsWebSocket(server) {
 // 1. GET SMS STATUS METRICS
 router.get('/api/sms/status', authRequired, (req, res) => {
   try {
-    const devices = db.getAllDevices();
-    const totalSms = db.getTotalSmsCount ? db.getTotalSmsCount() : 0;
-    const delivered = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('DELIVERED') : 0;
-    const retrying = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('RETRY_SCHEDULED') : 0;
-    const failed = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('FAILED') : 0;
-    const activeDevicesCount = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN).length || devices.filter(d => d.is_online).length;
+    const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const ownerUserId = isAdmin ? null : req.user.userId;
+
+    const devices = db.getAllDevices(ownerUserId);
+    const totalSms = db.getTotalSmsCount ? db.getTotalSmsCount(ownerUserId) : 0;
+    const delivered = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('DELIVERED', ownerUserId) : 0;
+    const retrying = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('RETRY_SCHEDULED', ownerUserId) : 0;
+    const failed = db.getTotalDeliveriesCount ? db.getTotalDeliveriesCount('FAILED', ownerUserId) : 0;
+    const activeDevicesCount = Array.from(phoneSockets.values()).filter(ws => {
+      if (ws.readyState !== WebSocket.OPEN) return false;
+      return isAdmin || ws.ownerUserId === req.user.userId;
+    }).length || devices.filter(d => d.is_online).length;
 
     res.json({
       success: true,
@@ -190,12 +219,37 @@ router.get('/api/sms/status', authRequired, (req, res) => {
 // 2. GET PAIRING QR CODE
 router.get('/api/sms/qr', authRequired, async (req, res) => {
   try {
+    const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
     let apiKey = '';
-    try {
-      apiKey = db.getSetting('api_key') || '';
-    } catch (dbErr) {
-      console.warn('[SMS Gateway] getSetting notice for QR:', dbErr.message);
+
+    if (isAdmin) {
+      try {
+        apiKey = (db.getSetting('api_key') || '').trim();
+      } catch (dbErr) {
+        console.warn('[SMS Gateway] getSetting notice for QR:', dbErr.message);
+      }
+    } else {
+      // Non-admin: NEVER expose master API key! Provide or create tenant deviceToken
+      const userDevices = db.getAllDevices(req.user.userId);
+      const existingWithToken = userDevices.find(d => d.device_token && d.device_token.length > 0);
+      if (existingWithToken) {
+        apiKey = existingWithToken.device_token;
+      } else {
+        const crypto = require('crypto');
+        apiKey = 'dt_' + crypto.randomBytes(16).toString('hex');
+        const pairingDeviceId = `dev_${req.user.userId.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now().toString(36)}`;
+        db.upsertDevice({
+          deviceId: pairingDeviceId,
+          deviceName: `${req.user.name || req.user.userId}'s Phone`,
+          batteryLevel: 100,
+          isCharging: false,
+          simCards: [],
+          ownerUserId: req.user.userId,
+          deviceToken: apiKey
+        });
+      }
     }
+
     const port = process.env.PORT || 10000;
     const resolvedLocalIp = getLocalIp();
 
@@ -224,7 +278,7 @@ router.get('/api/sms/qr', authRequired, async (req, res) => {
     const qrData = JSON.stringify({
       serverUrl,
       apiKey,
-      deviceName: 'ERS SMS Gateway Panel'
+      deviceName: `${req.user.name || req.user.userId} SMS Gateway`
     });
 
     const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
@@ -238,7 +292,7 @@ router.get('/api/sms/qr', authRequired, async (req, res) => {
       qrCode: qrCodeDataUrl,
       serverUrl,
       localIp: resolvedLocalIp,
-      apiKey
+      apiKey: apiKey
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -248,7 +302,9 @@ router.get('/api/sms/qr', authRequired, async (req, res) => {
 // 3. GET CONNECTED DEVICES
 router.get('/api/sms/devices', authRequired, (req, res) => {
   try {
-    const devices = db.getAllDevices();
+    const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const ownerUserId = isAdmin ? null : req.user.userId;
+    const devices = db.getAllDevices(ownerUserId);
     res.json({ success: true, devices });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -258,15 +314,31 @@ router.get('/api/sms/devices', authRequired, (req, res) => {
 // 3b. REGISTER DEVICE VIA HTTP POST (Requires Valid apiKey or User Token)
 router.post('/api/sms/devices/register', async (req, res) => {
   try {
-    const apiKey = req.headers['x-api-key'] || req.query.apiKey || req.body?.apiKey;
-    const expectedKey = db.getSetting('api_key');
-    let authorized = false;
+    const rawApiKey = req.headers['x-api-key'] || req.query.apiKey || req.body?.apiKey;
+    const apiKey = typeof rawApiKey === 'string' ? rawApiKey.trim() : '';
+    const rawExpectedKey = db.getSetting('api_key');
+    const expectedKey = typeof rawExpectedKey === 'string' ? rawExpectedKey.trim() : '';
 
-    if (apiKey && expectedKey && apiKey === expectedKey) {
+    let authorized = false;
+    let ownerUserId = 'ADMIN';
+
+    if (expectedKey && apiKey && apiKey === expectedKey) {
       authorized = true;
-    } else {
+      ownerUserId = 'ADMIN';
+    } else if (apiKey) {
+      const dev = db.getDeviceByToken(apiKey);
+      if (dev) {
+        authorized = true;
+        ownerUserId = dev.owner_user_id || 'ADMIN';
+      }
+    }
+
+    if (!authorized) {
       const user = await resolveSmsUser(req);
-      if (user) authorized = true;
+      if (user) {
+        authorized = true;
+        ownerUserId = user.userId || 'ADMIN';
+      }
     }
 
     if (!authorized) {
@@ -280,7 +352,9 @@ router.post('/api/sms/devices/register', async (req, res) => {
       deviceName: data.deviceName || 'Android Device',
       batteryLevel: data.batteryLevel !== undefined ? Number(data.batteryLevel) : 100,
       isCharging: !!data.isCharging,
-      simCards: data.simCards || []
+      simCards: data.simCards || [],
+      ownerUserId: ownerUserId,
+      deviceToken: (apiKey && apiKey !== expectedKey) ? apiKey : ''
     });
     db.setDeviceOnlineStatus(devId, true);
     res.json({ success: true, message: 'Device registered successfully' });
@@ -349,7 +423,10 @@ router.get('/api/sms/messages', authRequired, (req, res) => {
     const sender = req.query.sender || '';
     const deviceId = req.query.deviceId || '';
 
-    const messages = db.getSmsList({ limit, offset, sender, deviceId });
+    const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const ownerUserId = isAdmin ? (req.query.ownerUserId || null) : req.user.userId;
+
+    const messages = db.getSmsList({ limit, offset, sender, deviceId, ownerUserId });
     res.json({ success: true, messages });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -363,7 +440,10 @@ router.get('/api/sms/webhook-deliveries', authRequired, (req, res) => {
     const offset = Math.max(0, Number(req.query.offset || 0));
     const status = req.query.status || '';
 
-    const deliveries = db.getRecentDeliveries({ limit, offset, status });
+    const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+    const ownerUserId = isAdmin ? (req.query.ownerUserId || null) : req.user.userId;
+
+    const deliveries = db.getRecentDeliveries({ limit, offset, status, ownerUserId });
     res.json({ success: true, deliveries });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -373,47 +453,56 @@ router.get('/api/sms/webhook-deliveries', authRequired, (req, res) => {
 // 9. INCOMING SMS ENDPOINTS (SUPPORTS /inbox, /api/inbox, /api/sms/inbox, /api/sms/incoming)
 router.post(['/inbox', '/api/inbox', '/api/sms/inbox', '/api/sms/incoming'], async (req, res) => {
   try {
-    const expectedApiKey = db.getSetting('api_key') || '';
-    const providedApiKey = req.headers['x-api-key'] || req.query.apiKey || req.query.api_key || req.body?.apiKey;
+    const rawExpectedApiKey = db.getSetting('api_key');
+    const expectedApiKey = typeof rawExpectedApiKey === 'string' ? rawExpectedApiKey.trim() : '';
 
     const rawItems = Array.isArray(req.body) 
       ? req.body 
       : (Array.isArray(req.body?.messages) ? req.body.messages : [req.body]);
 
     const hasEncryptedPayload = rawItems.some(i => i && i.payload);
-    if (!hasEncryptedPayload && expectedApiKey) {
-      if (!providedApiKey || providedApiKey !== expectedApiKey) {
-        const user = await resolveSmsUser(req);
-        if (!user) {
-          return res.status(401).json({ success: false, message: 'Unauthorized: Valid apiKey or authentication token required.' });
-        }
+    let authenticatedUser = null;
+
+    if (hasEncryptedPayload) {
+      if (!expectedApiKey) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Gateway encryption key is not configured.' });
+      }
+    } else {
+      authenticatedUser = await resolveSmsUser(req);
+      if (!authenticatedUser) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: Valid apiKey or authentication token required.' });
       }
     }
 
-    const apiKey = expectedApiKey;
     const savedRecords = [];
 
     for (const item of rawItems) {
       if (!item) continue;
-      let rawSender = item.sender || item.from || item.address || item.phoneNumber || item.mobile;
-      let rawMessage = item.content || item.message || item.body || item.text || item.msg;
+      let rawSender = null;
+      let rawMessage = null;
+
+      if (item.payload) {
+        let dec = null;
+        try {
+          dec = decryptPayload(item.payload, expectedApiKey);
+        } catch (e) {
+          dec = null;
+        }
+        if (!dec || (!dec.sender && !dec.from && !dec.phoneNumber && !dec.address) || (!dec.message && !dec.content && !dec.body && !dec.text && !dec.msg)) {
+          return res.status(401).json({ success: false, message: 'Unauthorized: Payload decryption failed or payload is tampered/invalid.' });
+        }
+        rawSender = dec.sender || dec.from || dec.phoneNumber || dec.address;
+        rawMessage = dec.message || dec.content || dec.body || dec.text || dec.msg;
+      } else {
+        rawSender = item.sender || item.from || item.address || item.phoneNumber || item.mobile;
+        rawMessage = item.content || item.message || item.body || item.text || item.msg;
+      }
+
       const rawSlot = item.simSlot !== undefined 
         ? item.simSlot 
         : (item.simNumber !== undefined ? Math.max(0, parseInt(item.simNumber) - 1) : (item.slot !== undefined ? item.slot : 0));
       const rawTs = item.createdAt ? new Date(item.createdAt).getTime() : (item.timestamp || Date.now());
       const devId = item.deviceId || req.body.deviceId || 'android_device';
-
-      if (item.payload) {
-        try {
-          const dec = decryptPayload(item.payload, apiKey);
-          if (dec) {
-            rawSender = dec.sender || rawSender;
-            rawMessage = dec.message || dec.content || rawMessage;
-          }
-        } catch (e) {
-          console.warn('[SMS Gateway] Decrypt error for item:', e.message);
-        }
-      }
 
       if (!rawSender || !rawMessage) continue;
 
@@ -425,12 +514,15 @@ router.post(['/inbox', '/api/inbox', '/api/sms/inbox', '/api/sms/incoming'], asy
         continue;
       }
 
+      const ownerUserId = (authenticatedUser && authenticatedUser.userId) ? authenticatedUser.userId : 'ADMIN';
+
       const saved = db.saveIncomingSms({
         deviceId: devId,
         sender: senderStr,
         message: messageStr,
         simSlot: parseInt(rawSlot) || 0,
-        timestamp: Number(rawTs) || Date.now()
+        timestamp: Number(rawTs) || Date.now(),
+        ownerUserId
       });
 
       savedRecords.push(saved);
@@ -490,9 +582,23 @@ async function resolveSmsUser(req) {
   }
 
   // Support Master / Gateway API Key
-  const expectedApiKey = db.getSetting('api_key') || '';
+  const rawExpectedApiKey = db.getSetting('api_key');
+  const expectedApiKey = typeof rawExpectedApiKey === 'string' ? rawExpectedApiKey.trim() : '';
   if (apiKey && expectedApiKey && apiKey === expectedApiKey) {
     return { userId: 'ADMIN', role: 'admin', username: 'gateway_admin', smsPlan: 'SMS Business Pro' };
+  }
+
+  // Support Device Token
+  if (apiKey) {
+    const dev = db.getDeviceByToken(apiKey);
+    if (dev) {
+      return {
+        userId: dev.owner_user_id || 'ADMIN',
+        role: (dev.owner_user_id && dev.owner_user_id !== 'ADMIN') ? 'user' : 'admin',
+        username: `device_${dev.device_id}`,
+        deviceId: dev.device_id
+      };
+    }
   }
 
   return null;
@@ -594,8 +700,12 @@ async function handleSendSms(req, res) {
     }
 
     const messageId = 'msg_' + Date.now();
+    const isAdminUser = user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN';
+    const ownerUserId = user.userId || 'ADMIN';
+
     const outboxItem = {
       id: messageId,
+      ownerUserId: ownerUserId,
       recipient: recipient,
       message: message,
       simSlot: requestedSimSlot, // 0 = 1 by 1 from both SIM, 1 = SIM 1, 2 = SIM 2
@@ -607,16 +717,21 @@ async function handleSendSms(req, res) {
     };
 
     // If active phone WebSocket is connected, dispatch SMS directly to target or first available Android phone
-    const activeSockets = Array.from(phoneSockets.values()).filter(ws => ws.readyState === WebSocket.OPEN);
+    // Tenant isolation: Standard users can only send SMS through their own registered devices
+    const eligibleSockets = Array.from(phoneSockets.values()).filter(ws => {
+      if (ws.readyState !== WebSocket.OPEN) return false;
+      return isAdminUser || ws.ownerUserId === ownerUserId;
+    });
+
     let targetSocket = null;
     if (deviceId && phoneSockets.has(deviceId)) {
       const specificWs = phoneSockets.get(deviceId);
-      if (specificWs && specificWs.readyState === WebSocket.OPEN) {
+      if (specificWs && specificWs.readyState === WebSocket.OPEN && (isAdminUser || specificWs.ownerUserId === ownerUserId)) {
         targetSocket = specificWs;
       }
     }
-    if (!targetSocket && activeSockets.length > 0) {
-      targetSocket = activeSockets[0];
+    if (!targetSocket && eligibleSockets.length > 0) {
+      targetSocket = eligibleSockets[0];
     }
 
     if (targetSocket) {
@@ -631,7 +746,7 @@ async function handleSendSms(req, res) {
           }
         }));
         outboxItem.status = 'DISPATCHED_TO_PHONE';
-        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone (${outboxItem.deviceId}) via hardware slot ${targetHardwareSimSlot} (${simSelectionDesc})`);
+        console.log(`[SMS Gateway] Dispatched SMS ${messageId} to connected Android phone (${outboxItem.deviceId}) via hardware slot ${targetHardwareSimSlot} (${simSelectionDesc}) [Owner: ${ownerUserId}]`);
       } catch (sendErr) {
         console.warn('[SMS Gateway] Failed sending to phone socket:', sendErr.message);
       }
@@ -664,7 +779,11 @@ router.get(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
 router.post(['/api/sms/send', '/send-sms', '/api/send-sms'], handleSendSms);
 
 router.get('/api/sms/outbox', authRequired, (req, res) => {
-  res.json({ success: true, outbox: outboxMessages });
+  const isAdmin = req.user.role === 'admin' || String(req.user.userId || '').toUpperCase() === 'ADMIN';
+  const filtered = isAdmin
+    ? outboxMessages
+    : outboxMessages.filter(m => m.ownerUserId === req.user.userId);
+  res.json({ success: true, outbox: filtered });
 });
 
 // Download ERS SMS Gateway Android APK

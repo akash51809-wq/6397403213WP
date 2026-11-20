@@ -59,7 +59,7 @@ export default function UsersPage({ notify: propNotify }) {
     try {
       const d = await api(`/api/admin/users/${u.userId}/send-password`, { method: 'POST' })
       if (d.success) {
-        setSentNotice({ userId: u.userId, mobile: u.mobile || u.username, newPassword: d.newPassword })
+        setSentNotice({ userId: u.userId, mobile: u.mobile || u.username })
         notify(`नया पासवर्ड ${u.mobile || u.username} के WhatsApp पर भेज दिया गया है!`)
       }
     } catch (e) {
@@ -282,8 +282,7 @@ export default function UsersPage({ notify: propNotify }) {
       {sentNotice && (
         <div className="alert alert-success d-flex align-items-center justify-content-between mb-2 p-2 px-3" style={{ borderRadius: 8, border: '1px solid #7ae0bd', background: '#e9f8f2', color: '#055b44', fontSize: '0.82rem' }}>
           <div>
-            ✓ <strong>Password Sent to WhatsApp!</strong> User <strong>{sentNotice.mobile}</strong> ({sentNotice.userId}) को नया पासवर्ड भेज दिया गया है। 
-            Temporary Password: <code style={{ background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #7ae0bd', fontWeight: 'bold', color: '#0d835f', marginLeft: 6 }}>{sentNotice.newPassword}</code>
+            ✓ <strong>Password Sent to WhatsApp!</strong> User <strong>{sentNotice.mobile}</strong> ({sentNotice.userId}) के WhatsApp पर नया पासवर्ड सुरक्षित रूप से भेज दिया गया है।
           </div>
           <button onClick={() => setSentNotice(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#055b44', fontWeight: 700 }}>×</button>
         </div>

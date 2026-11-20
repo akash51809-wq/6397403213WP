@@ -68,6 +68,20 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_delivery_sms_id ON webhook_deliveries(sms_id);
   `);
 
+  // Migration for tenant isolation and revocable device credentials
+  try { db.exec(`ALTER TABLE devices ADD COLUMN owner_user_id TEXT DEFAULT 'ADMIN';`); } catch (e) {}
+  try { db.exec(`ALTER TABLE devices ADD COLUMN device_token TEXT DEFAULT '';`); } catch (e) {}
+  try { db.exec(`ALTER TABLE sms_messages ADD COLUMN owner_user_id TEXT DEFAULT 'ADMIN';`); } catch (e) {}
+  try { db.exec(`ALTER TABLE webhook_deliveries ADD COLUMN owner_user_id TEXT DEFAULT 'ADMIN';`); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner_user_id);
+      CREATE INDEX IF NOT EXISTS idx_devices_token ON devices(device_token);
+      CREATE INDEX IF NOT EXISTS idx_sms_owner ON sms_messages(owner_user_id);
+      CREATE INDEX IF NOT EXISTS idx_webhook_owner ON webhook_deliveries(owner_user_id);
+    `);
+  } catch (e) {}
+
   // Default Settings Seed
   const defaultSettings = [
     { key: 'default_webhook_url', value: '' },
@@ -207,17 +221,22 @@ function getAllSettings() {
 // Devices Helpers
 function upsertDevice(dev) {
   const now = Date.now();
+  const ownerUserId = dev.ownerUserId || 'ADMIN';
+  const deviceToken = dev.deviceToken || '';
+
   const stmt = db.prepare(`
     INSERT INTO devices (
-      device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+      device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at, owner_user_id, device_token
+    ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(device_id) DO UPDATE SET
       device_name = excluded.device_name,
       battery_level = excluded.battery_level,
       is_charging = excluded.is_charging,
       sim_cards_json = excluded.sim_cards_json,
       is_online = 1,
-      last_seen_at = excluded.last_seen_at
+      last_seen_at = excluded.last_seen_at,
+      owner_user_id = CASE WHEN devices.owner_user_id IS NULL OR devices.owner_user_id = 'ADMIN' THEN excluded.owner_user_id ELSE devices.owner_user_id END,
+      device_token = CASE WHEN excluded.device_token != '' THEN excluded.device_token ELSE devices.device_token END
   `);
 
   stmt.run(
@@ -227,7 +246,9 @@ function upsertDevice(dev) {
     dev.isCharging ? 1 : 0,
     JSON.stringify(dev.simCards || []),
     now,
-    now
+    now,
+    ownerUserId,
+    deviceToken
   );
 
   // Async Dual-Write to PostgreSQL
@@ -236,25 +257,39 @@ function upsertDevice(dev) {
     if (pgMod?.connection?.pool) {
       pgMod.query(`
         INSERT INTO sms_devices (
-          device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at
-        ) VALUES ($1, $2, $3, $4, $5, 1, $6, $6)
+          device_id, device_name, battery_level, is_charging, sim_cards_json, is_online, last_seen_at, created_at, owner_user_id, device_token
+        ) VALUES ($1, $2, $3, $4, $5, 1, $6, $6, $7, $8)
         ON CONFLICT(device_id) DO UPDATE SET
           device_name = EXCLUDED.device_name,
           battery_level = EXCLUDED.battery_level,
           is_charging = EXCLUDED.is_charging,
           sim_cards_json = EXCLUDED.sim_cards_json,
           is_online = 1,
-          last_seen_at = EXCLUDED.last_seen_at
+          last_seen_at = EXCLUDED.last_seen_at,
+          owner_user_id = CASE WHEN sms_devices.owner_user_id IS NULL OR sms_devices.owner_user_id = 'ADMIN' THEN EXCLUDED.owner_user_id ELSE sms_devices.owner_user_id END,
+          device_token = CASE WHEN EXCLUDED.device_token IS NOT NULL AND EXCLUDED.device_token != '' THEN EXCLUDED.device_token ELSE sms_devices.device_token END
       `, [
         dev.deviceId,
         dev.deviceName || 'Android Device',
         dev.batteryLevel !== undefined ? dev.batteryLevel : 100,
         dev.isCharging ? 1 : 0,
         JSON.stringify(dev.simCards || []),
-        now
+        now,
+        ownerUserId,
+        deviceToken
       ]).catch(e => console.warn('[SMS DB PG Device write warning]:', e.message));
     }
   } catch (e) {}
+}
+
+function getDeviceByToken(token) {
+  if (!token) return null;
+  const row = db.prepare('SELECT * FROM devices WHERE device_token = ?').get(token);
+  if (!row) return null;
+  return {
+    ...row,
+    simCards: JSON.parse(row.sim_cards_json || '[]')
+  };
 }
 
 function updateDeviceConfig(deviceId, webhookUrl, senderWhitelist) {
@@ -288,8 +323,13 @@ function getDevice(deviceId) {
   };
 }
 
-function getAllDevices() {
-  const rows = db.prepare('SELECT * FROM devices ORDER BY last_seen_at DESC').all();
+function getAllDevices(ownerUserId = null) {
+  let rows;
+  if (ownerUserId) {
+    rows = db.prepare('SELECT * FROM devices WHERE owner_user_id = ? ORDER BY last_seen_at DESC').all(ownerUserId);
+  } else {
+    rows = db.prepare('SELECT * FROM devices ORDER BY last_seen_at DESC').all();
+  }
   return rows.map(r => ({
     ...r,
     simCards: JSON.parse(r.sim_cards_json || '[]')
@@ -307,15 +347,16 @@ function isDuplicateSms(sender, message, timestampWindow = 60000) {
   return !!row;
 }
 
-function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
+function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp, ownerUserId }) {
   const now = Date.now();
   const ts = timestamp || now;
   const istString = formatISTDate(ts);
+  const owner = ownerUserId || 'ADMIN';
 
   const res = db.prepare(`
     INSERT INTO sms_messages (
-      device_id, sender, message, sim_slot, received_at, received_timestamp, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      device_id, sender, message, sim_slot, received_at, received_timestamp, created_at, owner_user_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     deviceId || 'unknown',
     String(sender).trim(),
@@ -323,7 +364,8 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
     simSlot !== undefined ? parseInt(simSlot) : 0,
     istString,
     ts,
-    now
+    now,
+    owner
   );
 
   const record = {
@@ -333,7 +375,8 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
     message: String(message).trim(),
     simSlot: simSlot !== undefined ? parseInt(simSlot) : 0,
     receivedAt: istString,
-    receivedTimestamp: ts
+    receivedTimestamp: ts,
+    ownerUserId: owner
   };
 
   // Async Dual-Write to PostgreSQL
@@ -342,8 +385,8 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
     if (pgMod?.connection?.pool) {
       pgMod.query(`
         INSERT INTO sms_messages (
-          device_id, sender, message, sim_slot, received_at, received_timestamp, webhook_status, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          device_id, sender, message, sim_slot, received_at, received_timestamp, webhook_status, created_at, owner_user_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       `, [
         record.deviceId,
         record.sender,
@@ -352,7 +395,8 @@ function saveIncomingSms({ deviceId, sender, message, simSlot, timestamp }) {
         record.receivedAt,
         record.receivedTimestamp,
         'DELIVERED',
-        now
+        now,
+        owner
       ]).catch(e => console.warn('[SMS DB PG Write warning]:', e.message));
     }
   } catch (e) {}
@@ -364,7 +408,7 @@ function getSmsById(id) {
   return db.prepare('SELECT * FROM sms_messages WHERE id = ?').get(id);
 }
 
-function getSmsList({ limit = 50, offset = 0, sender, deviceId } = {}) {
+function getSmsList({ limit = 50, offset = 0, sender, deviceId, ownerUserId } = {}) {
   let query = `
     SELECT m.*, 
       COALESCE((SELECT status FROM webhook_deliveries WHERE sms_id = m.id ORDER BY id DESC LIMIT 1), 'PENDING') as webhook_status,
@@ -374,6 +418,10 @@ function getSmsList({ limit = 50, offset = 0, sender, deviceId } = {}) {
   `;
   const params = [];
 
+  if (ownerUserId) {
+    query += ' AND m.owner_user_id = ?';
+    params.push(ownerUserId);
+  }
   if (sender) {
     query += ' AND m.sender LIKE ?';
     params.push(`%${sender}%`);
@@ -393,19 +441,19 @@ function getSmsList({ limit = 50, offset = 0, sender, deviceId } = {}) {
 function createWebhookDelivery({
   smsId, deviceId, targetUrl, status, httpStatus = 0,
   responseTimeMs = 0, responseBody = '', errorMessage = '',
-  attempts = 1, nextRetryAt = 0
+  attempts = 1, nextRetryAt = 0, ownerUserId = 'ADMIN'
 }) {
   const now = Date.now();
   const res = db.prepare(`
     INSERT INTO webhook_deliveries (
       sms_id, device_id, target_url, status, http_status,
       response_time_ms, response_body, error_message, attempts,
-      next_retry_at, last_attempt_at, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      next_retry_at, last_attempt_at, created_at, owner_user_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     smsId, deviceId, targetUrl, status, httpStatus,
     responseTimeMs, responseBody.slice(0, 2000), errorMessage.slice(0, 1000),
-    attempts, nextRetryAt, now, now
+    attempts, nextRetryAt, now, now, ownerUserId || 'ADMIN'
   );
 
   return Number(res.lastInsertRowid);
@@ -443,7 +491,7 @@ function getPendingRetries() {
   `).all(now);
 }
 
-function getRecentDeliveries({ limit = 50, offset = 0, status } = {}) {
+function getRecentDeliveries({ limit = 50, offset = 0, status, ownerUserId } = {}) {
   let query = `
     SELECT d.*, m.sender, m.message, m.received_at
     FROM webhook_deliveries d
@@ -452,6 +500,10 @@ function getRecentDeliveries({ limit = 50, offset = 0, status } = {}) {
   `;
   const params = [];
 
+  if (ownerUserId) {
+    query += ' AND d.owner_user_id = ?';
+    params.push(ownerUserId);
+  }
   if (status) {
     query += ' AND d.status = ?';
     params.push(status);
@@ -477,14 +529,26 @@ function cleanupOldData(retentionHours = 48) {
   }
 }
 
-function getTotalSmsCount() {
+function getTotalSmsCount(ownerUserId = null) {
+  if (ownerUserId) {
+    const row = db.prepare('SELECT COUNT(*) as count FROM sms_messages WHERE owner_user_id = ?').get(ownerUserId);
+    return row ? Number(row.count) : 0;
+  }
   const row = db.prepare('SELECT COUNT(*) as count FROM sms_messages').get();
   return row ? Number(row.count) : 0;
 }
 
-function getTotalDeliveriesCount(status = null) {
+function getTotalDeliveriesCount(status = null, ownerUserId = null) {
+  if (status && ownerUserId) {
+    const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries WHERE status = ? AND owner_user_id = ?').get(status, ownerUserId);
+    return row ? Number(row.count) : 0;
+  }
   if (status) {
     const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries WHERE status = ?').get(status);
+    return row ? Number(row.count) : 0;
+  }
+  if (ownerUserId) {
+    const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries WHERE owner_user_id = ?').get(ownerUserId);
     return row ? Number(row.count) : 0;
   }
   const row = db.prepare('SELECT COUNT(*) as count FROM webhook_deliveries').get();
@@ -498,6 +562,7 @@ module.exports = {
   setSetting,
   getAllSettings,
   upsertDevice,
+  getDeviceByToken,
   updateDeviceConfig,
   setDeviceOnlineStatus,
   getDevice,

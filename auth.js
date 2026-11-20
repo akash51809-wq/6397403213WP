@@ -516,6 +516,7 @@ async function authenticateToken(token) {
 }
 
 async function authRequired(req, res, next) {
+  if (req.user) return next();
   try {
     const header = req.headers.authorization || '';
     let token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -857,6 +858,47 @@ async function checkAndIncrementDailyUsage(user, count = 1) {
       limit: dailyLimit,
       remaining: Math.max(0, dailyLimit - user.dailyMessageCount)
     };
+  });
+}
+
+async function refundDailyUsage(user, count = 1) {
+  if (!user || count <= 0) return { refunded: false, count: 0 };
+  if (user.role === 'admin' || String(user.userId).toUpperCase() === 'ADMIN') {
+    return { refunded: true, count };
+  }
+
+  const today = getTodayDateIST();
+  const userId = user.userId;
+
+  return await withUserQuotaLock(userId, async () => {
+    if (connection.readyState === 1 && userId && typeof query === 'function') {
+      try {
+        const res = await query(
+          `UPDATE users
+           SET "dailyMessageCount" = GREATEST(0, "dailyMessageCount" - $1),
+               "updatedAt" = NOW()
+           WHERE "userId" = $2 AND "dailyCountDate" = $3
+           RETURNING "dailyMessageCount"`,
+          [count, userId, today]
+        );
+        if (res.rows && res.rows.length > 0) {
+          const newCount = Number(res.rows[0].dailyMessageCount);
+          user.dailyMessageCount = newCount;
+          return { refunded: true, current: newCount, count };
+        }
+      } catch (dbErr) {
+        console.warn('[DailyUsage] Atomic DB refund fallback to memory lock:', dbErr.message);
+      }
+    }
+
+    if (user.dailyCountDate === today) {
+      user.dailyMessageCount = Math.max(0, Number(user.dailyMessageCount || 0) - count);
+      user.updatedAt = new Date();
+      if (typeof user.save === 'function') {
+        await user.save().catch((e) => console.warn('[DailyUsage] Counter refund save warning:', e.message));
+      }
+    }
+    return { refunded: true, current: user.dailyMessageCount, count };
   });
 }
 
@@ -1523,8 +1565,7 @@ router.post('/api/admin/users/:userId/send-password', authRequired, adminRequire
 
     res.json({ 
       success: true, 
-      message: `नया पासवर्ड यूजर (+91 ${clean10}) के WhatsApp पर सफलतापूर्वक भेज दिया गया!`,
-      newPassword: newPassword
+      message: `नया पासवर्ड यूजर (+91 ${clean10}) के WhatsApp पर सफलतापूर्वक भेज दिया गया!`
     });
   } catch (err) {
     console.error('Admin send password error:', err);
@@ -4194,6 +4235,7 @@ module.exports = {
   recordAdminWhatsAppSession, 
   getUserPlanFeatures,
   checkAndIncrementDailyUsage,
+  refundDailyUsage,
   withUserQuotaLock,
   userQuotaLocks,
   sanitizeUser,
